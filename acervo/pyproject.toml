@@ -1,0 +1,23 @@
+[project]
+name = "acervo"
+version = "0.1.0"
+description = "LIMIAR — pipeline de dados: transforma os depoimentos do canal em um dataset padronizado (ver Docs/02)"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pyyaml>=6",
+    "yt-dlp>=2025.1.1",
+]
+
+[project.scripts]
+acervo = "acervo.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/acervo"]

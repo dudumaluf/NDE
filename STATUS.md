@@ -18,7 +18,9 @@
 | M1 | Multidão instanciada (1 draw call, até 4096), cor/escala/fase por instância | ✔ tag `m1` |
 | M2 | **Simulação compute**: wander (curl noise), separação (ninguém atravessa ninguém), contenção, mouse atrai/repele, giro suave, passo acoplado à velocidade | ✔ tag `m2` |
 | Design | UX de consumo consolidado (`Docs/04`) + dossiê curadoria (`Docs/05`) | ✔ 2026-07-10 |
-| `acervo` | Pipeline de dados (doc 02) — piloto de 10–20 vídeos | ⬅ **próximo** (decisão: antes do M3) |
+| A0 | `acervo` scaffolding + `scan` + `fetch` (597 vídeos na fila, 6 áudios baixados) | ✔ tag `a0` |
+| A1 | `acervo transcribe` (fal wizper, pt, word timestamps) — **precisa de FAL_KEY no .env** | ⬅ **próximo** |
+| A2–A5 | extract → analyze/export → review UI → piloto 10–20 vídeos | pendente |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
@@ -51,6 +53,13 @@
 - `Docs/05-dossie-curadoria.md`: apresentação externa (galerias/patrocínio),
   incluindo o formato instalação física. **Falta preencher contato.**
 - Painel leva com tema mais largo (`rootWidth` 380px) — rótulos legíveis.
+- **Infra do acervo: fal.ai-first** (2026-07-10). Estágios pagos concentrados
+  no fal (créditos existentes): transcrição = `fal-ai/wizper` (pt, word
+  timestamps, diarização por flag); extração = `fal-ai/any-llm` com modelo
+  frontier. Embeddings/análise/cortes/UI = local no Mac M4 (grátis). Backends
+  plugáveis por config (whisper local e API Anthropic como alternativas).
+  PC RTX 2080S = reserva, não é peça necessária. Piloto estimado em poucos
+  dólares; `--dry-run` obrigatório antes de cada lote LLM.
 
 ## Fatos técnicos verificados (nunca re-derivar)
 
@@ -60,9 +69,14 @@ playback, limite de 8 vertex buffers do WebGPU, etc.
 
 ## Pendências e questões abertas
 
-- **Abrir o `acervo`**: plano do piloto proposto (marcos A0–A5 = doc 02 §12);
-  decisões pendentes do Dudu: chave de API para extração LLM (Claude) e
-  transcrição local (faster-whisper, grátis/lento) vs. API.
+- **A1 precisa da FAL_KEY**: Dudu deve copiar `acervo/.env.example` para
+  `acervo/.env` e colar a chave do dashboard do fal.
+- **Descoberta do A0 que muda o A2**: o canal tem **597 vídeos** (não 136) e
+  depoimentos longos são divididos em partes ("1/3", "2/3"…) — uma pessoa
+  pode ser vários vídeos. O schema `person.json` precisa de agrupamento
+  vídeo→pessoa (decidir no A2). Curadoria do piloto deve preferir histórias
+  completas (todas as partes).
+- **Escolher os 10–20 vídeos do piloto** (Dudu — diversidade importa, doc 04 §10).
 - **Calibração de sensação no navegador real** (o Dudu ainda não validou o M2
   no próprio PC): velocidade, densidade, nervosismo do wander, raio do mouse —
   sliders todos no painel leva. FPS headless é enganoso (ambiente lento);

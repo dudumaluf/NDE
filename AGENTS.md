@@ -23,6 +23,8 @@ envolver curadoria/patrocínio.)
 ## Mapa do repositório
 
 - `limiar-experience/` — o app (R3F + WebGPU/TSL). Tem AGENTS.md próprio.
+- `acervo/` — pipeline de dados (Python/uv, CLI typer; doc 02). Estágios
+  pagos rodam no fal.ai (wizper/any-llm); resto local. Ver `acervo/README.md`.
 - `Docs/` — documentação canônica (o espelho `limiar-experience/docs/` existe
   para quando só a subpasta é aberta; raiz vence em conflito).
 - `cables-export/` — o patch cables.gl original exportado (referência

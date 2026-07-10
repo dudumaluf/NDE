@@ -1,0 +1,34 @@
+# Configuração do pipeline (doc 02 §3 — requisito 3: tudo config-driven).
+# Chaves de API vivem no .env, nunca aqui.
+
+channel:
+  # Canal "Afinal, o que somos nós?" — resolvido a partir dos vídeos do patch.
+  url: ""            # preenchido no primeiro `acervo scan --resolve <video_id>`
+
+paths:
+  data: data
+  export: export
+  db: acervo.db
+
+fetch:
+  audio_format: "m4a" # bestaudio nesse container; cai para o melhor disponível
+
+transcribe:
+  backend: fal        # fal | local
+  model: fal-ai/wizper
+  language: pt
+  chunk_level: word   # timestamps por palavra (beats/quotes dependem disso)
+  diarize: false      # ligar quando quisermos separar entrevistador × depoente
+
+extract:
+  backend: fal        # fal | anthropic
+  model: ""           # decidir no A2 (modelo frontier via any-llm)
+  max_retries: 2
+
+embeddings:
+  backend: local
+  model: intfloat/multilingual-e5-large
+
+analyze:
+  umap_random_state: 42
+  knn_k: 8

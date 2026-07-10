@@ -23,12 +23,20 @@ O `acervo` é um pipeline em estágios: **scan → fetch → transcribe → extr
 
 ## 3. Stack sugerida
 
+> **Decisão de infra (2026-07-10, ver STATUS):** concentrar os estágios pagos
+> no **fal.ai** (créditos já existentes do Dudu). Transcrição default =
+> `fal-ai/wizper` (Whisper v3 Large, `language: pt`, `chunk_level: word`,
+> diarização integrada por flag — dispensa pyannote local). Extração default =
+> `fal-ai/any-llm` com modelo frontier. Backends **plugáveis por config**:
+> `faster-whisper` local e API Anthropic direta continuam como alternativas
+> (fallback de custo zero / plano B de qualidade). Todo o resto roda local.
+
 - Python 3.11+, gerenciado com `uv`
 - CLI: `typer` · Config: `pydantic-settings` + YAML
 - Download: `yt-dlp` (áudio m4a/opus + metadata + thumbnail)
-- Transcrição: `faster-whisper` (modelo large-v3, língua `pt`, word timestamps)
-- Diarização (opcional, flag): `pyannote.audio` — separar entrevistador × depoente
-- Extração estruturada: API do Claude (modelo configurável), prompts versionados em `prompts/*.md`
+- Transcrição: `fal-ai/wizper` via `fal-client` (default) ou `faster-whisper` local (modelo large-v3, língua `pt`, word timestamps)
+- Diarização (opcional, flag): `diarize=true` do wizper (default) ou `pyannote.audio` local — separar entrevistador × depoente
+- Extração estruturada: `fal-ai/any-llm` com modelo frontier (default) ou API do Claude (modelo configurável), prompts versionados em `prompts/*.md`
 - Embeddings: plugável via interface única — default local `intfloat/multilingual-e5-large` (sentence-transformers); alternativa API (Voyage/OpenAI) por config
 - Análise: `umap-learn`, `hdbscan`, `networkx`, `numpy`
 - Áudio (cortes): `ffmpeg` via subprocess, com loudness normalization (`loudnorm`)

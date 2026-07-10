@@ -1,0 +1,14 @@
+# dados baixados e derivados (regeneráveis; áudio é pesado)
+data/
+export/
+acervo.db
+report.html
+
+# segredos
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
