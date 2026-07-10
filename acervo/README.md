@@ -47,6 +47,25 @@ Estado da fila em `acervo.db` (SQLite); dados canônicos em `data/<video_id>/`
 - O canal hoje se apresenta como "AFTER ALL, WHAT ARE WE?" (títulos dos
   vídeos seguem em PT).
 
+## Fundamentação da taxonomia (fontes a cruzar no A2)
+
+A taxonomia v1 nasce do cruzamento destes instrumentos com o **vocabulário
+real do corpus** (transcripts do lote piloto):
+
+- **Escala de Greyson** (1983) — o instrumento padrão de EQM: 16 itens em 4
+  domínios (cognitivo, afetivo, paranormal, transcendental). Base principal.
+- **NDE-C** (Near-Death Experience Content, Martial et al. 2020) — revisão
+  moderna da Greyson; refina transcendência, unidade, inefabilidade.
+- **WCEI** (Weighted Core Experience Index, Kenneth Ring 1980) — índice
+  histórico de "profundidade" da experiência.
+- **MEQ-30** (Mystical Experience Questionnaire) — dimensões místicas:
+  unidade, transcendência de tempo/espaço, inefabilidade, qualidade noética.
+- **CAPS** (Cardiff Anomalous Perceptions Scale) — percepções anômalas em
+  linguagem clinicamente neutra; referência de **tom sem viés** (princípio 2
+  do doc 00: as leituras transcendente e neurocientífica coexistem).
+- Categorias NDERF (nderf.org) — taxonomia prática usada no maior acervo
+  público de relatos.
+
 ## Descobertas do A1
 
 - **`fal-ai/wizper` só aceita `chunk_level=segment`** (word é rejeitado pela
