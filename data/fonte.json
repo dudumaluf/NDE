@@ -1,0 +1,19 @@
+{
+  "canal": {
+    "nome": "Afinal, o que somos nós?",
+    "url": "https://www.youtube.com/@afinaloquesomosnos/videos",
+    "handle": "@afinaloquesomosnos"
+  },
+  "video_ids": {
+    "arquivo": "youtube_video_ids.json",
+    "quantidade": 136,
+    "origem": "Extraídos do patch cables.gl (cables-export/js/Crowd.json, op Array.StringToArray_v2 g7qnlmxh2)",
+    "nota": "Lista curada manualmente na época do patch. O canal pode ter vídeos novos — o comando 'acervo scan' (Doc 02) deve usar o canal como fonte da verdade e esta lista como seed/validação."
+  },
+  "nomes": {
+    "arquivo": "nomes.json",
+    "quantidade": 268,
+    "origem": "Extraídos do patch (op 6xb1y3yhf)",
+    "nota": "Nomes PLACEHOLDER aleatórios usados no protótipo — NÃO são os nomes reais dos depoentes. Os nomes reais virão do pipeline (campo person.display_name do Doc 02)."
+  }
+}
