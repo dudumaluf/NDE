@@ -14,11 +14,11 @@ fetch:
   audio_format: "m4a" # bestaudio nesse container; cai para o melhor disponível
 
 transcribe:
-  backend: fal        # fal | local
-  model: fal-ai/wizper
+  backend: fal          # fal | local
+  model: fal-ai/wizper  # rápido/barato; só aceita chunk_level=segment (verificado)
   language: pt
-  chunk_level: word   # timestamps por palavra (beats/quotes dependem disso)
-  diarize: false      # ligar quando quisermos separar entrevistador × depoente
+  chunk_level: segment  # suficiente p/ beats+quotes; word exigiria fal-ai/whisper
+  diarize: false        # ligar quando quisermos separar entrevistador × depoente
 
 extract:
   backend: fal        # fal | anthropic

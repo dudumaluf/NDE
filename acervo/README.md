@@ -21,6 +21,8 @@ uv run acervo scan                            # re-escaneia (só registra novos)
 uv run acervo fetch                           # baixa os 3 próximos pendentes
 uv run acervo fetch --limit 10                # ou um lote maior
 uv run acervo fetch <id> [<id>…]              # ou IDs específicos
+uv run acervo transcribe                      # transcreve 1 pendente (fal wizper)
+uv run acervo transcribe --all                # ou todos os fetched
 uv run acervo status                          # fila por status + erros
 uv run acervo meta <id>                       # inspeciona o meta.json de um vídeo
 ```
@@ -31,7 +33,7 @@ Estado da fila em `acervo.db` (SQLite); dados canônicos em `data/<video_id>/`
 ## Marcos (doc 02 §12)
 
 - [x] **A0** — scaffolding + `scan` + `fetch` (tag `a0`)
-- [ ] **A1** — `transcribe` (fal-ai/wizper, pt, word timestamps)
+- [x] **A1** — `transcribe` (fal-ai/wizper, pt; tag `a1`)
 - [ ] **A2** — schema `person.json` + `extract` (any-llm) + taxonomy v1
 - [ ] **A3** — `analyze` (embeddings, UMAP, HDBSCAN, grafo) + `export/`
 - [ ] **A4** — UI `review`
@@ -44,3 +46,13 @@ Estado da fila em `acervo.db` (SQLite); dados canônicos em `data/<video_id>/`
   título) → uma *pessoa* pode ser vários vídeos; agrupamento a decidir no A2.
 - O canal hoje se apresenta como "AFTER ALL, WHAT ARE WE?" (títulos dos
   vídeos seguem em PT).
+
+## Descobertas do A1
+
+- **`fal-ai/wizper` só aceita `chunk_level=segment`** (word é rejeitado pela
+  API, apesar da doc genérica do Whisper) — segmentos de ~30s. Suficiente
+  para beats e razoável para quotes; se o A2 mostrar que precisamos de
+  timestamps por palavra, trocar `transcribe.model` para `fal-ai/whisper`
+  (mais lento) no config.
+- Qualidade PT excelente (pontuação, termos como "EQM" corretos); ~10–140s
+  de processamento por vídeo de 25–64 min.

@@ -19,8 +19,9 @@
 | M2 | **Simulação compute**: wander (curl noise), separação (ninguém atravessa ninguém), contenção, mouse atrai/repele, giro suave, passo acoplado à velocidade | ✔ tag `m2` |
 | Design | UX de consumo consolidado (`Docs/04`) + dossiê curadoria (`Docs/05`) | ✔ 2026-07-10 |
 | A0 | `acervo` scaffolding + `scan` + `fetch` (597 vídeos na fila, 6 áudios baixados) | ✔ tag `a0` |
-| A1 | `acervo transcribe` (fal wizper, pt, word timestamps) — **precisa de FAL_KEY no .env** | ⬅ **próximo** |
-| A2–A5 | extract → analyze/export → review UI → piloto 10–20 vídeos | pendente |
+| A1 | `acervo transcribe` (fal wizper, pt, segmentos ~30s) — 6 vídeos transcritos (~4h45 de áudio), qualidade PT excelente | ✔ tag `a1` |
+| A2 | Schema `person.json` (com agrupamento vídeo→pessoa!) + `extract` via any-llm + taxonomy v1 | ⬅ **próximo** |
+| A3–A5 | analyze/export → review UI → piloto 10–20 vídeos | pendente |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
@@ -69,8 +70,10 @@ playback, limite de 8 vertex buffers do WebGPU, etc.
 
 ## Pendências e questões abertas
 
-- **A1 precisa da FAL_KEY**: Dudu deve copiar `acervo/.env.example` para
-  `acervo/.env` e colar a chave do dashboard do fal.
+- FAL_KEY configurada no `acervo/.env` (gitignored; NUNCA no .env.example).
+- **Limitação registrada**: wizper só dá `chunk_level=segment` (~30s) — ok
+  para beats; se A2 exigir word-level, trocar model para `fal-ai/whisper`.
+- Conferir custo real do A1 no dashboard do fal (billing) — ~285 min de áudio.
 - **Descoberta do A0 que muda o A2**: o canal tem **597 vídeos** (não 136) e
   depoimentos longos são divididos em partes ("1/3", "2/3"…) — uma pessoa
   pode ser vários vídeos. O schema `person.json` precisa de agrupamento

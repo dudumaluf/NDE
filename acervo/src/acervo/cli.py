@@ -124,6 +124,64 @@ def fetch(
 
 
 @app.command()
+def transcribe(
+    ids: list[str] = typer.Argument(None, help="IDs específicos (default: pendentes)."),
+    all_: bool = typer.Option(False, "--all", help="Transcreve todos os fetched."),
+    limit: int = typer.Option(0, help="Máximo de vídeos nesta execução."),
+) -> None:
+    """Transcreve os vídeos baixados (fal wizper, pt, timestamps por palavra)."""
+    from . import transcribe as tr
+
+    cfg = load_config()
+    conn = dbm.connect(cfg.db_path())
+
+    if ids:
+        queue = ids
+    else:
+        rows = conn.execute(
+            "SELECT id FROM videos WHERE status = 'fetched' ORDER BY first_seen_at"
+        ).fetchall()
+        queue = [r["id"] for r in rows]
+        if not all_ and limit == 0:
+            limit = 1  # default conservador: um por vez até confiarmos no custo
+
+    if limit:
+        queue = queue[:limit]
+    if not queue:
+        console.print("Nada a transcrever — rode fetch antes ou fila já processada.")
+        return
+
+    ok, failed = 0, 0
+    for video_id in queue:
+        if tr.has_transcript(cfg, video_id):
+            dbm.advance_status(conn, video_id, "transcribed")
+            conn.commit()
+            console.print(f"[dim]{video_id} já transcrito — pulando (idempotente)[/dim]")
+            ok += 1
+            continue
+        try:
+            console.print(f"Transcrevendo {video_id} … (upload + wizper)")
+            summary = tr.transcribe_video(cfg, video_id)
+            dbm.advance_status(conn, video_id, "transcribed")
+            conn.commit()
+            console.print(
+                f"[green]ok[/green] {video_id} · {summary['chars']} chars · "
+                f"{summary['chunks']} chunks · áudio até {summary['last_end']}s · "
+                f"{summary['elapsed_s']}s de processamento"
+            )
+            ok += 1
+        except Exception as exc:  # noqa: BLE001 — registrar e seguir (resumível)
+            dbm.set_error(conn, video_id, str(exc))
+            conn.commit()
+            console.print(f"[red]falhou[/red] {video_id}: {exc}")
+            failed += 1
+
+    console.print(f"\n[bold]{ok} ok · {failed} falhas[/bold]")
+    if failed:
+        raise typer.Exit(2)
+
+
+@app.command()
 def status() -> None:
     """Contagem por status + últimos erros (visão rápida da fila)."""
     cfg = load_config()

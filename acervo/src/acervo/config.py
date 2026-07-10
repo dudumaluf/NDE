@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel
 
 
@@ -78,6 +79,7 @@ def find_root(start: Path | None = None) -> Path:
 
 def load_config(start: Path | None = None) -> AcervoConfig:
     root = find_root(start)
+    load_dotenv(root / ".env")  # segredos (FAL_KEY etc.) entram no ambiente
     raw = yaml.safe_load((root / "acervo.config.yaml").read_text(encoding="utf-8")) or {}
     cfg = AcervoConfig.model_validate(raw)
     cfg.root = root
