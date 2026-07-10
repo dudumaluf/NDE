@@ -6,6 +6,10 @@ function get(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);
 }
 
+export function qpHas(name: string): boolean {
+  return new URLSearchParams(window.location.search).has(name);
+}
+
 export function qpNum(name: string, def: number): number {
   const v = get(name);
   const n = v === null ? NaN : Number(v);

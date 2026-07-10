@@ -16,27 +16,34 @@ export const VAT = {
   clipCount: 6,
   framesPerClip: 60,
   /**
-   * Rótulos por clipe — IDENTIFICADOS visualmente no M0 (screenshots em shots/).
+   * Clipes identificados visualmente no M0 e confirmados pelo autor.
    * Mapeiam 1:1 para a máquina de estados narrativa do doc 01 §4.
+   * one-shots (loop: false) seguram o último frame (hold) ao terminar.
    */
-  clipLabels: [
-    "idle (em pé, respirando)",
-    "andar (walk cycle — default do patch)",
-    "idle 2 (em pé, braços soltos)",
-    "queda/morte (one-shot, termina deitado)",
-    "levantar (one-shot, do chão até mãos juntas)",
-    "rezar (loop, mãos juntas, cabeça baixa)",
+  clips: [
+    { name: "idle", loop: true },
+    { name: "andar", loop: true },
+    { name: "idle 2", loop: true },
+    { name: "morrer", loop: false },
+    { name: "levantar", loop: false },
+    { name: "rezar", loop: true },
   ],
   /**
    * Offset de recentralização em espaço de bake (subtraído antes da basis).
    * Medido dos EXRs (scripts/inspect-exr.mjs): centro X/Y dos clipes em pé
    * (0,1,2,5) e máximo do canal Z (vertical invertido) para aterrar os pés.
    * (O patch usava 0.37,0.40,0.37 + escala própria — irrelevante aqui.)
+   *
+   * Normais: assadas como vetores unitários crus em [-1,1] (verificado) —
+   * decodificação = rotação de basis + normalize, sem offset.
    */
   bakeOffset: [0.7185, 0.7355, 0.7378] as const,
   /** Duração default de um clipe (timer 0.3 do patch → ~3.33 s por loop de 60 f). */
   clipSeconds: 3.33,
 } as const;
+
+/** Frames por segundo de paridade com o patch (~18 fps). */
+export const VAT_FPS = VAT.framesPerClip / VAT.clipSeconds;
 
 export const BASIS_NAMES = [
   "x_negz_y",
