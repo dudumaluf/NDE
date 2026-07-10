@@ -4,8 +4,9 @@ Leia antes de qualquer tarefa, nesta ordem:
 
 1. `docs/00-visao-geral.md` — norte do projeto, princípios, ética
 2. `docs/01-conceito-experiencia.md` — o design que este código serve (em conflito com a técnica, ele vence)
-3. `docs/03-briefing-experiencia-3d.md` — arquitetura, stack e marcos (M0–M7) **incluindo a errata no §1**
-4. `docs/ANALISE_TECNICA.md` — engenharia reversa do patch cables.gl original (fatos verificados)
+3. `docs/04-experiencia-consumo.md` — decisões de UX mais recentes (estende e vence o 01 em conflito)
+4. `docs/03-briefing-experiencia-3d.md` — arquitetura, stack e marcos (M0–M7) **incluindo a errata no §1**
+5. `docs/ANALISE_TECNICA.md` — engenharia reversa do patch cables.gl original (fatos verificados)
 
 ## Método de trabalho
 

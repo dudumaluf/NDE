@@ -4,7 +4,7 @@
 > em qualquer máquina deve conseguir retomar o trabalho lendo isto + os docs.
 > **Ritual**: atualizar ao final de cada marco/sessão relevante, antes do push.
 
-Última atualização: **2026-07-10** (fechamento do M2)
+Última atualização: **2026-07-10, tarde** (sessão de design: docs 04/05 + decisão acervo-first)
 
 ---
 
@@ -17,9 +17,10 @@
 | M0.5 | **Morph seamless**: crossfade A/B entre quaisquer clipes, `VatClipPlayer`, botões de estado, arco da história | ✔ |
 | M1 | Multidão instanciada (1 draw call, até 4096), cor/escala/fase por instância | ✔ tag `m1` |
 | M2 | **Simulação compute**: wander (curl noise), separação (ninguém atravessa ninguém), contenção, mouse atrai/repele, giro suave, passo acoplado à velocidade | ✔ tag `m2` |
-| M3 | Data layer (`content/` fake com o contrato do pipeline, doc 02 §10) | ⬅ **próximo** |
-| M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente |
-| `acervo` | Pipeline de dados real (transcrição/análise dos vídeos, doc 02) | não iniciado — pode abrir em paralelo ao M3 |
+| Design | UX de consumo consolidado (`Docs/04`) + dossiê curadoria (`Docs/05`) | ✔ 2026-07-10 |
+| `acervo` | Pipeline de dados (doc 02) — piloto de 10–20 vídeos | ⬅ **próximo** (decisão: antes do M3) |
+| M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
+| M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
 ## Decisões tomadas (e porquês)
 
@@ -36,6 +37,20 @@
 - O patch cables é **referência técnica, não contrato de design** — o design
   que vale é o dos docs 00/01 (dito explicitamente pelo Dudu).
 - Monorepo único no GitHub (`dudumaluf/NDE`) com histórico e tags preservados.
+- **Acervo antes do M3** (2026-07-10): os dados informam o design (doc 00 §6);
+  o risco técnico do app já foi mitigado (M0–M2); e o M3 fica melhor plugando
+  dados **reais** do piloto em vez do corpus fake.
+- **UX de consumo consolidado no `Docs/04`** (2026-07-10): resumos por beats
+  como padrão + 3 níveis de profundidade (corte/íntegra/link YouTube);
+  timeline de hotspots no follow; revelação-depois-da-intuição; sem números
+  na escala íntima; e as três mecânicas novas batizadas — **Sintonia**
+  (hover-rádio), **Coro** (áudio sincronizado por contexto), **Lentes**
+  (re-clusterização temática interativa). Doc 04 vence o 01 em conflito.
+- Visual do que é descrito nos relatos: **princípio O(elementos)** — vinhetas
+  ambientais por elemento (~20), nunca conteúdo por história (doc 04 §8).
+- `Docs/05-dossie-curadoria.md`: apresentação externa (galerias/patrocínio),
+  incluindo o formato instalação física. **Falta preencher contato.**
+- Painel leva com tema mais largo (`rootWidth` 380px) — rótulos legíveis.
 
 ## Fatos técnicos verificados (nunca re-derivar)
 
@@ -45,10 +60,14 @@ playback, limite de 8 vertex buffers do WebGPU, etc.
 
 ## Pendências e questões abertas
 
+- **Abrir o `acervo`**: plano do piloto proposto (marcos A0–A5 = doc 02 §12);
+  decisões pendentes do Dudu: chave de API para extração LLM (Claude) e
+  transcrição local (faster-whisper, grátis/lento) vs. API.
 - **Calibração de sensação no navegador real** (o Dudu ainda não validou o M2
   no próprio PC): velocidade, densidade, nervosismo do wander, raio do mouse —
   sliders todos no painel leva. FPS headless é enganoso (ambiente lento);
   medir no navegador de verdade.
+- Preencher contato (e-mail/site) no `Docs/05-dossie-curadoria.md`.
 - `faceFlip` default parece correto (pessoas de costas quando se afastam),
   mas conferir em movimento; há toggle no painel.
 - Warning `THREE.Clock deprecated` no console — cosmético, ignorar.

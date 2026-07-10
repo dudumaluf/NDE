@@ -48,6 +48,8 @@ Estes princípios resolvem discussões futuras. Quando houver dúvida de design,
 | 01 | Conceito da Experiência | O design completo: mundo, jornada, mecânicas, estética, som | Você (design) + informa o doc 03 |
 | 02 | Briefing — Pipeline de Dados | Especificação para construir a ferramenta "acervo" | Claude Code / Cursor (repo 1) |
 | 03 | Briefing — Experiência 3D | Especificação para construir o mundo em R3F + WebGPU | Claude Code / Cursor (repo 2) |
+| 04 | Experiência de Consumo (UX) | Decisões de UX e mecânicas de escuta (Sintonia, Coro, Lentes); estende o 01 e resolve suas perguntas abertas | Design + informa os docs 02/03 |
+| 05 | Dossiê para Curadoria | Apresentação externa do conceito (galerias, festivais, patrocínio) | Curadores/parceiros |
 
 **Como usar com Claude Code / Cursor:**
 1. Crie dois repositórios: `acervo/` (pipeline) e `limiar-experience/` (experiência).
