@@ -62,7 +62,12 @@ export default function App() {
 
   return (
     <>
-      <Leva hidden={!showUi} collapsed={false} titleBar={{ title: "LIMIAR — debug" }} />
+      <Leva
+        hidden={!showUi}
+        collapsed={false}
+        titleBar={{ title: "LIMIAR — debug" }}
+        theme={{ sizes: { rootWidth: "380px", controlWidth: "170px" } }}
+      />
       <Canvas
         camera={{ position: initialCamera(), fov: 45, near: 0.05, far: 300 }}
         gl={async (props) => {
