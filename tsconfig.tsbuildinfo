@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/lib/urlparams.ts","./src/scene/scene.tsx","./src/vat/vatcharacter.tsx","./src/vat/descriptor.ts","./src/vat/usevattextures.ts","./src/vat/vatmaterial.ts","./vite.config.ts"],"version":"5.9.3"}
