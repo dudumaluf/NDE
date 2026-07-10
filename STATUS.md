@@ -69,6 +69,36 @@ Ver `limiar-experience/AGENTS.md` — lista canônica: 1590 vértices, VAT 6×60
 frames, basis `x_negz_y`, bakeOffset empírico, normais cruas, ~18 fps de
 playback, limite de 8 vertex buffers do WebGPU, etc.
 
+## Hipóteses de pesquisa do corpus (Dudu, 2026-07-10 — validar no A3/stats)
+
+Intuições registradas para virarem queries de co-ocorrência no `analyze`
+(números preliminares das fichas do piloto, 17 pessoas):
+
+1. **O amor não é só sentimento presente — é o ensinamento.** Paz ~15/17;
+   amor incondicional explícito ~8/17; e em ~7 casos o amor É o conteúdo da
+   missão trazida de volta ("ser amor", "o amor salvará a humanidade",
+   "seja luz, seja amor", perdão como lição).
+2. **Algo se destrava ao beirar a morte.** Sensitividade/mediunidade
+   ampliada pós-EQM em ~12/17 (premonição, sentir energias, telepatia,
+   "porta entreaberta", "véu mais fino") — quase universal, e as escalas
+   clássicas tratam como nota de rodapé.
+3. **A missão de contar (às vezes com aviso planetário).** Ordem/cobrança
+   explícita de divulgar em ~7/17 — e em ≥4 casos o PRÓPRIO CANAL é o
+   veículo designado ("fala com o Carlos", guia cobrando "é hoje?"). Avisos
+   de catástrofe/transição planetária em ~7/17 (água, tsunami, sol laranja,
+   "transição"). Meta-padrão: o corpus se auto-alimenta.
+4. **A rede além das EQMs.** O corpus já contém as pontes: projeção astral
+   (6+), meditação/retiros como "o mesmo lugar" (Letícia, Hudson),
+   enteógenos, ETs/espíritos (6+), Conscienciologia (Kacianni — tradição
+   diretamente ligada a Robert Monroe). Regra de ouro decidida: **dentro do
+   Campo, só as vozes do corpus**; literatura externa (Monroe, Bardo
+   Thödol, DMT etc.) pode existir como camada curada de "leituras" fora da
+   experiência (About/ensaio), nunca misturada aos dados.
+
+→ `taxonomy.yaml` já captura: `sensitividade`, `missao`, `amor_incondicional`
+canônicos; `visao_de_catastrofe` e demais pontes como adjacentes. O A3 deve
+gerar co-ocorrências específicas para testar cada hipótese no corpus real.
+
 ## Pendências e questões abertas
 
 - FAL_KEY configurada no `acervo/.env` (gitignored; NUNCA no .env.example).

@@ -179,6 +179,36 @@ divergência**. Onde os relatos discordam também é dado. Um Campo que só
 mostra encaixes vira propaganda; um que mostra os encaixes e as arestas
 soltas vira pesquisa — e deixa o visitante genuinamente livre.
 
+## 9.1 O Oráculo (mecânica candidata, 2026-07-10)
+
+Ideia do Dudu: uma LLM informada em **todo o corpus** (RAG sobre o export:
+transcripts, elementos, quotes, stats) que o visitante pode consultar dentro
+da experiência — perguntar o que quiser e receber resposta fundamentada no
+que o acervo sabe.
+
+**A versão LIMIAR da ideia — o Oráculo responde em vozes.** Em vez de gerar
+texto de chatbot, a resposta é um **Coro curado**: a pergunta vira busca
+semântica (embeddings já existem no pipeline), e o Oráculo devolve *as
+pessoas que falaram daquilo* — trechos de áudio reais, citações literais com
+fonte, e as figuras correspondentes se iluminam no Campo, prontas para
+serem visitadas. A LLM faz retrieval, ranking e no máximo uma costura
+mínima; **quem responde é o corpus**.
+
+Regras invioláveis (herdam o manifesto §9 e o req. 7 do doc 02):
+1. O Oráculo **nunca afirma nada sem citação** literal validada; se o corpus
+   não cobre a pergunta, ele diz "ninguém falou disso ainda" (que é, em si,
+   um dado bonito).
+2. Não opina, não teoriza, não console — **encontra vozes**. Bibliotecário
+   do memorial, não guru.
+3. UI diegética: "perguntar ao Campo" — sem cara de chat. A resposta
+   acontece no mundo (pessoas iluminam, trechos tocam) + painel discreto.
+4. Anti-clichê por construção: perguntou "todo mundo vê um túnel?", o
+   Oráculo responde com os dados (no piloto: raro) e as vozes divergentes.
+
+Técnica: RAG sobre `export/` (quotes + beats + stats), LLM via fal any-llm,
+custo por pergunta pequeno e cacheável. Entra depois do M6 (precisa de
+corpus real e busca semântica); protótipo possível como comando de debug.
+
 ## 10. Riscos de UX vigiados
 
 1. **O vale do tédio** — platô entre a 1ª história e a gravidade ligar.
