@@ -16,19 +16,29 @@ WebGPU é usado quando disponível; caso contrário o `WebGPURenderer` cai
 automaticamente para WebGL2 (mesmos nodes TSL). O backend ativo aparece no
 canto inferior esquerdo.
 
-## Estado atual — M0 (personagem VAT) ✔
+## Estado atual — M0 ✔ · morph seamless ✔ · M1 (multidão) ✔
 
 - EXRs do patch original em `public/vat/` (posições + normais, 1590×360:
-  6 clipes × 60 frames). Clipes identificados: **0** idle · **1** andar ·
-  **2** idle variação · **3** queda/morte · **4** levantar · **5** rezar.
-- `src/vat/` — descriptor, loader e material TSL com vertex pulling por
-  `vertexIndex`, lerp entre frames e calibração de eixos/normais via painel.
-- Painel (leva) para: clipe 0–5, velocidade, pausa/scrub, base de eixos,
-  inversão de linhas, offset de bake, modo de normais.
+  6 clipes × 60 frames). Clipes: **0** idle · **1** andar · **2** idle
+  variação · **3** morrer · **4** levantar · **5** rezar — a máquina de
+  estados narrativa completa (doc 01 §4).
+- `src/vat/` — sampler TSL com **crossfade A/B**: qualquer clipe morfa em
+  qualquer outro fora de sequência, com lerp interframe; one-shots (morrer,
+  levantar) seguram o último frame. `VatClipPlayer` dirige as transições
+  (CPU) e o shader mistura as posições (GPU).
+- `src/crowd/` — multidão em **1 draw call** (InstancedMesh + atributos por
+  instância: posição, yaw, escala, cor, fase). Fase dessincroniza loops;
+  one-shots disparam em sincronia (a "pausa coletiva" do doc 01 nasce aqui).
+- Painel (leva): cena (multidão/personagem), botões de estado com morph,
+  arco da história completo, fade, velocidade, grade/área/ruído/seed/paleta.
 
 ### Parâmetros de URL (para inspeção/screenshots)
 
-`?clip=3&speed=1&pause=1&frame=30&basis=flipZ&rowsFlip=0&offset=1&flatNormals=1&showNormals=1&scale=1&leva=0`
+- Cena e câmera: `?scene=multidao|personagem&cam=x,y,z&leva=0&forceWebGL=1`
+- Multidão: `&grid=32&area=40`
+- Estado congelado: `&pause=1&clip=3&frame=30`
+- Morph congelado: `&clipA=1&frameA=30&clipB=3&frameB=40&blend=0.5`
+- Arco automático: `&arc=1`
 
 ### Screenshot headless (verificação)
 

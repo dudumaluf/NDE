@@ -2,38 +2,69 @@ import { Suspense, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Leva } from "leva";
-import { Scene } from "./scene/Scene";
-import { qpBool } from "./lib/urlParams";
+import { Scene, initialSceneMode } from "./scene/Scene";
+import { qpBool, qpStr } from "./lib/urlParams";
 
-/** Sinaliza prontidão (2 frames renderizados) e detecta o backend em uso. */
-function Probe({ onReady }: { onReady: (backend: string) => void }) {
+/** Sinaliza prontidão (2 frames), detecta o backend e mede FPS médio. */
+function Probe({
+  onReady,
+  onFps,
+}: {
+  onReady: (backend: string) => void;
+  onFps: (fps: number) => void;
+}) {
   const frames = useRef(0);
   const done = useRef(false);
-  useFrame((state) => {
+  const acc = useRef({ t: 0, n: 0 });
+
+  useFrame((state, delta) => {
     frames.current += 1;
-    if (done.current || frames.current < 2) return;
-    done.current = true;
-    const gl = state.gl as unknown as {
-      backend?: { isWebGPUBackend?: boolean };
-    };
-    const backend = gl.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2 (fallback)";
-    onReady(backend);
-    const w = window as unknown as Record<string, unknown>;
-    w.__limiarBackend = backend;
-    w.__limiarReady = true;
+    if (!done.current && frames.current >= 2) {
+      done.current = true;
+      const gl = state.gl as unknown as {
+        backend?: { isWebGPUBackend?: boolean };
+      };
+      const backend = gl.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2 (fallback)";
+      onReady(backend);
+      const w = window as unknown as Record<string, unknown>;
+      w.__limiarBackend = backend;
+      w.__limiarReady = true;
+    }
+    const a = acc.current;
+    a.t += delta;
+    a.n += 1;
+    if (a.t >= 0.5) {
+      const fps = a.n / a.t;
+      onFps(fps);
+      (window as unknown as Record<string, unknown>).__limiarFps = fps;
+      a.t = 0;
+      a.n = 0;
+    }
   });
   return null;
 }
 
+function initialCamera(): [number, number, number] {
+  const cam = qpStr<string>("cam", "");
+  if (cam) {
+    const parts = cam.split(",").map(Number);
+    if (parts.length === 3 && parts.every(Number.isFinite)) {
+      return parts as [number, number, number];
+    }
+  }
+  return initialSceneMode() === "personagem" ? [2.6, 1.7, 3.4] : [14, 9, 18];
+}
+
 export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
+  const [fps, setFps] = useState<number | null>(null);
   const showUi = qpBool("leva", true);
 
   return (
     <>
-      <Leva hidden={!showUi} collapsed={false} titleBar={{ title: "LIMIAR — debug M0" }} />
+      <Leva hidden={!showUi} collapsed={false} titleBar={{ title: "LIMIAR — debug" }} />
       <Canvas
-        camera={{ position: [2.6, 1.7, 3.4], fov: 45, near: 0.05, far: 300 }}
+        camera={{ position: initialCamera(), fov: 45, near: 0.05, far: 300 }}
         gl={async (props) => {
           const renderer = new THREE.WebGPURenderer({
             ...(props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
@@ -46,7 +77,7 @@ export default function App() {
       >
         <Suspense fallback={null}>
           <Scene />
-          <Probe onReady={setBackend} />
+          <Probe onReady={setBackend} onFps={setFps} />
         </Suspense>
       </Canvas>
       <div
@@ -60,9 +91,11 @@ export default function App() {
           color: "#ddd",
           fontSize: 12,
           pointerEvents: "none",
+          fontVariantNumeric: "tabular-nums",
         }}
       >
         {backend ? `render: ${backend}` : "inicializando renderer…"}
+        {fps !== null ? ` · ${fps.toFixed(0)} fps` : ""}
       </div>
     </>
   );
