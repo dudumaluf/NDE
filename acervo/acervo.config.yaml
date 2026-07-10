@@ -22,7 +22,7 @@ transcribe:
 
 extract:
   backend: fal        # fal | anthropic
-  model: ""           # decidir no A2 (modelo frontier via any-llm)
+  model: anthropic/claude-sonnet-4.5  # via openrouter/router (any-llm foi deprecado)
   max_retries: 2
 
 embeddings:

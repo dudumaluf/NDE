@@ -182,6 +182,119 @@ def transcribe(
 
 
 @app.command()
+def group() -> None:
+    """Agrupa vídeos transcritos em PESSOAS (padrão 'N/M – ... EQM de Nome')."""
+    from . import people as ppl
+    from .group import group_videos
+
+    cfg = load_config()
+    conn = dbm.connect(cfg.db_path())
+    channel = dbm.kv_get(conn, "channel_name") or ""
+
+    rows = conn.execute(
+        "SELECT id, title, duration_s FROM videos "
+        "WHERE status IN ('transcribed','extracted','reviewed','exported')"
+    ).fetchall()
+    groups = group_videos([dict(r) for r in rows])
+
+    table = Table(title="pessoas agrupadas")
+    table.add_column("slug")
+    table.add_column("nome")
+    table.add_column("partes", justify="right")
+    table.add_column("min", justify="right")
+    for slug, g in sorted(groups.items()):
+        person = ppl.upsert_grouped(cfg, slug, g, channel)
+        total_min = sum((v.get("duration_s") or 0) for v in g["videos"]) / 60
+        parts = f"{len(g['videos'])}/{g['videos'][0]['total']}"
+        table.add_row(person.id, person.person.display_name, parts, f"{total_min:.0f}")
+    console.print(table)
+    console.print(f"[green]{len(groups)} pessoas[/green] em data/people/")
+
+
+@app.command()
+def extract(
+    slugs: list[str] = typer.Argument(None, help="Pessoas específicas (default: pendentes)."),
+    all_: bool = typer.Option(False, "--all", help="Extrai todas as pessoas agrupadas."),
+    limit: int = typer.Option(0, help="Máximo de pessoas nesta execução."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Só estima tokens/custo (req. 4)."),
+    force: bool = typer.Option(False, "--force", help="Ignora cache de extração por vídeo."),
+) -> None:
+    """Extrai beats/elementos/quotes por pessoa (fal openrouter/router, 2 passadas)."""
+    from . import extract as ex
+    from . import people as ppl
+
+    cfg = load_config()
+    tax = ex.load_taxonomy(cfg)
+
+    persons = ppl.list_people(cfg)
+    if slugs:
+        persons = [p for p in persons if p.id in set(slugs)]
+    else:
+        persons = [p for p in persons if p.status == "grouped"]
+        if not all_ and limit == 0:
+            limit = 1  # default conservador: uma pessoa por vez
+    if limit:
+        persons = persons[:limit]
+    if not persons:
+        console.print("Nada a extrair — rode `acervo group` antes, ou tudo já processado.")
+        return
+
+    videos_meta = []
+    for p in persons:
+        for s in p.sources:
+            videos_meta.append(
+                {
+                    "video_id": s.video_id,
+                    "person_name": p.person.display_name,
+                    "part": s.part,
+                    "parts_total": s.parts_total,
+                    "title": s.title,
+                }
+            )
+
+    if dry_run:
+        est = ex.dry_run_estimate(cfg, tax, videos_meta)
+        console.print_json(json.dumps(est, ensure_ascii=False))
+        return
+
+    ok, failed = 0, 0
+    for p in persons:
+        try:
+            console.print(f"[bold]{p.person.display_name}[/bold] ({len(p.sources)} partes)")
+            extractions = []
+            for s in sorted(p.sources, key=lambda s: s.part):
+                console.print(f"  extraindo {s.video_id} (parte {s.part}/{s.parts_total}) …")
+                meta = {
+                    "video_id": s.video_id,
+                    "person_name": p.person.display_name,
+                    "part": s.part,
+                    "parts_total": s.parts_total,
+                    "title": s.title,
+                }
+                extv = ex.extract_video(cfg, tax, meta, force=force)
+                console.print(
+                    f"    [green]ok[/green] {len(extv.elements)} elementos · "
+                    f"{len(extv.beats)} beats · {len(extv.emergent_motifs)} motivos · "
+                    f"{extv.quotes_rejected} quotes rejeitadas"
+                )
+                extractions.append(extv)
+            merged = ppl.merge_extractions(p, extractions)
+            ppl.save_person(cfg, merged)
+            console.print(
+                f"  [green]pessoa ok[/green] → {len(merged.elements)} elementos únicos, "
+                f"tom {merged.tone.valence}\n"
+            )
+            ok += 1
+        except Exception as exc:  # noqa: BLE001 — resumível
+            console.print(f"  [red]falhou[/red] {p.id}: {exc}\n")
+            failed += 1
+
+    console.print(f"[bold]{ok} pessoas ok · {failed} falhas[/bold]")
+    if failed:
+        raise typer.Exit(2)
+
+
+@app.command()
 def status() -> None:
     """Contagem por status + últimos erros (visão rápida da fila)."""
     cfg = load_config()
@@ -195,6 +308,21 @@ def status() -> None:
         if st in counts:
             table.add_row(st, str(counts[st]))
     console.print(table)
+
+    from . import people as ppl
+
+    persons = ppl.list_people(cfg)
+    if persons:
+        pcounts: dict[str, int] = {}
+        for p in persons:
+            pcounts[p.status] = pcounts.get(p.status, 0) + 1
+        ptable = Table(title="acervo — pessoas")
+        ptable.add_column("status")
+        ptable.add_column("pessoas", justify="right")
+        for st in ppl.STATUS_ORDER:
+            if st in pcounts:
+                ptable.add_row(st, str(pcounts[st]))
+        console.print(ptable)
 
     name = dbm.kv_get(conn, "channel_name")
     url = dbm.kv_get(conn, "channel_url") or cfg.channel.url
