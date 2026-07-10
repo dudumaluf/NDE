@@ -8,16 +8,14 @@ export function buildSoupGeometry(vertexCount: number): THREE.BufferGeometry {
 }
 
 export interface CrowdAttributes {
-  offset: THREE.InstancedBufferAttribute;
-  yaw: THREE.InstancedBufferAttribute;
-  scale: THREE.InstancedBufferAttribute;
-  color: THREE.InstancedBufferAttribute;
-  phase: THREE.InstancedBufferAttribute;
+  /** rgb = cor da pessoa, w = variação de escala (um só buffer: WebGPU limita a 8). */
+  colorScale: THREE.InstancedBufferAttribute;
 }
 
 /**
- * Geometria da multidão: mesma soup + atributos por instância (alocados uma
- * única vez para o máximo; `InstancedMesh.count` controla quantos desenham).
+ * Geometria da multidão: mesma soup + atributo estático por instância
+ * (cor+escala num vec4). Posição/direção/fase vêm da CrowdSim (GPU).
+ * `InstancedMesh.count` controla quantas instâncias desenham.
  */
 export function buildCrowdGeometry(
   vertexCount: number,
@@ -27,28 +25,25 @@ export function buildCrowdGeometry(
   fillBaseAttributes(geometry, vertexCount);
 
   const attrs: CrowdAttributes = {
-    offset: new THREE.InstancedBufferAttribute(new Float32Array(maxInstances * 3), 3),
-    yaw: new THREE.InstancedBufferAttribute(new Float32Array(maxInstances), 1),
-    scale: new THREE.InstancedBufferAttribute(new Float32Array(maxInstances), 1),
-    color: new THREE.InstancedBufferAttribute(new Float32Array(maxInstances * 3), 3),
-    phase: new THREE.InstancedBufferAttribute(new Float32Array(maxInstances), 1),
+    colorScale: new THREE.InstancedBufferAttribute(
+      new Float32Array(maxInstances * 4),
+      4,
+    ),
   };
-  geometry.setAttribute("iOffset", attrs.offset);
-  geometry.setAttribute("iYaw", attrs.yaw);
-  geometry.setAttribute("iScale", attrs.scale);
-  geometry.setAttribute("iColor", attrs.color);
-  geometry.setAttribute("iPhase", attrs.phase);
+  geometry.setAttribute("iColorScale", attrs.colorScale);
 
   return { geometry, attrs };
 }
 
+/**
+ * Só o atributo de posição (zeros) — serve para o draw count; a posição real
+ * vem da VAT. Sem atributo de normal: a normal vem da textura irmã, e cada
+ * vertex buffer conta no limite de 8 do WebGPU.
+ */
 function fillBaseAttributes(geometry: THREE.BufferGeometry, vertexCount: number): void {
   geometry.setAttribute(
     "position",
     new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3),
   );
-  const normals = new Float32Array(vertexCount * 3);
-  for (let i = 0; i < vertexCount; i++) normals[i * 3 + 1] = 1;
-  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.5, 0), 1e5);
 }

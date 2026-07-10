@@ -4,7 +4,8 @@ import { VatCharacter } from "../vat/VatCharacter";
 import { CrowdMesh } from "../crowd/CrowdMesh";
 import { StateButtons } from "../ui/StateButtons";
 import { PlayerBridge } from "./PlayerBridge";
-import { qpStr } from "../lib/urlParams";
+import { mouseTarget } from "../sim/mouseTarget";
+import { qpNum, qpStr } from "../lib/urlParams";
 
 export const SCENE_MODES = ["multidao", "personagem"] as const;
 export type SceneMode = (typeof SCENE_MODES)[number];
@@ -26,13 +27,18 @@ export function Scene() {
   return (
     <>
       <color attach="background" args={["#6d6d6d"]} />
-      <fog attach="fog" args={["#6d6d6d", 14, 55]} />
+      <fog attach="fog" args={["#6d6d6d", qpNum("fogNear", 14), qpNum("fogFar", 55)]} />
 
       <hemisphereLight args={["#d8dde6", "#46413c", 1.0]} />
       <directionalLight position={[4, 6, 3]} intensity={1.7} color="#fff1de" />
       <directionalLight position={[-5, 3, -4]} intensity={0.45} color="#9fb4ff" />
 
-      <mesh rotation-x={-Math.PI / 2}>
+      <mesh
+        rotation-x={-Math.PI / 2}
+        onPointerMove={(e) => {
+          mouseTarget.point.copy(e.point);
+        }}
+      >
         <circleGeometry args={[80, 64]} />
         <meshStandardMaterial color="#616161" roughness={0.95} metalness={0} />
       </mesh>

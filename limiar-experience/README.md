@@ -16,7 +16,7 @@ WebGPU é usado quando disponível; caso contrário o `WebGPURenderer` cai
 automaticamente para WebGL2 (mesmos nodes TSL). O backend ativo aparece no
 canto inferior esquerdo.
 
-## Estado atual — M0 ✔ · morph seamless ✔ · M1 (multidão) ✔
+## Estado atual — M0 ✔ · morph seamless ✔ · M1 (multidão) ✔ · M2 (simulação) ✔
 
 - EXRs do patch original em `public/vat/` (posições + normais, 1590×360:
   6 clipes × 60 frames). Clipes: **0** idle · **1** andar · **2** idle
@@ -26,16 +26,29 @@ canto inferior esquerdo.
   qualquer outro fora de sequência, com lerp interframe; one-shots (morrer,
   levantar) seguram o último frame. `VatClipPlayer` dirige as transições
   (CPU) e o shader mistura as posições (GPU).
-- `src/crowd/` — multidão em **1 draw call** (InstancedMesh + atributos por
-  instância: posição, yaw, escala, cor, fase). Fase dessincroniza loops;
-  one-shots disparam em sincronia (a "pausa coletiva" do doc 01 nasce aqui).
+- `src/crowd/` — multidão em **1 draw call** (InstancedMesh; cor/escala como
+  atributos estáticos). Posição, direção e fase do passo vêm da simulação.
+- `src/sim/` — **simulação compute (TSL)** com estado por agente em storage
+  buffers: wander por curl noise, **separação** (ninguém atravessa ninguém —
+  o que o WebGL do patch não permitia), contenção suave no raio do Campo,
+  mouse atrai/repele (raycast no chão), giro suave seguindo o movimento e
+  **passo acoplado à velocidade real** (quem anda devagar pisa devagar).
+  One-shots (morrer/levantar) continuam síncronos no beat coletivo.
+  No fallback WebGL2 a separação desliga (transform feedback não dá acesso
+  aleatório aos buffers); o resto da simulação roda igual.
 - Painel (leva): cena (multidão/personagem), botões de estado com morph,
-  arco da história completo, fade, velocidade, grade/área/ruído/seed/paleta.
+  arco da história completo, fade, velocidade, spawn (grade/área/ruído/seed/
+  paleta) e simulação (velocidade, wander, separação, contenção, mouse,
+  giro, passo, debug por cor).
 
 ### Parâmetros de URL (para inspeção/screenshots)
 
 - Cena e câmera: `?scene=multidao|personagem&cam=x,y,z&leva=0&forceWebGL=1`
 - Multidão: `&grid=32&area=40`
+- Simulação: `&simT=8` (pré-roda 8 s — screenshots de estado assentado),
+  `&mouse=off|atrair|repelir&mouseR=12`, `&sep=0` (separação off),
+  `&contain=25`, `&speed2=1.2`, `&debug=velocidade|direção`, `&faceflip=1`
+- Névoa: `&fogNear=100&fogFar=300` (útil em vistas de cima)
 - Estado congelado: `&pause=1&clip=3&frame=30`
 - Morph congelado: `&clipA=1&frameA=30&clipB=3&frameB=40&blend=0.5`
 - Arco automático: `&arc=1`
@@ -51,7 +64,9 @@ Requer Chrome instalado (usa `playwright-core` com `channel: "chrome"`).
 
 ## Próximos marcos (docs/03 §12)
 
-- M1 — multidão instanciada (1.000+), offset de fase e cor por instância
-- M2 — simulação compute (wander, separação via hash grid, contenção, mouse)
 - M3 — data layer (`content/` fake com contrato do pipeline)
 - M4+ — follow/beats, descoberta, constelação, polimento
+
+Nota de engenharia: a separação hoje é O(N²) na GPU (ok até 4096 agentes,
+~60 fps). O upgrade para **spatial hash grid** (atômicos, WebGPU puro) entra
+quando escalarmos além disso — decisão registrada no doc 03 §5.

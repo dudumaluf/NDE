@@ -25,8 +25,19 @@ Leia antes de qualquer tarefa, nesta ordem:
 - Crossfade entre clipes: dois slots (A/B) amostrados no shader, mix por `blend`;
   fase por instância só em loops (`phaseScale=0` em one-shots → beats síncronos).
 - Multidão: InstancedMesh + InstancedBufferAttribute em BufferGeometry comum;
-  `instanceMatrix` fica em identidade (transform real vem dos atributos);
+  `instanceMatrix` fica em identidade (transform real vem da sim + atributos);
   `mesh.count` controla quantas instâncias desenham (máx. 64×64 = 4096).
+- **WebGPU limita a 8 vertex buffers por pipeline**: por isso a soup NÃO tem
+  atributo de normal (vem da VAT) e cor+escala compartilham um vec4
+  (`iColorScale`). Cuidado ao adicionar novos atributos por instância —
+  prefira storage buffers da sim.
+- Simulação (`src/sim/CrowdSim.ts`): storage buffers (`instancedArray`) de
+  posição/velocidade/direção/fase; render lê via `.toAttribute()` (compatível
+  com WebGL2). Separação é O(N²) com `Loop` — só roda no backend WebGPU
+  (transform feedback não tem acesso aleatório a buffers); hash grid espacial
+  é o upgrade planejado para >4096 agentes.
+- Fase do passo por agente integra a velocidade (`phasePerUnit` frames por
+  unidade percorrida) — o walk cycle gruda no chão em qualquer velocidade.
 
 ## Verificação
 
