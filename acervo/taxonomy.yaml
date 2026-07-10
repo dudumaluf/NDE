@@ -1,0 +1,397 @@
+# Taxonomia canônica de elementos de EQM — LIMIAR
+# PROPOSTA v1 (2026-07-10) — aguardando validação do Dudu antes do extract (A2).
+#
+# Fundamentação: escalas Greyson (1983), NDE-C (2020), WCEI (1980), MEQ-30,
+# CAPS, categorias NDERF — cruzadas com a leitura integral do corpus piloto
+# (17 pessoas, 39 vídeos, ~30h; fichas em notes/fichas-piloto.md).
+#
+# Princípios:
+# - `key` estável (nunca renomear; migração explícita — doc 02 req. 5).
+# - `vocabulario` = exemplos REAIS de como as pessoas do corpus nomeiam o
+#   elemento (alimenta prompts de extração, a Sintonia e o Coro).
+# - Elementos em `emergentes_em_observacao` NÃO são marcados pela passada
+#   fechada; a passada aberta os vigia. Promoção a canônico = editar este
+#   arquivo + `acervo migrate-taxonomy`.
+# - `adjacente: true` = fenômeno biográfico-espiritual fora da EQM nuclear
+#   (o corpus mostrou que toda história é uma biografia, não um episódio).
+
+version: 1
+idioma: pt-BR
+
+dominios:
+  percepcao: "Como se percebe (corpo, visão, espaço)"
+  cenario: "Onde se está (lugares, passagens, limites)"
+  encontros: "Quem se encontra (presenças, comunicação)"
+  cognicao: "O que se sabe e se vê (conhecimento, tempo, revisão)"
+  afeto: "O que se sente (paz, amor, medo, pertença)"
+  retorno: "Como e por que se volta"
+  depois: "O que muda na vida (integração)"
+
+elementos:
+  # ── percepcao ──────────────────────────────────────────────────────────
+  - key: fora_do_corpo
+    label: "Fora do corpo"
+    dominio: percepcao
+    fontes: [greyson, nde-c, nderf]
+    nota: "Universal no piloto (17/17). Formas: em pé ao lado, a distância, de cima, desacoplado (corpo é movido e a visão não acompanha — Luana)."
+    vocabulario:
+      - "eu me vi em pé ao lado da cama"
+      - "eu estava a uns 20 metros observando o meu corpo caindo"
+      - "saí toda redonda e transparente que nem uma bolha de sabão"
+
+  - key: visao_ampliada
+    label: "Visão ampliada"
+    dominio: percepcao
+    fontes: [corpus, caps]
+    nota: "360°/esférica, nitidez impossível (míope enxergando), ver através de paredes, percepção simultânea de pontos distintos."
+    vocabulario:
+      - "um olhar 360 graus"
+      - "via até as gotas da água escorrendo... de forma muito nítida"
+      - "eu vi pelas paredes"
+
+  - key: corpo_como_veiculo
+    label: "O corpo como veículo"
+    dominio: percepcao
+    fontes: [corpus]
+    nota: "Emergente promovido: metáfora transversal (7+ pessoas) que nenhuma escala nomeia — corpo é roupa/máquina/papel que a consciência usa."
+    vocabulario:
+      - "nós vamos desligar ela?"
+      - "a personagem Letícia"
+      - "escafandro"
+      - "a casca"
+
+  - key: instancias_simultaneas
+    label: "Em dois lugares ao mesmo tempo"
+    dominio: percepcao
+    fontes: [corpus]
+    nota: "Emergente promovido: 4+ pessoas (útero+colo+em pé; corpo+espírito+olho; 'vivi nos dois lugares')."
+    vocabulario:
+      - "era como se eu estivesse em dois lugares ao mesmo tempo"
+      - "eu era dentro do útero... no colo... e também em pé"
+      - "sou duas, uma mora de um lado, a outra mora do outro lado"
+
+  - key: tempo_distorcido
+    label: "O tempo é outro"
+    dominio: cognicao
+    fontes: [greyson, meq]
+    vocabulario:
+      - "pra mim foi dias"
+      - "lá o tempo não passa"
+      - "tudo em câmera lenta"
+
+  # ── cenario ────────────────────────────────────────────────────────────
+  - key: passagem
+    label: "A passagem"
+    dominio: cenario
+    fontes: [greyson, nderf]
+    nota: "Túnel/portal/corredor/espiral. ATENÇÃO: o túnel clássico é RARO no piloto (3 explícitos, 3 negações diretas) — não assumir."
+    vocabulario:
+      - "um portal circular, como um túnel"
+      - "um corredor muito longo... infinito"
+      - "eu entrei como se fosse numa espiral"
+
+  - key: fronteira
+    label: "A fronteira"
+    dominio: cenario
+    fontes: [greyson, nderf]
+    nota: "Limite que não se pode cruzar (senão não volta): cortina, teto, delimitação, corredor metálico."
+    vocabulario:
+      - "tinha uma fronteira e eu não podia passar"
+      - "se eu passasse pelo teto, eu não voltaria mais"
+      - "uma cortina de fumaça esbranquiçada"
+
+  - key: luz
+    label: "A luz"
+    dominio: cenario
+    fontes: [greyson, nde-c, nderf]
+    nota: "Raramente 'no fim do túnel': desce como sol, ilumina o quarto, é inalcançável, é meio amarelada, é caminho."
+    vocabulario:
+      - "uma luz muito forte, brilhante, descendo em direção a mim"
+      - "quando eu vi a luz eu não conseguia alcançar"
+      - "um caminho de luz"
+
+  - key: ambiente_realista
+    label: "O mundo de sempre, visto de fora"
+    dominio: cenario
+    fontes: [corpus, caps]
+    nota: "Emergente promovido: a EQM acontece no hospital/praia/quarto real, não em paisagem — às vezes com staff 'inexistente'."
+    vocabulario:
+      - "eu estava na minha própria UTI... ao lado do meu corpo"
+      - "eu não estive em lugar nenhum... estive consciente ali no rio"
+
+  - key: paisagem_de_luz
+    label: "Um lugar que não é daqui"
+    dominio: cenario
+    fontes: [nderf, nde-c]
+    nota: "Jardim, campo, sala branca, céu rosa, espaço cósmico — quando a EQM tem cenário próprio."
+    vocabulario:
+      - "um jardim cheio de girassol"
+      - "era um céu rosa... eu sentia que eu estava em casa"
+      - "uma sala branca redonda"
+
+  - key: visao_cosmica
+    label: "Ver a Terra de fora"
+    dominio: cenario
+    fontes: [corpus, meq]
+    vocabulario:
+      - "já estava vendo a terra lá embaixo"
+      - "eu vi o planeta... coisa mais linda"
+
+  # ── encontros ──────────────────────────────────────────────────────────
+  - key: presencas
+    label: "As presenças"
+    dominio: encontros
+    fontes: [greyson, nde-c, nderf]
+    nota: "Seres/guias/figuras: médico, enfermeira, dupla, anciãos, monitores, mentores, ser grande. Hierarquias percebidas (idade, luminosidade, cuidado)."
+    vocabulario:
+      - "três seres... feitos de luz"
+      - "dois homens... um mais novo e o outro já com uma certa idade"
+      - "a própria ternura materializada"
+
+  - key: parentes_falecidos
+    label: "Os que partiram antes"
+    dominio: encontros
+    fontes: [greyson, nderf]
+    nota: "Inclui o encontro NEGADO (Hudson: pedir para ver a mãe e não poder) — variação significativa."
+    vocabulario:
+      - "Oi, filha! Eu vim te ver"
+      - "será que eu posso ver minha mãe? / não é o momento"
+
+  - key: telepatia
+    label: "Conversar sem palavras"
+    dominio: encontros
+    fontes: [greyson, nde-c]
+    nota: "Modo padrão de comunicação no corpus (12+). Inclui antecipação (saber o que será dito antes da fala — Letícia)."
+    vocabulario:
+      - "a gente se comunicava sem falar"
+      - "é tão mais prático falar pela mente"
+      - "eu ouvia a consciência do médico"
+
+  - key: presenca_perturbadora
+    label: "Presenças que não acolhem"
+    dominio: encontros
+    fontes: [corpus, greyson-angustiante]
+    nota: "Emergente promovido: presença fria/neutra, voz firme ('cala a boca'), seres que testam ou aterrorizam."
+    vocabulario:
+      - "era fria... não tinha amor... 'é só a morte'"
+      - "uma presença masculina tentando me aterrorizar"
+
+  - key: invisibilidade
+    label: "Ninguém me vê"
+    dominio: encontros
+    fontes: [corpus, nderf]
+    vocabulario:
+      - "ninguém me via, ninguém me ouvia, ninguém me escutava"
+      - "eu sabia que elas não podiam me ver"
+
+  # ── cognicao ───────────────────────────────────────────────────────────
+  - key: revisao_de_vida
+    label: "A revisão da vida"
+    dominio: cognicao
+    fontes: [greyson, wcei, nderf]
+    nota: "Formas MUITO variadas: telão, tela de cinema, ficha consultada, revivência gestacional completa, quadros, replay tardio (dias depois — Raí)."
+    vocabulario:
+      - "como se fosse um telão... passando tudo o que eu já tinha vivenciado"
+      - "como uma tela de cinema"
+      - "como se estivessem olhando a minha ficha evolutiva"
+
+  - key: conhecimento_revelado
+    label: "Saber tudo de uma vez"
+    dominio: cognicao
+    fontes: [greyson, meq, nde-c]
+    vocabulario:
+      - "bilhões de perguntas respondidas instantaneamente... como lembrança"
+      - "eu era o conhecimento"
+      - "downloads"
+
+  - key: memoria_pre_encarnacao
+    label: "Antes de vir para cá"
+    dominio: cognicao
+    fontes: [corpus, nderf]
+    nota: "Planejamento pré-vida, reunião, 'programação', memória perinatal. Frequente no corpus (6+), ausente das escalas."
+    vocabulario:
+      - "estávamos planejando a nossa vinda para a Terra"
+      - "eles explicam tudinho... e você aceita"
+
+  - key: premonicao
+    label: "Ver o que ainda não aconteceu"
+    dominio: cognicao
+    fontes: [corpus, caps]
+    nota: "Dentro da EQM (roupa azul da mãe — Selma) ou como sequela dela."
+    vocabulario:
+      - "memória futura"
+      - "eu vi meu velório"
+
+  - key: verificacao_factual
+    label: "Eu vi, e era verdade"
+    dominio: cognicao
+    fontes: [corpus, nde-c]
+    nota: "Percepções verídicas confirmadas depois (4+ no piloto): queimadura, supositório, roupa, telefonema. Peso probatório central para as pessoas."
+    vocabulario:
+      - "quando eu acordei, contei... e tinha acontecido exatamente assim"
+
+  # ── afeto ──────────────────────────────────────────────────────────────
+  - key: paz
+    label: "A paz"
+    dominio: afeto
+    fontes: [greyson, nde-c, nderf]
+    vocabulario:
+      - "uma paz como se eu nunca tivesse sentido antes na minha vida"
+      - "não senti aflição, não senti vontade de respirar"
+
+  - key: amor_incondicional
+    label: "O amor incondicional"
+    dominio: afeto
+    fontes: [nde-c, nderf, meq]
+    vocabulario:
+      - "Eu te amo completamente, inteiramente, exatamente como você é"
+      - "um amor que não dá para explicar com palavras"
+
+  - key: unidade
+    label: "Ser tudo"
+    dominio: afeto
+    fontes: [meq, nde-c]
+    vocabulario:
+      - "como uma gota que você joga no oceano"
+      - "eu era o rio... eu era a pedra"
+      - "não existe mais Luana... eu era o todo"
+
+  - key: familiaridade
+    label: "Eu conheço este lugar"
+    dominio: afeto
+    fontes: [corpus]
+    nota: "Emergente promovido (8+): saudade de origem, 'em casa', 'já estive aqui', reconhecimento — a EQM como retorno, não descoberta. É o bordão do canal ('saudade desse lugar')."
+    vocabulario:
+      - "sinto saudade desse lugar"
+      - "eu não acredito que eu estou aqui de novo"
+      - "é como se eu já existisse lá"
+
+  - key: inefabilidade
+    label: "Não cabe em palavras"
+    dominio: afeto
+    fontes: [greyson, meq]
+    vocabulario:
+      - "não dá para explicar com palavras"
+      - "não coubesse no nosso cérebro terreno"
+
+  - key: experiencia_angustiante
+    label: "O lado difícil"
+    dominio: afeto
+    fontes: [greyson-angustiante, nderf]
+    nota: "Obrigatório por honestidade (doc 00). Formas: escuridão fria, gritos, seres aterrorizantes, inferno visionário, pavor de não ter corpo."
+    vocabulario:
+      - "pessoas gritando... muito grito horrível"
+      - "eu fiquei apavorado por não ter um corpo"
+      - "muita gente, muito sofrimento"
+
+  - key: desapego
+    label: "O corpo não importa mais"
+    dominio: afeto
+    fontes: [corpus, nde-c]
+    nota: "Indiferença ao próprio corpo/vínculos durante a experiência (inclusive ao recém-nascido — Luana; 'até o dia 13 eu não tinha filho' — Márcia)."
+    vocabulario:
+      - "olhei para o meu corpo e não senti apego nenhum"
+      - "lembrava dos filhos... mas aquilo não tinha peso na hora"
+
+  # ── retorno ────────────────────────────────────────────────────────────
+  - key: nao_queria_voltar
+    label: "Não queria voltar"
+    dominio: retorno
+    fontes: [nderf, corpus]
+    vocabulario:
+      - "eu não queria voltar de jeito nenhum"
+      - "mas eu não quero voltar... eu quero ficar aqui"
+
+  - key: retorno_decidido
+    label: "Alguém decide a volta"
+    dominio: retorno
+    fontes: [greyson, nderf, corpus]
+    nota: "O eixo de agência é dado central do corpus: ordem ('não é a hora'), negociação, escolha oferecida (Gilson), rendição paradoxal (aceitar ficar = voltar — Letícia), puxão involuntário (avó — Luana)."
+    vocabulario:
+      - "não... não é a hora ainda dela"
+      - "me deram a oportunidade de voltar... o livre-arbítrio foi meu"
+      - "eu aceito então, vou ficar aqui — e nesse momento eu comecei a voltar"
+
+  - key: reentrada_dolorosa
+    label: "Voltar dói"
+    dominio: retorno
+    fontes: [corpus]
+    nota: "Emergente promovido (8+): o choque de densidade da volta ao corpo."
+    vocabulario:
+      - "como um aspirador me puxando de volta"
+      - "fui sugada de volta... dor em todo o corpo"
+      - "esmagada por toneladas e toneladas de laje"
+
+  - key: missao
+    label: "A missão"
+    dominio: retorno
+    fontes: [nderf, corpus]
+    nota: "Razão da volta (10+): levar conhecimento, ser amor, iluminar. Frequentemente inclui a ordem de CONTAR (às vezes ao próprio canal!)."
+    vocabulario:
+      - "você é um fósforo... precisa ajudar a iluminar a vida de outras pessoas"
+      - "sua missão na Terra é o amor"
+      - "vai, fala com o Carlos porque agora é a hora"
+
+  # ── depois ─────────────────────────────────────────────────────────────
+  - key: transformacao
+    label: "A vida muda"
+    dominio: depois
+    fontes: [greyson, nderf]
+    nota: "Quase universal, MAS com contraexemplo (Selma: 'continuei exatamente a mesma') — nunca assumir."
+    vocabulario:
+      - "a minha vida completamente mudou, da água para o vinho"
+      - "nada era razão para sofrer"
+
+  - key: perda_medo_morte
+    label: "O medo da morte acaba"
+    dominio: depois
+    fontes: [nderf, nde-c]
+    vocabulario:
+      - "você tem medo da morte? De jeito nenhum"
+
+  - key: sensitividade
+    label: "Os sentidos que ficam"
+    dominio: depois
+    fontes: [corpus, caps]
+    nota: "Mediunidade/percepção ampliada pós-EQM (10+): sentir energias, premonições, 'porta entreaberta', 'véu mais fino'."
+    vocabulario:
+      - "a porta ficou aberta"
+      - "o véu ficou mais fino... eu consigo olhar por trás dele"
+
+  - key: estado_de_graca
+    label: "O estado de graça"
+    dominio: depois
+    fontes: [corpus]
+    nota: "Período de êxtase/leveza logo após o retorno (dias a meses — Tânia: 2 meses; Eunice: 1 semana)."
+    vocabulario:
+      - "eu ainda fiquei uma semana em estado de graça"
+
+# ─────────────────────────────────────────────────────────────────────────
+# Motivos emergentes EM OBSERVAÇÃO (a passada aberta vigia; promover quando
+# a frequência no corpus completo justificar):
+emergentes_em_observacao:
+  - velorio_proprio            # Daniela + confirmação do entrevistador de recorrência
+  - cura_energetica            # cirurgia espiritual, sala de tratamento, cálice (Márcia, Amanda, Eunice)
+  - resgate_espiritual         # ajudar espíritos presos (Gilson, Natália)
+  - eqm_prolongada             # dias/semanas contínuos (Amanda 32d, Márcia ~18d)
+  - relato_automatico          # falar no físico durante a inconsciência (Márcia)
+  - revisao_tardia             # telão dias depois, acordado (Raí)
+  - memoria_recuperada         # EQM lembrada via meditação (Hudson)
+  - escala_perceptiva          # gigante/grão ("grãozinho de mostarda")
+  - humor_dos_seres            # risadas, leveza (Daniela, Natália)
+  - toque_que_devolve          # toque na testa/ombro como gatilho de retorno (Daniela)
+  - vida_liminar               # "metade aqui, metade lá" permanente (Gilson)
+  - ponte_enteogeno            # "o mesmo lugar" dos retiros/consagrações (Letícia)
+  - protecao_de_infancia       # presença protetora que some aos ~7 anos (Daniela, Carmen)
+  - oracao_como_forca          # orações alheias sentidas/atuantes (Hudson, Amanda, Luana)
+
+# Fenômenos ADJACENTES (biografia espiritual; taggeáveis fora da EQM nuclear):
+adjacentes:
+  - projecao_astral
+  - sonho_lucido
+  - memoria_perinatal
+  - vidas_passadas
+  - contato_extraterrestre
+  - deslizamento_temporal
+  - premonicao_cotidiana
+  - visao_de_catastrofe

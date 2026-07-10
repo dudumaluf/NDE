@@ -19,9 +19,10 @@
 | M2 | **Simulação compute**: wander (curl noise), separação (ninguém atravessa ninguém), contenção, mouse atrai/repele, giro suave, passo acoplado à velocidade | ✔ tag `m2` |
 | Design | UX de consumo consolidado (`Docs/04`) + dossiê curadoria (`Docs/05`) | ✔ 2026-07-10 |
 | A0 | `acervo` scaffolding + `scan` + `fetch` (597 vídeos na fila, 6 áudios baixados) | ✔ tag `a0` |
-| A1 | `acervo transcribe` (fal wizper, pt, segmentos ~30s) — 6 vídeos transcritos (~4h45 de áudio), qualidade PT excelente | ✔ tag `a1` |
-| A2 | Schema `person.json` (com agrupamento vídeo→pessoa!) + `extract` via any-llm + taxonomy v1 | ⬅ **próximo** |
-| A3–A5 | analyze/export → review UI → piloto 10–20 vídeos | pendente |
+| A1 | `acervo transcribe` (fal wizper, pt, segmentos ~30s) — **39 vídeos transcritos (~30h de áudio)**, qualidade PT excelente | ✔ tag `a1` |
+| A1.5 | **Leitura qualitativa do piloto completo**: 17 pessoas fichadas (`acervo/notes/fichas-piloto.md`) + **proposta de taxonomia v1** (`acervo/taxonomy.yaml`) | ✔ aguardando validação do Dudu |
+| A2 | Schema `person.json` (agrupamento vídeo→pessoa, N experiências, epistemologia do relato, link entre entrevistas) + `extract` via any-llm | ⬅ **próximo** |
+| A3–A5 | analyze/export → review UI → fechamento do piloto | pendente |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
@@ -73,7 +74,16 @@ playback, limite de 8 vertex buffers do WebGPU, etc.
 - FAL_KEY configurada no `acervo/.env` (gitignored; NUNCA no .env.example).
 - **Limitação registrada**: wizper só dá `chunk_level=segment` (~30s) — ok
   para beats; se A2 exigir word-level, trocar model para `fal-ai/whisper`.
-- Conferir custo real do A1 no dashboard do fal (billing) — ~285 min de áudio.
+- Conferir custo real no dashboard do fal (billing) — ~30h de áudio no total.
+- **Dudu validar a taxonomia v1** (`acervo/taxonomy.yaml`) antes do extract.
+- **Achados do piloto que mudam o A2** (detalhes em `acervo/notes/fichas-piloto.md`):
+  túnel clássico é raro (não assumir clichês — confirmado); toda história é
+  biografia com N experiências (schema precisa de experiências múltiplas +
+  tags adjacentes); pessoas recorrentes entre entrevistas (Gilson, 3ª);
+  epistemologia do relato varia (direto/meditação/lido); diarização vale o
+  custo no corpus completo (entrevistador nomeia fenômenos antes da pessoa);
+  nomes vêm do título, não do áudio (ASR erra); eixo de agência no retorno
+  (forçado/negociado/escolhido/rendição) é dado central.
 - **Descoberta do A0 que muda o A2**: o canal tem **597 vídeos** (não 136) e
   depoimentos longos são divididos em partes ("1/3", "2/3"…) — uma pessoa
   pode ser vários vídeos. O schema `person.json` precisa de agrupamento
