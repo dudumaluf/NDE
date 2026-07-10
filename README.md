@@ -29,8 +29,14 @@ WebGPU quando disponível, fallback WebGL2 automático.
 ## Método de trabalho
 
 Desenvolvimento por marcos (Doc 03 §12), um commit + tag por marco
-(`m0`, `m1`, …). Agentes de IA: ler `limiar-experience/AGENTS.md` antes
-de qualquer tarefa.
+(`m0`, `m1`, …). Agentes de IA: ler `AGENTS.md` (raiz) antes de qualquer
+tarefa — ele aponta a ordem de leitura completa.
+
+## Retomando o trabalho (nesta ou em outra máquina)
+
+O estado vivo do projeto está em **`STATUS.md`**: onde estamos, decisões,
+pendências e o passo a passo para continuar num PC novo. O conhecimento do
+projeto vive no repositório, não em nenhum chat.
 
 ## Ética
 
