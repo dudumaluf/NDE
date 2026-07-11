@@ -82,7 +82,17 @@ def upsert_grouped(cfg: AcervoConfig, slug: str, group: dict, channel: str) -> P
 
 
 def merge_extractions(person: Person, extractions: list[VideoExtraction]) -> Person:
-    """Agrega as extrações das partes no documento da pessoa."""
+    """Agrega as extrações das partes no documento da pessoa.
+
+    Respeita `review.locked_fields`: campos editados manualmente na UI nunca
+    são sobrescritos por reprocessamento (doc 02 §9)."""
+    locked = set(person.review.locked_fields)
+    keep = {
+        "one_liner": person.summary.one_liner,
+        "short": person.summary.short,
+        "display_name": person.person.display_name,
+        "elements": [e.model_copy(deep=True) for e in person.elements],
+    }
     part_of = {s.video_id: s.part for s in person.sources}
     extractions = sorted(extractions, key=lambda e: part_of.get(e.video_id, 99))
 
@@ -142,4 +152,14 @@ def merge_extractions(person: Person, extractions: list[VideoExtraction]) -> Per
     ]
     if person.status == "grouped":
         person.status = "extracted"
+
+    # restaura o que a curadoria travou
+    if "summary.one_liner" in locked:
+        person.summary.one_liner = keep["one_liner"]
+    if "summary.short" in locked:
+        person.summary.short = keep["short"]
+    if "person.display_name" in locked:
+        person.person.display_name = keep["display_name"]
+    if "elements" in locked:
+        person.elements = keep["elements"]
     return person

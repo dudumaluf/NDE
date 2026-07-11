@@ -129,6 +129,7 @@ def transcribe(
     all_: bool = typer.Option(False, "--all", help="Transcreve todos os fetched."),
     limit: int = typer.Option(0, help="Máximo de vídeos nesta execução."),
     force: bool = typer.Option(False, "--force", help="Re-transcreve mesmo se já existir."),
+    workers: int = typer.Option(3, help="Transcrições em paralelo."),
 ) -> None:
     """Transcreve os vídeos baixados (config: modelo, word-level, diarização)."""
     from . import transcribe as tr
@@ -155,31 +156,45 @@ def transcribe(
         console.print("Nada a transcrever — rode fetch antes ou fila já processada.")
         return
 
-    ok, failed = 0, 0
-    for video_id in queue:
-        if tr.has_transcript(cfg, video_id) and not force:
-            dbm.advance_status(conn, video_id, "transcribed")
-            conn.commit()
-            console.print(f"[dim]{video_id} já transcrito — pulando (idempotente)[/dim]")
-            ok += 1
-            continue
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    conn.close()  # cada worker abre a própria conexão (sqlite × threads)
+
+    def worker(video_id: str) -> tuple[str, str, str]:
+        wconn = dbm.connect(cfg.db_path())
         try:
-            console.print(f"Transcrevendo {video_id} … ({cfg.transcribe.model})")
+            if tr.has_transcript(cfg, video_id) and not force:
+                dbm.advance_status(wconn, video_id, "transcribed")
+                wconn.commit()
+                return video_id, "skip", "já transcrito"
             summary = tr.transcribe_video(cfg, video_id)
-            dbm.advance_status(conn, video_id, "transcribed")
-            conn.commit()
-            console.print(
-                f"[green]ok[/green] {video_id} · {summary['chars']} chars · "
+            dbm.advance_status(wconn, video_id, "transcribed")
+            wconn.commit()
+            msg = (
                 f"{summary['segments']} segmentos · {summary['words']} palavras · "
-                f"{summary['speakers']} falantes · áudio até {summary['last_end']}s · "
-                f"{summary['elapsed_s']}s de processamento"
+                f"{summary['speakers']} falantes · {summary['elapsed_s']}s"
             )
-            ok += 1
+            return video_id, "ok", msg
         except Exception as exc:  # noqa: BLE001 — registrar e seguir (resumível)
-            dbm.set_error(conn, video_id, str(exc))
-            conn.commit()
-            console.print(f"[red]falhou[/red] {video_id}: {exc}")
-            failed += 1
+            dbm.set_error(wconn, video_id, str(exc))
+            wconn.commit()
+            return video_id, "fail", str(exc)[:200]
+        finally:
+            wconn.close()
+
+    ok, failed = 0, 0
+    console.print(f"Transcrevendo {len(queue)} vídeos ({workers} em paralelo, {cfg.transcribe.model}) …")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(worker, vid): vid for vid in queue}
+        for fut in as_completed(futures):
+            vid, st, msg = fut.result()
+            if st == "fail":
+                failed += 1
+                console.print(f"[red]falhou[/red] {vid}: {msg}")
+            else:
+                ok += 1
+                style = "dim" if st == "skip" else "green"
+                console.print(f"[{style}]{st}[/{style}] {vid} · {msg}")
 
     console.print(f"\n[bold]{ok} ok · {failed} falhas[/bold]")
     if failed:
@@ -223,6 +238,7 @@ def extract(
     limit: int = typer.Option(0, help="Máximo de pessoas nesta execução."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Só estima tokens/custo (req. 4)."),
     force: bool = typer.Option(False, "--force", help="Ignora cache de extração por vídeo."),
+    workers: int = typer.Option(3, help="Pessoas em paralelo."),
 ) -> None:
     """Extrai beats/elementos/quotes por pessoa (fal openrouter/router, 2 passadas)."""
     from . import extract as ex
@@ -262,13 +278,12 @@ def extract(
         console.print_json(json.dumps(est, ensure_ascii=False))
         return
 
-    ok, failed = 0, 0
-    for p in persons:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def worker(p) -> tuple[str, str, str]:
         try:
-            console.print(f"[bold]{p.person.display_name}[/bold] ({len(p.sources)} partes)")
             extractions = []
             for s in sorted(p.sources, key=lambda s: s.part):
-                console.print(f"  extraindo {s.video_id} (parte {s.part}/{s.parts_total}) …")
                 meta = {
                     "video_id": s.video_id,
                     "person_name": p.person.display_name,
@@ -276,23 +291,30 @@ def extract(
                     "parts_total": s.parts_total,
                     "title": s.title,
                 }
-                extv = ex.extract_video(cfg, tax, meta, force=force)
-                console.print(
-                    f"    [green]ok[/green] {len(extv.elements)} elementos · "
-                    f"{len(extv.beats)} beats · {len(extv.emergent_motifs)} motivos · "
-                    f"{extv.quotes_rejected} quotes rejeitadas"
-                )
-                extractions.append(extv)
+                extractions.append(ex.extract_video(cfg, tax, meta, force=force))
             merged = ppl.merge_extractions(p, extractions)
             ppl.save_person(cfg, merged)
-            console.print(
-                f"  [green]pessoa ok[/green] → {len(merged.elements)} elementos únicos, "
-                f"tom {merged.tone.valence}\n"
+            rejected = sum(e.quotes_rejected for e in extractions)
+            return p.id, "ok", (
+                f"{len(merged.elements)} elementos · "
+                f"{sum(len(e.beats) for e in extractions)} beats · "
+                f"tom {merged.tone.valence} · {rejected} quotes rejeitadas"
             )
-            ok += 1
         except Exception as exc:  # noqa: BLE001 — resumível
-            console.print(f"  [red]falhou[/red] {p.id}: {exc}\n")
-            failed += 1
+            return p.id, "fail", str(exc)[:220]
+
+    ok, failed = 0, 0
+    console.print(f"Extraindo {len(persons)} pessoas ({workers} em paralelo, {cfg.extract.model}) …")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(worker, p): p.id for p in persons}
+        for fut in as_completed(futures):
+            pid, st, msg = fut.result()
+            if st == "fail":
+                failed += 1
+                console.print(f"[red]falhou[/red] {pid}: {msg}")
+            else:
+                ok += 1
+                console.print(f"[green]pessoa ok[/green] {pid} · {msg}")
 
     console.print(f"[bold]{ok} pessoas ok · {failed} falhas[/bold]")
     if failed:
