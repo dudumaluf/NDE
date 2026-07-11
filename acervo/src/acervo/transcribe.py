@@ -39,24 +39,46 @@ def has_transcript(cfg: AcervoConfig, video_id: str) -> bool:
     return transcript_path(cfg, video_id).exists()
 
 
+TRANSCRIBE_DEADLINE_S = 1500  # 25 min por vídeo (upload + fila + inferência)
+
+
 def _transcribe_fal(cfg: AcervoConfig, audio: Path) -> dict[str, Any]:
+    """Upload + submit + polling com deadline — conexão pendurada não trava
+    mais o batch (aprendido na prática: 2 travamentos em batches longos)."""
     import fal_client
 
     if not os.environ.get("FAL_KEY"):
         raise RuntimeError("FAL_KEY ausente — copie .env.example para .env e preencha.")
 
-    audio_url = fal_client.upload_file(str(audio))
-    arguments: dict[str, Any] = {
-        "audio_url": audio_url,
-        "task": "transcribe",
-        "language": cfg.transcribe.language,
-        "chunk_level": cfg.transcribe.chunk_level,
-    }
-    if cfg.transcribe.diarize:
-        arguments["diarize"] = True
-    if cfg.transcribe.prompt:
-        arguments["prompt"] = cfg.transcribe.prompt
-    return fal_client.subscribe(cfg.transcribe.model, arguments=arguments)
+    last: Exception | None = None
+    for attempt in range(3):
+        try:
+            audio_url = fal_client.upload_file(str(audio))
+            arguments: dict[str, Any] = {
+                "audio_url": audio_url,
+                "task": "transcribe",
+                "language": cfg.transcribe.language,
+                "chunk_level": cfg.transcribe.chunk_level,
+            }
+            if cfg.transcribe.diarize:
+                arguments["diarize"] = True
+            if cfg.transcribe.prompt:
+                arguments["prompt"] = cfg.transcribe.prompt
+
+            handle = fal_client.submit(cfg.transcribe.model, arguments=arguments)
+            deadline = time.time() + TRANSCRIBE_DEADLINE_S
+            while time.time() < deadline:
+                status = handle.status(with_logs=False)
+                if isinstance(status, fal_client.Completed):
+                    return handle.get()
+                time.sleep(5)
+            raise TimeoutError(
+                f"transcrição excedeu {TRANSCRIBE_DEADLINE_S}s (request {handle.request_id})"
+            )
+        except Exception as exc:  # noqa: BLE001 — retry consciente
+            last = exc
+            time.sleep(8 * (attempt + 1))
+    raise RuntimeError(f"transcrição falhou após 3 tentativas: {last}")
 
 
 # ── derivação de estrutura (v2) ──────────────────────────────────────────

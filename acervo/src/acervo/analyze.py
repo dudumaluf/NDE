@@ -41,8 +41,29 @@ def get_model(cfg: AcervoConfig):
     return _model_cache[name]
 
 
-def person_document(p: Person) -> str:
-    """Representação semântica da história (cabe no contexto do bge-m3)."""
+def person_document(p: Person, cfg: AcervoConfig | None = None) -> str:
+    """Representação semântica da história.
+
+    Preferência (experimento notes/exp_embeddings.py, 2026-07-11): a VOZ DA
+    DEPOENTE pura (segments do main_speaker) — remove as perguntas do
+    entrevistador, idênticas em todas as entrevistas, que homogeneízam o
+    corpus. Fallback: composto de summaries+quotes (transcripts v1)."""
+    if cfg is not None:
+        chunks: list[str] = []
+        for s in p.sources:
+            tp = cfg.data_dir() / s.video_id / "transcript.json"
+            if not tp.exists():
+                continue
+            t = json.loads(tp.read_text(encoding="utf-8"))
+            main = t.get("main_speaker")
+            if main:
+                chunks += [
+                    seg["text"] for seg in t.get("segments", [])
+                    if seg.get("speaker") == main
+                ]
+        if chunks:
+            return " ".join(chunks)[:24000]
+
     parts = [p.summary.one_liner, p.summary.short]
     parts += [f"{e.key}" for e in p.elements]
     parts += [q.text for e in p.elements for q in e.quotes]
@@ -74,9 +95,9 @@ def element_signature(persons: list[Person]) -> np.ndarray:
 
 
 def embed_people(cfg: AcervoConfig, persons: list[Person]) -> np.ndarray:
-    """Híbrido: 40% semântica do texto + 60% assinatura de elementos (IDF)."""
+    """Híbrido: 40% semântica (voz da depoente) + 60% assinatura IDF."""
     model = get_model(cfg)
-    docs = [person_document(p) for p in persons]
+    docs = [person_document(p, cfg) for p in persons]
     text = np.asarray(model.encode(docs, normalize_embeddings=True, show_progress_bar=False))
     sig = element_signature(persons)
     return np.hstack([0.4 * text, 0.6 * sig])
