@@ -344,6 +344,15 @@ def status() -> None:
 
 
 @app.command()
+def review(port: int = typer.Option(8777, help="Porta do servidor local.")) -> None:
+    """Sobe a UI local de revisão (dashboard, pessoas, áudio, aprovar/editar)."""
+    from . import review as rv
+
+    console.print(f"[bold]acervo review[/bold] → http://localhost:{port}  (Ctrl+C para sair)")
+    rv.run(port)
+
+
+@app.command()
 def meta(video_id: str) -> None:
     """Mostra o meta.json de um vídeo baixado."""
     cfg = load_config()

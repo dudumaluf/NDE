@@ -23,7 +23,8 @@
 | A1.5 | **Leitura qualitativa do piloto completo**: 17 pessoas fichadas (`acervo/notes/fichas-piloto.md`) + **proposta de taxonomia v1** (`acervo/taxonomy.yaml`) | ✔ aguardando validação do Dudu |
 | A2 | Schema pessoa + `group` (17 pessoas) + `extract` 2 passadas (openrouter/router + claude-sonnet-4.5): **17/17 extraídas, 1779 quotes literais validadas, 725 beats, 341 motivos emergentes** (custo real ~US$7,2) | ✔ tag `a2` |
 | A3 | `analyze` (embeddings locais, UMAP, HDBSCAN, grafo, stats, **clustering dos 343 motivos emergentes**) + `export/` | ⬅ **próximo** — destrava o M3 do app com dados reais |
-| A4–A5 | review UI → fechamento do piloto | pendente |
+| A4 (adiantado) | **UI de revisão no ar**: `acervo review` → http://localhost:8777 — dashboard da fila/custos, cards das 17 pessoas, página por pessoa (players por parte, timeline de beats colorida, quotes que tocam no clique, aprovar/anonimizar/editar com locked_fields) | ✔ v1 |
+| A3 + A5 | analyze/export → fechamento do piloto | ⬅ próximo |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
@@ -152,6 +153,11 @@ corpus validadas: `corpo_como_veiculo` 16/17, `familiaridade` 16/17,
   sliders todos no painel leva. FPS headless é enganoso (ambiente lento);
   medir no navegador de verdade.
 - Preencher contato (e-mail/site) no `Docs/05-dossie-curadoria.md`.
+- **Revisar as pessoas na UI só DEPOIS do batch premium terminar** (o merge
+  da re-extração sobrescreve elements/summary; gap conhecido: o merge ainda
+  não respeita `locked_fields` — corrigir no fechamento do A4).
+- Batch premium (re-transcrição word+diarize + re-extração v2) em andamento
+  — ~US$ 22 estimados; conferir custo real no dashboard do fal ao final.
 - `faceFlip` default parece correto (pessoas de costas quando se afastam),
   mas conferir em movimento; há toggle no painel.
 - Warning `THREE.Clock deprecated` no console — cosmético, ignorar.

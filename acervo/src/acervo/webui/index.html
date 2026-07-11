@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>acervo — revisão</title>
+<style>
+  :root {
+    --bg: #101114; --panel: #17181c; --panel2: #1d1f24; --line: #2a2c33;
+    --tx: #d8d9dd; --dim: #8b8d95; --faint: #5a5c64;
+    --pos: #7fb58a; --ang: #b5807f; --mix: #b0a27f; --acc: #8a94c9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--tx);
+         font: 14px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+  header.top { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
+  header.top h1 { font-size: 17px; letter-spacing: .22em; font-weight: 600; margin: 0; }
+  header.top .sub { color: var(--dim); font-size: 12.5px; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 26px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 14px; min-width: 110px; }
+  .stat b { display: block; font-size: 19px; font-weight: 600; }
+  .stat span { color: var(--dim); font-size: 11.5px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 14px 15px; cursor: pointer; transition: border-color .15s; }
+  .card:hover { border-color: var(--acc); }
+  .card h3 { margin: 0 0 2px; font-size: 14.5px; font-weight: 600; }
+  .card .meta { color: var(--dim); font-size: 11.5px; margin-bottom: 8px; }
+  .card p { color: var(--dim); font-size: 12px; margin: 0; display: -webkit-box;
+            -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .badge { display: inline-block; border-radius: 99px; padding: 1px 9px; font-size: 10.5px;
+           border: 1px solid var(--line); color: var(--dim); margin-right: 5px; }
+  .badge.reviewed { color: var(--pos); border-color: var(--pos); }
+  .badge.mista { color: var(--mix); border-color: #4a4436; }
+  .badge.positiva { color: var(--pos); border-color: #34493a; }
+  .badge.angustiante { color: var(--ang); border-color: #4a3636; }
+  /* pessoa */
+  .back { color: var(--dim); font-size: 12.5px; display: inline-block; margin-bottom: 14px; cursor: pointer; }
+  .back:hover { color: var(--tx); }
+  .phead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .phead h2 { margin: 0; font-size: 21px; font-weight: 650; }
+  .actions { margin-left: auto; display: flex; gap: 8px; }
+  button { background: var(--panel2); color: var(--tx); border: 1px solid var(--line);
+           border-radius: 7px; padding: 6px 13px; font-size: 12.5px; cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  button.primary { border-color: var(--pos); color: var(--pos); }
+  .oneliner { width: 100%; background: transparent; border: 1px solid transparent; color: var(--dim);
+              font-size: 13px; padding: 4px 6px; border-radius: 6px; }
+  .oneliner:focus { border-color: var(--line); background: var(--panel); outline: none; color: var(--tx); }
+  section { margin-top: 26px; }
+  section > h4 { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase;
+                 color: var(--faint); margin: 0 0 10px; }
+  .part { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 12px 14px; margin-bottom: 10px; }
+  .part .t { font-size: 12.5px; color: var(--dim); margin-bottom: 8px; }
+  audio { width: 100%; height: 34px; }
+  .beats { display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .beats div { height: 100%; cursor: pointer; opacity: .85; }
+  .beats div:hover { opacity: 1; }
+  .legend { display: flex; gap: 12px; margin-top: 6px; font-size: 10.5px; color: var(--dim); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+  .el { border-top: 1px solid var(--line); padding: 9px 2px; }
+  .el .row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .el .key { font-weight: 600; font-size: 13px; }
+  .el .conf { color: var(--faint); font-size: 11px; }
+  .el .n { color: var(--dim); font-size: 11px; margin-left: auto; }
+  .el .del { visibility: hidden; color: var(--ang); background: none; border: none; font-size: 12px; }
+  .el:hover .del { visibility: visible; }
+  .quotes { display: none; padding: 6px 0 2px 12px; }
+  .el.open .quotes { display: block; }
+  .q { padding: 6px 10px; border-left: 2px solid var(--line); margin-bottom: 6px; cursor: pointer;
+       color: var(--dim); font-size: 12.5px; font-style: italic; }
+  .q:hover { border-color: var(--acc); color: var(--tx); }
+  .q .ts { color: var(--faint); font-style: normal; font-size: 10.5px; margin-left: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px;
+          font-size: 11.5px; color: var(--dim); }
+  .attn { color: var(--mix); font-size: 12px; }
+  .empty { color: var(--faint); padding: 60px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty">carregando…</div></div>
+<script>
+const BEAT_COLORS = { contexto:"#3d4047", evento_morte:"#7d4a4a", eqm:"#4a5a7d",
+                      retorno:"#4a6b52", integracao:"#6b5e46", outro:"#26282e" };
+const $app = document.getElementById("app");
+const fmt = s => { const m = Math.floor(s/60), ss = Math.floor(s%60); return `${m}:${String(ss).padStart(2,"0")}`; };
+const esc = s => (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function j(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+
+async function home() {
+  const [ov, people] = await Promise.all([j("/api/overview"), j("/api/people")]);
+  const v = ov.videos, p = ov.people;
+  $app.innerHTML = `
+    <header class="top"><h1>ACERVO</h1><span class="sub">${esc(ov.channel||"")} · revisão do corpus</span></header>
+    <div class="stats">
+      <div class="stat"><b>${(v.transcribed||0)+(v.extracted||0)}</b><span>vídeos processados</span></div>
+      <div class="stat"><b>${v.raw||0}</b><span>vídeos na fila</span></div>
+      <div class="stat"><b>${Object.values(p).reduce((a,b)=>a+b,0)}</b><span>pessoas</span></div>
+      <div class="stat"><b>${p.reviewed||0}</b><span>revisadas</span></div>
+      <div class="stat"><b>$${ov.llm_cost_est_usd}</b><span>LLM (estimado)</span></div>
+    </div>
+    <div class="grid">${people.map(card).join("")}</div>`;
+  document.querySelectorAll(".card").forEach(c =>
+    c.addEventListener("click", () => { location.hash = "#/p/" + c.dataset.id; }));
+}
+
+function card(p) {
+  return `<div class="card" data-id="${p.id}">
+    <h3>${esc(p.anonymized ? "Anônima" : p.name)}</h3>
+    <div class="meta">${p.parts} partes · ${p.duration_min} min · ${p.elements} elementos</div>
+    <div style="margin-bottom:8px">
+      <span class="badge ${p.tone}">${p.tone}</span>
+      <span class="badge ${p.status==="reviewed"?"reviewed":""}">${p.status}</span>
+      ${p.needs_attention ? `<span class="badge">⚠ ${p.needs_attention}</span>` : ""}
+    </div>
+    <p>${esc(p.one_liner)}</p></div>`;
+}
+
+let players = {};
+async function person(slug) {
+  const p = await j("/api/people/" + slug);
+  players = {};
+  const partHtml = p.sources.map(s => {
+    const beats = p.beats.filter(b => b.video_id === s.video_id);
+    const dur = s.duration_s || Math.max(...beats.map(b => b.end), 1);
+    return `<div class="part">
+      <div class="t">Parte ${s.part}/${s.parts_total} · ${fmt(dur)} · <a href="${esc(s.url)}" target="_blank" style="color:var(--acc)">YouTube ↗</a></div>
+      ${s.audio_url ? `<audio controls preload="none" id="au-${s.video_id}" src="${s.audio_url}"></audio>` : `<div class="attn">sem áudio local</div>`}
+      <div class="beats" title="beats">${beats.map(b =>
+        `<div style="width:${((b.end-b.start)/dur*100).toFixed(2)}%;background:${BEAT_COLORS[b.type]||"#333"}"
+              title="${b.type} ${fmt(b.start)}–${fmt(b.end)} — ${esc(b.summary)}"
+              onclick="seek('${s.video_id}',${b.start})"></div>`).join("")}</div>
+    </div>`;
+  }).join("");
+
+  $app.innerHTML = `
+    <span class="back" onclick="location.hash=''">← acervo</span>
+    <div class="phead">
+      <h2>${esc(p.person.anonymized ? "Anônima" : p.person.display_name)}</h2>
+      <span class="badge ${p.tone.valence}">${p.tone.valence}</span>
+      <span class="badge ${p.status==="reviewed"?"reviewed":""}">${p.status}</span>
+      <div class="actions">
+        <button onclick="anon('${p.id}')">${p.person.anonymized ? "des-anonimizar" : "anonimizar"}</button>
+        ${p.status === "reviewed"
+          ? `<button onclick="unapprove('${p.id}')">reabrir</button>`
+          : `<button class="primary" onclick="approve('${p.id}')">aprovar ✓</button>`}
+      </div>
+    </div>
+    <div class="meta" style="color:var(--dim);font-size:12px">
+      ${p.person.cause_category} · ${p.person.age_at_event ? p.person.age_at_event + " anos na época · " : ""}memória: ${p.report_epistemology}
+      ${p.needs_attention.length ? ` · <span class="attn">⚠ ${p.needs_attention.join(" · ")}</span>` : ""}
+    </div>
+    <input class="oneliner" value="${esc(p.summary.one_liner)}" placeholder="one-liner…"
+           onchange="save('${p.id}', {one_liner: this.value})" />
+    <div class="legend">${Object.entries(BEAT_COLORS).map(([k,c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("")}</div>
+    <section><h4>Áudio & beats</h4>${partHtml}</section>
+    <section><h4>Elementos (${p.elements.length})</h4>
+      ${p.elements.map((e,i) => `<div class="el" id="el-${i}">
+        <div class="row" onclick="document.getElementById('el-${i}').classList.toggle('open')">
+          <span class="key">${e.key}</span><span class="conf">${(e.confidence*100).toFixed(0)}%</span>
+          <span class="n">${e.quotes.length} quote${e.quotes.length>1?"s":""}</span>
+          <button class="del" onclick="event.stopPropagation();removeEl('${p.id}','${e.key}')">remover</button>
+        </div>
+        <div class="quotes">${e.quotes.map(q =>
+          `<div class="q" onclick="seek('${q.video_id}',${q.start ?? 0})">“${esc(q.text)}”
+             <span class="ts">${q.start != null ? fmt(q.start) : "?"} · ${q.video_id}</span></div>`).join("")}</div>
+      </div>`).join("")}
+    </section>
+    <section><h4>Motivos emergentes (${p.emergent_motifs.length})</h4>
+      ${p.emergent_motifs.map((m,i) => `<div class="el" id="mo-${i}">
+        <div class="row" onclick="document.getElementById('mo-${i}').classList.toggle('open')">
+          <span class="key" style="color:var(--mix)">${esc(m.label)}</span>
+          <span class="n">${m.quotes.length}</span></div>
+        <div class="quotes">${m.quotes.map(q =>
+          `<div class="q" onclick="seek('${q.video_id}',${q.start ?? 0})">“${esc(q.text)}”
+             <span class="ts">${q.start != null ? fmt(q.start) : "?"}</span></div>`).join("")}</div>
+      </div>`).join("")}
+    </section>
+    ${p.adjacent_tags.length ? `<section><h4>Adjacentes</h4>
+      <div class="chips">${p.adjacent_tags.map(t => `<span class="chip">${t}</span>`).join("")}</div></section>` : ""}
+    <section><h4>Resumo</h4>
+      <textarea class="oneliner" rows="4" style="resize:vertical"
+        onchange="save('${p.id}', {short: this.value})">${esc(p.summary.short)}</textarea>
+    </section>`;
+}
+
+window.seek = (vid, t) => {
+  const au = document.getElementById("au-" + vid);
+  if (!au) return;
+  au.currentTime = Math.max(0, t - 0.4);
+  au.play();
+  au.scrollIntoView({ behavior: "smooth", block: "center" });
+};
+window.approve  = async slug => { await j(`/api/people/${slug}/approve`,  { method: "POST" }); person(slug); };
+window.unapprove= async slug => { await j(`/api/people/${slug}/unapprove`,{ method: "POST" }); person(slug); };
+window.anon     = async slug => { await j(`/api/people/${slug}/anonymize`,{ method: "POST" }); person(slug); };
+window.save     = async (slug, body) => j(`/api/people/${slug}`, { method: "PATCH",
+  headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+window.removeEl = async (slug, key) => {
+  if (!confirm(`Remover o elemento "${key}" desta pessoa?`)) return;
+  await save(slug, { remove_element: key }); person(slug);
+};
+
+function route() {
+  const m = location.hash.match(/^#\/p\/(.+)$/);
+  (m ? person(m[1]) : home()).catch(e => { $app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; });
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
