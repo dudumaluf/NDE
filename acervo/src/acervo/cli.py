@@ -344,6 +344,45 @@ def status() -> None:
 
 
 @app.command()
+def analyze(
+    no_names: bool = typer.Option(False, "--no-names", help="Pula a nomeação de clusters via LLM."),
+) -> None:
+    """Embeddings, layout UMAP 3D/2D, clusters, grafo, co-ocorrências, temas de motivos."""
+    from .analyze import run_analysis
+
+    cfg = load_config()
+    console.print(f"Analisando corpus… (modelo: {cfg.embeddings.model}, local)")
+    result = run_analysis(cfg, with_names=not no_names)
+    console.print(
+        f"[green]ok[/green] {len(result['people'])} pessoas · "
+        f"{len(result['clusters'])} núcleos · {len(result['edges'])} fios · "
+        f"{len(result['motif_themes'])} temas emergentes transversais"
+    )
+    for c in result["clusters"]:
+        console.print(f"  núcleo {c['id']}: [bold]{c['label']}[/bold] ({c['size']} pessoas)")
+
+
+@app.command()
+def export(
+    allow_unreviewed: bool = typer.Option(
+        False, "--allow-unreviewed", help="Exporta pessoas não revisadas (prototipagem)."
+    ),
+    no_audio: bool = typer.Option(False, "--no-audio", help="Pula os cortes de áudio."),
+) -> None:
+    """Gera o export/ completo (contrato com a experiência 3D, doc 02 §10)."""
+    from .export import run_export
+
+    cfg = load_config()
+    console.print("Gerando export/ …")
+    manifest = run_export(cfg, allow_unreviewed=allow_unreviewed, with_audio=not no_audio)
+    c = manifest["counts"]
+    console.print(
+        f"[green]ok[/green] {c['people']} pessoas · {c['beats']} beats · "
+        f"hash {manifest['content_hash']} → {cfg.root / cfg.paths.export}"
+    )
+
+
+@app.command()
 def review(port: int = typer.Option(8777, help="Porta do servidor local.")) -> None:
     """Sobe a UI local de revisão (dashboard, pessoas, áudio, aprovar/editar)."""
     from . import review as rv

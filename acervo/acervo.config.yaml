@@ -31,7 +31,7 @@ extract:
 
 embeddings:
   backend: local
-  model: intfloat/multilingual-e5-large
+  model: BAAI/bge-m3   # premium: multilíngue, contexto 8k (e5-large como alternativa)
 
 analyze:
   umap_random_state: 42

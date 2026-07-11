@@ -2,7 +2,7 @@
 name = "acervo"
 version = "0.1.0"
 description = "LIMIAR — pipeline de dados: transforma os depoimentos do canal em um dataset padronizado (ver Docs/02)"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"  # numba/llvmlite (UMAP) ainda não suportam 3.13+
 dependencies = [
     "typer>=0.15",
     "rich>=13",
@@ -14,6 +14,13 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "fastapi>=0.139.0",
     "uvicorn>=0.51.0",
+    "numba>=0.60",
+    "llvmlite>=0.43",
+    "sentence-transformers>=5.6.0",
+    "umap-learn>=0.5.12",
+    "networkx>=3.6.1",
+    "numpy>=2.4.6",
+    "scikit-learn>=1.9.0",
 ]
 
 [project.scripts]
