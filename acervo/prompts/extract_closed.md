@@ -45,7 +45,9 @@ REGRAS INEGOCIÁVEIS:
 - Vídeo: {video_id} — parte {part} de {parts_total}
 - Título: {title}
 
-## Transcrição (cada linha: [segundos_de_início] texto do segmento)
+## Transcrição (cada linha: [segundos_de_início] [falante?] texto do segmento)
+
+{speaker_note}
 
 {transcript_block}
 

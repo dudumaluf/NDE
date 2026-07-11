@@ -14,11 +14,15 @@ fetch:
   audio_format: "m4a" # bestaudio nesse container; cai para o melhor disponível
 
 transcribe:
-  backend: fal          # fal | local
-  model: fal-ai/wizper  # rápido/barato; só aceita chunk_level=segment (verificado)
+  backend: fal           # fal | local
+  # MODO PREMIUM (decisão 2026-07-10): whisper clássico com timestamps por
+  # palavra + diarização (separa entrevistador × depoente). Para o modo
+  # rápido/barato voltar: model=fal-ai/wizper, chunk_level=segment, diarize=false.
+  model: fal-ai/whisper
   language: pt
-  chunk_level: segment  # suficiente p/ beats+quotes; word exigiria fal-ai/whisper
-  diarize: false        # ligar quando quisermos separar entrevistador × depoente
+  chunk_level: word
+  diarize: true
+  prompt: "Entrevista em português brasileiro sobre experiência de quase-morte (EQM), canal Afinal o que somos nós."
 
 extract:
   backend: fal        # fal | anthropic

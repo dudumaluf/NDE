@@ -128,8 +128,9 @@ def transcribe(
     ids: list[str] = typer.Argument(None, help="IDs específicos (default: pendentes)."),
     all_: bool = typer.Option(False, "--all", help="Transcreve todos os fetched."),
     limit: int = typer.Option(0, help="Máximo de vídeos nesta execução."),
+    force: bool = typer.Option(False, "--force", help="Re-transcreve mesmo se já existir."),
 ) -> None:
-    """Transcreve os vídeos baixados (fal wizper, pt, timestamps por palavra)."""
+    """Transcreve os vídeos baixados (config: modelo, word-level, diarização)."""
     from . import transcribe as tr
 
     cfg = load_config()
@@ -138,8 +139,11 @@ def transcribe(
     if ids:
         queue = ids
     else:
+        status_filter = (
+            "status IN ('fetched','transcribed','extracted')" if force else "status = 'fetched'"
+        )
         rows = conn.execute(
-            "SELECT id FROM videos WHERE status = 'fetched' ORDER BY first_seen_at"
+            f"SELECT id FROM videos WHERE {status_filter} ORDER BY first_seen_at"
         ).fetchall()
         queue = [r["id"] for r in rows]
         if not all_ and limit == 0:
@@ -153,20 +157,21 @@ def transcribe(
 
     ok, failed = 0, 0
     for video_id in queue:
-        if tr.has_transcript(cfg, video_id):
+        if tr.has_transcript(cfg, video_id) and not force:
             dbm.advance_status(conn, video_id, "transcribed")
             conn.commit()
             console.print(f"[dim]{video_id} já transcrito — pulando (idempotente)[/dim]")
             ok += 1
             continue
         try:
-            console.print(f"Transcrevendo {video_id} … (upload + wizper)")
+            console.print(f"Transcrevendo {video_id} … ({cfg.transcribe.model})")
             summary = tr.transcribe_video(cfg, video_id)
             dbm.advance_status(conn, video_id, "transcribed")
             conn.commit()
             console.print(
                 f"[green]ok[/green] {video_id} · {summary['chars']} chars · "
-                f"{summary['chunks']} chunks · áudio até {summary['last_end']}s · "
+                f"{summary['segments']} segmentos · {summary['words']} palavras · "
+                f"{summary['speakers']} falantes · áudio até {summary['last_end']}s · "
                 f"{summary['elapsed_s']}s de processamento"
             )
             ok += 1

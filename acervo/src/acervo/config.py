@@ -25,10 +25,11 @@ class FetchCfg(BaseModel):
 
 class TranscribeCfg(BaseModel):
     backend: str = "fal"
-    model: str = "fal-ai/wizper"
+    model: str = "fal-ai/whisper"
     language: str = "pt"
     chunk_level: str = "word"
-    diarize: bool = False
+    diarize: bool = True
+    prompt: str = ""
 
 
 class ExtractCfg(BaseModel):

@@ -23,7 +23,7 @@ import yaml
 from .config import AcervoConfig
 from .schema import Beat, ElementHit, EmergentMotif, Quote, Tone, VideoExtraction
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"  # v2 = transcripts diarizados word-level (invalida cache v1)
 ROUTER_ENDPOINT = "openrouter/router"
 
 # preços aproximados por 1M tokens (USD) para estimativa de --dry-run
@@ -79,15 +79,21 @@ def taxonomy_keys(tax: dict) -> str:
 
 def load_transcript(cfg: AcervoConfig, video_id: str) -> dict:
     p = cfg.data_dir() / video_id / "transcript.json"
-    return json.loads(p.read_text(encoding="utf-8"))
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    if "segments" not in doc:  # retrocompat com transcripts v1
+        doc["segments"] = doc.get("chunks", [])
+        doc["words"] = []
+        doc["main_speaker"] = None
+    return doc
 
 
 def transcript_block(transcript: dict) -> str:
     lines = []
-    for c in transcript["chunks"]:
+    for c in transcript["segments"]:
         start = c.get("start")
         prefix = f"[{start:.0f}]" if start is not None else "[?]"
-        lines.append(f"{prefix} {c['text'].strip()}")
+        spk = f" [{c['speaker']}]" if c.get("speaker") else ""
+        lines.append(f"{prefix}{spk} {c['text'].strip()}")
     return "\n".join(lines)
 
 
@@ -107,6 +113,12 @@ def build_prompts(
     """Retorna {'closed': (system, user), 'open': (system, user)}."""
     tblock = transcript_block(transcript)
     out = {}
+    speaker_note = (
+        f"Os segmentos têm rótulos de falante; o falante principal (provavelmente "
+        f"a pessoa depoente) é {transcript['main_speaker']}. Confirme pelo conteúdo."
+        if transcript.get("main_speaker")
+        else "A transcrição não separa falantes; distinga pelo contexto."
+    )
     for passada in ("closed", "open"):
         md = (cfg.root / "prompts" / f"extract_{passada}.md").read_text(encoding="utf-8")
         system, user = split_prompt(md)
@@ -119,6 +131,7 @@ def build_prompts(
             part=meta["part"],
             parts_total=meta["parts_total"],
             title=meta.get("title", ""),
+            speaker_note=speaker_note,
             transcript_block=tblock,
         )
         out[passada] = (system, user)
@@ -188,8 +201,25 @@ def call_with_repair(
 # ── validação de quotes (req. 7 — nunca inventar) ────────────────────────
 
 
+def _locate_by_words(transcript: dict, qnorm: str) -> tuple[float | None, float | None]:
+    """Localiza início/fim exatos da quote na sequência de palavras (v2)."""
+    words = transcript.get("words") or []
+    if not words:
+        return None, None
+    toks = [norm_text(w["text"]) for w in words]
+    qtoks = qnorm.split()
+    if not qtoks:
+        return None, None
+    n, m = len(toks), len(qtoks)
+    for i in range(n - m + 1):
+        if toks[i] == qtoks[0] and toks[i : i + m] == qtoks:
+            return words[i].get("start"), words[i + m - 1].get("end")
+    return None, None
+
+
 def locate_quote(transcript: dict, text: str, start_hint: float | None) -> Quote | None:
-    """Valida a quote como substring do transcript e localiza timestamps."""
+    """Valida a quote como substring do transcript e localiza timestamps
+    (precisão de palavra quando o transcript é v2 word-level)."""
     qnorm = norm_text(text)
     if len(qnorm) < 8:
         return None
@@ -197,15 +227,21 @@ def locate_quote(transcript: dict, text: str, start_hint: float | None) -> Quote
     if qnorm not in full:
         return None
 
-    chunks = transcript["chunks"]
-    # busca no chunk (janela de 2) mais próximo do hint primeiro
-    order = range(len(chunks))
+    # v2: início/fim exatos pela sequência de palavras
+    w_start, w_end = _locate_by_words(transcript, qnorm)
+    if w_start is not None:
+        return Quote(
+            video_id=transcript["video_id"], start=w_start, end=w_end, text=text.strip()
+        )
+
+    segments = transcript["segments"]
+    order = range(len(segments))
     if start_hint is not None:
         order = sorted(
-            order, key=lambda i: abs((chunks[i].get("start") or 0) - start_hint)
+            order, key=lambda i: abs((segments[i].get("start") or 0) - start_hint)
         )
     for i in order:
-        window = chunks[i : i + 2]
+        window = segments[i : i + 2]
         wnorm = norm_text(" ".join(c["text"] for c in window))
         if qnorm in wnorm:
             return Quote(
@@ -214,7 +250,6 @@ def locate_quote(transcript: dict, text: str, start_hint: float | None) -> Quote
                 end=window[-1].get("end"),
                 text=text.strip(),
             )
-    # substring existe no texto completo mas cruza mais de 2 chunks
     return Quote(video_id=transcript["video_id"], start=start_hint, end=None, text=text.strip())
 
 

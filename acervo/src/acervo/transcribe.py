@@ -1,9 +1,15 @@
-"""Transcrição via fal.ai (wizper — Whisper v3 Large otimizado).
+"""Transcrição via fal.ai.
 
-Salva data/<id>/transcript.json com o texto completo e chunks com timestamps
-(nível configurável; default `word` — beats e quotes dependem disso).
-Backend plugável por config (doc 02 §3); `local` (faster-whisper) fica como
-alternativa futura de custo zero.
+MODO PREMIUM (v2, 2026-07-10): `fal-ai/whisper` com `chunk_level=word` +
+`diarize=true`. O transcript.json v2 guarda:
+- `words`: timestamps por palavra (+ speaker quando a diarização cobre);
+- `segments`: frases derivadas (agrupadas por falante/pontuação/pausa) —
+  são o que os prompts de extração leem;
+- `diarization_segments`: cru da API;
+- `main_speaker`: heurística (quem fala mais = depoente, provável).
+
+Modo rápido antigo (wizper/segment) continua suportado pelo mesmo código.
+Backend plugável por config (doc 02 §3).
 """
 
 from __future__ import annotations
@@ -17,7 +23,12 @@ from typing import Any
 from .config import AcervoConfig
 from .ytdl import audio_file_of
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# limites de tamanho dos segmentos derivados (para prompts legíveis)
+SOFT_CHARS = 450
+HARD_CHARS = 700
+GAP_S = 1.2
 
 
 def transcript_path(cfg: AcervoConfig, video_id: str) -> Path:
@@ -43,7 +54,84 @@ def _transcribe_fal(cfg: AcervoConfig, audio: Path) -> dict[str, Any]:
     }
     if cfg.transcribe.diarize:
         arguments["diarize"] = True
+    if cfg.transcribe.prompt:
+        arguments["prompt"] = cfg.transcribe.prompt
     return fal_client.subscribe(cfg.transcribe.model, arguments=arguments)
+
+
+# ── derivação de estrutura (v2) ──────────────────────────────────────────
+
+
+def _speaker_at(diar: list[dict], t: float | None) -> str | None:
+    if t is None:
+        return None
+    for seg in diar:
+        ts = seg.get("timestamp")
+        if isinstance(ts, (list, tuple)) and len(ts) == 2 and ts[0] <= t <= ts[1]:
+            return seg.get("speaker")
+    return None
+
+
+def _norm_chunks(result: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    for c in result.get("chunks") or []:
+        ts = c.get("timestamp")
+        ok = isinstance(ts, (list, tuple)) and len(ts) == 2
+        out.append(
+            {
+                "start": float(ts[0]) if ok and ts[0] is not None else None,
+                "end": float(ts[1]) if ok and ts[1] is not None else None,
+                "text": c.get("text", ""),
+                **({"speaker": c["speaker"]} if c.get("speaker") else {}),
+            }
+        )
+    return out
+
+
+def derive_segments(words: list[dict], diar: list[dict]) -> list[dict[str, Any]]:
+    """Agrupa palavras em frases: quebra por troca de falante, pontuação
+    forte (após tamanho mínimo), pausa longa ou tamanho máximo."""
+    segments: list[dict[str, Any]] = []
+    cur: dict[str, Any] | None = None
+
+    for w in words:
+        spk = w.get("speaker") or _speaker_at(diar, w.get("start"))
+        text = (w.get("text") or "").strip()
+        if not text:
+            continue
+        gap = (
+            cur is not None
+            and w.get("start") is not None
+            and cur["end"] is not None
+            and w["start"] - cur["end"] > GAP_S
+        )
+        if cur is None or spk != cur.get("speaker") or gap or len(cur["text"]) > HARD_CHARS:
+            if cur:
+                segments.append(cur)
+            cur = {
+                "start": w.get("start"),
+                "end": w.get("end"),
+                "speaker": spk,
+                "text": text,
+            }
+            continue
+        cur["text"] += " " + text
+        cur["end"] = w.get("end") or cur["end"]
+        if len(cur["text"]) > SOFT_CHARS and text[-1:] in ".?!":
+            segments.append(cur)
+            cur = None
+    if cur:
+        segments.append(cur)
+    return segments
+
+
+def main_speaker(segments: list[dict]) -> str | None:
+    """Quem fala mais tempo = provavelmente a pessoa depoente."""
+    totals: dict[str, float] = {}
+    for s in segments:
+        if s.get("speaker") and s.get("start") is not None and s.get("end") is not None:
+            totals[s["speaker"]] = totals.get(s["speaker"], 0) + (s["end"] - s["start"])
+    return max(totals, key=totals.get) if totals else None
 
 
 def transcribe_video(cfg: AcervoConfig, video_id: str) -> dict[str, Any]:
@@ -62,17 +150,22 @@ def transcribe_video(cfg: AcervoConfig, video_id: str) -> dict[str, Any]:
         )
     elapsed = time.time() - t0
 
-    chunks = []
-    for c in result.get("chunks") or []:
-        ts = c.get("timestamp")
-        chunk: dict[str, Any] = {
-            "start": ts[0] if isinstance(ts, (list, tuple)) and len(ts) == 2 else None,
-            "end": ts[1] if isinstance(ts, (list, tuple)) and len(ts) == 2 else None,
-            "text": c.get("text", ""),
+    chunks = _norm_chunks(result)
+    diar = [
+        {
+            "timestamp": s.get("timestamp"),
+            "speaker": s.get("speaker"),
         }
-        if c.get("speaker"):
-            chunk["speaker"] = c["speaker"]
-        chunks.append(chunk)
+        for s in (result.get("diarization_segments") or [])
+    ]
+
+    word_level = cfg.transcribe.chunk_level == "word"
+    if word_level:
+        words = chunks
+        segments = derive_segments(words, diar)
+    else:
+        words = []
+        segments = [{**c, "speaker": c.get("speaker")} for c in chunks]
 
     doc = {
         "schema_version": SCHEMA_VERSION,
@@ -81,12 +174,15 @@ def transcribe_video(cfg: AcervoConfig, video_id: str) -> dict[str, Any]:
         "model": cfg.transcribe.model,
         "language": cfg.transcribe.language,
         "chunk_level": cfg.transcribe.chunk_level,
+        "diarize": cfg.transcribe.diarize,
         "transcribed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "elapsed_s": round(elapsed, 1),
         "text": result.get("text", ""),
         "inferred_languages": result.get("inferred_languages"),
-        "chunks": chunks,
-        "diarization_segments": result.get("diarization_segments") or [],
+        "segments": segments,
+        "words": words,
+        "diarization_segments": diar,
+        "main_speaker": main_speaker(segments),
     }
     out = transcript_path(cfg, video_id)
     out.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -94,7 +190,9 @@ def transcribe_video(cfg: AcervoConfig, video_id: str) -> dict[str, Any]:
     return {
         "video_id": video_id,
         "chars": len(doc["text"]),
-        "chunks": len(chunks),
+        "segments": len(segments),
+        "words": len(words),
+        "speakers": len({s.get("speaker") for s in segments if s.get("speaker")}),
         "elapsed_s": round(elapsed, 1),
-        "last_end": chunks[-1]["end"] if chunks else None,
+        "last_end": segments[-1]["end"] if segments else None,
     }
