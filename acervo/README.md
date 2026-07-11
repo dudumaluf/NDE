@@ -23,6 +23,9 @@ uv run acervo fetch --limit 10                # ou um lote maior
 uv run acervo fetch <id> [<id>…]              # ou IDs específicos
 uv run acervo transcribe                      # transcreve 1 pendente (fal wizper)
 uv run acervo transcribe --all                # ou todos os fetched
+uv run acervo group                           # agrupa vídeos em pessoas (por título)
+uv run acervo extract --dry-run --all         # estima custo LLM antes de gastar
+uv run acervo extract <slug> | --all          # extrai beats/elementos/quotes
 uv run acervo status                          # fila por status + erros
 uv run acervo meta <id>                       # inspeciona o meta.json de um vídeo
 ```
@@ -34,7 +37,7 @@ Estado da fila em `acervo.db` (SQLite); dados canônicos em `data/<video_id>/`
 
 - [x] **A0** — scaffolding + `scan` + `fetch` (tag `a0`)
 - [x] **A1** — `transcribe` (fal-ai/wizper, pt; tag `a1`)
-- [ ] **A2** — schema `person.json` + `extract` (any-llm) + taxonomy v1
+- [x] **A2** — schema pessoa + `group` + `extract` (openrouter/router, claude-sonnet-4.5, 2 passadas; tag `a2`)
 - [ ] **A3** — `analyze` (embeddings, UMAP, HDBSCAN, grafo) + `export/`
 - [ ] **A4** — UI `review`
 - [ ] **A5** — corpus piloto (10–20 vídeos) + `report.html`

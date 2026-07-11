@@ -21,8 +21,9 @@
 | A0 | `acervo` scaffolding + `scan` + `fetch` (597 vídeos na fila, 6 áudios baixados) | ✔ tag `a0` |
 | A1 | `acervo transcribe` (fal wizper, pt, segmentos ~30s) — **39 vídeos transcritos (~30h de áudio)**, qualidade PT excelente | ✔ tag `a1` |
 | A1.5 | **Leitura qualitativa do piloto completo**: 17 pessoas fichadas (`acervo/notes/fichas-piloto.md`) + **proposta de taxonomia v1** (`acervo/taxonomy.yaml`) | ✔ aguardando validação do Dudu |
-| A2 | Schema `person.json` (agrupamento vídeo→pessoa, N experiências, epistemologia do relato, link entre entrevistas) + `extract` via any-llm | ⬅ **próximo** |
-| A3–A5 | analyze/export → review UI → fechamento do piloto | pendente |
+| A2 | Schema pessoa + `group` (17 pessoas) + `extract` 2 passadas (openrouter/router + claude-sonnet-4.5): **17/17 extraídas, 1750 quotes literais validadas, 729 beats** (~US$5,5) | ✔ tag `a2` |
+| A3 | `analyze` (embeddings locais, UMAP, HDBSCAN, grafo, stats, **clustering dos 343 motivos emergentes**) + `export/` | ⬅ **próximo** — destrava o M3 do app com dados reais |
+| A4–A5 | review UI → fechamento do piloto | pendente |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
@@ -99,13 +100,29 @@ Intuições registradas para virarem queries de co-ocorrência no `analyze`
 canônicos; `visao_de_catastrofe` e demais pontes como adjacentes. O A3 deve
 gerar co-ocorrências específicas para testar cada hipótese no corpus real.
 
+**Veredito preliminar pós-extract (17 pessoas):** todas confirmadas —
+`missao` é o ÚNICO elemento universal (17/17, acima até de fora_do_corpo!);
+`amor_incondicional` 14/17; `sensitividade` 14/17; rede adjacente forte
+(projeção astral 11, vidas passadas 8, ET 7). E os clichês são minoritários:
+passagem/túnel 7/17, luz 7/17, parentes falecidos 6/17. As promoções do
+corpus validadas: `corpo_como_veiculo` 16/17, `familiaridade` 16/17,
+`reentrada_dolorosa` 14/17, `instancias_simultaneas` 9/17.
+
 ## Pendências e questões abertas
 
 - FAL_KEY configurada no `acervo/.env` (gitignored; NUNCA no .env.example).
 - **Limitação registrada**: wizper só dá `chunk_level=segment` (~30s) — ok
   para beats; se A2 exigir word-level, trocar model para `fal-ai/whisper`.
 - Conferir custo real no dashboard do fal (billing) — ~30h de áudio no total.
-- **Dudu validar a taxonomia v1** (`acervo/taxonomy.yaml`) antes do extract.
+- Taxonomia v1 validada pragmaticamente (Dudu, 2026-07-10: "vamos seguir,
+  itero quando a experiência tiver corpo") — revisão ao vivo no M5.
+- **Motivos emergentes precisam de clustering** (343 labels livres, quase
+  todos únicos — "telefone_dimensional" vs "ligacao_espiritual" etc.):
+  agregar por embedding no A3 antes de promover qualquer um.
+- Tom "mista" em 16/17 — o merge derruba para mista quando as partes
+  divergem; refinar na review UI (A4).
+- `data/` é gitignored: person.json/extraction.json vivem só nesta máquina
+  até o A3 gerar o `export/` (que aí decidimos versionar ou não).
 - **Achados do piloto que mudam o A2** (detalhes em `acervo/notes/fichas-piloto.md`):
   túnel clássico é raro (não assumir clichês — confirmado); toda história é
   biografia com N experiências (schema precisa de experiências múltiplas +

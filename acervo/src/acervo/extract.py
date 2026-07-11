@@ -289,6 +289,11 @@ def extract_video(
         except Exception:  # noqa: BLE001 — beat malformado não derruba o vídeo
             continue
 
+    age_raw = closed_raw.get("age_at_event")
+    if isinstance(age_raw, str):
+        digits = re.findall(r"\d+", age_raw)
+        age_raw = int(digits[0]) if digits else None
+
     usage = {k: usage_c.get(k, 0) + usage_o.get(k, 0) for k in {*usage_c, *usage_o}}
     ext = VideoExtraction(
         video_id=video_id,
@@ -300,7 +305,7 @@ def extract_video(
         adjacent_tags=[t for t in closed_raw.get("adjacent_tags", []) if t in allowed_adj],
         summary_short=str(closed_raw.get("summary_short", ""))[:600],
         tone=Tone.model_validate(closed_raw.get("tone") or {}),
-        age_at_event=closed_raw.get("age_at_event"),
+        age_at_event=age_raw,
         cause_category=closed_raw.get("cause_category") or "nao_informado",
         epistemology=closed_raw.get("epistemology") or "nao_avaliado",
         quotes_rejected=rejected,

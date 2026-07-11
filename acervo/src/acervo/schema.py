@@ -11,9 +11,10 @@ achados do piloto — ver notes/fichas-piloto.md e STATUS):
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 SCHEMA_VERSION = 1
 
@@ -129,3 +130,29 @@ class VideoExtraction(BaseModel):
     epistemology: Epistemology = "nao_avaliado"
     quotes_rejected: int = 0
     usage: dict = {}
+
+    # Tolerância a saídas imperfeitas do LLM (ex.: "13 anos", "~13"):
+    @field_validator("age_at_event", mode="before")
+    @classmethod
+    def _coerce_age(cls, v: object) -> int | None:
+        if v is None or isinstance(v, int):
+            return v
+        m = re.search(r"\d{1,3}", str(v))
+        return int(m.group()) if m else None
+
+    @field_validator("cause_category", mode="before")
+    @classmethod
+    def _coerce_cause(cls, v: object) -> str:
+        valid = {
+            "acidente", "cirurgia", "parada_cardiaca", "doenca",
+            "afogamento", "outro", "nao_informado",
+        }
+        s = str(v or "nao_informado").strip().lower()
+        return s if s in valid else "outro" if s else "nao_informado"
+
+    @field_validator("epistemology", mode="before")
+    @classmethod
+    def _coerce_epistemology(cls, v: object) -> str:
+        valid = {"direto", "meditacao", "lido", "reconstruido", "nao_avaliado"}
+        s = str(v or "nao_avaliado").strip().lower()
+        return s if s in valid else "nao_avaliado"
