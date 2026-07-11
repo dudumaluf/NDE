@@ -11,7 +11,9 @@ NÃO cobre.
 REGRAS INEGOCIÁVEIS:
 
 1. CITAÇÕES LITERAIS, copiadas exatamente da transcrição (10 a 40 palavras),
-   apenas de falas da própria pessoa (nunca do entrevistador Carlos).
+   apenas de falas da própria pessoa (nunca do entrevistador Carlos; a quote
+   não pode conter a pergunta dele nem ser mera confirmação de algo que ele
+   nomeou).
 2. NÃO repita o que a taxonomia já cobre (lista fornecida). Procure o resto:
    o detalhe estranho, a imagem única, o mecanismo não catalogado.
 3. Rotule cada motivo com um `label` curto e descritivo em pt-BR

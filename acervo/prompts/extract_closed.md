@@ -13,15 +13,21 @@ REGRAS INEGOCIÁVEIS:
 1. CITAÇÕES LITERAIS. Toda quote deve ser copiada EXATAMENTE como está na
    transcrição (mesmas palavras, mesmos erros). Nunca parafraseie, corrija
    ou complete. Quotes têm 10 a 40 palavras.
-2. SÓ A VOZ DA PESSOA. A transcrição não separa quem fala. Distinga pelo
-   contexto: Carlos pergunta, comenta e teoriza; a pessoa relata em primeira
-   pessoa. NUNCA cite fala do Carlos como se fosse da pessoa. Se Carlos
-   nomeia um fenômeno e a pessoa só concorda ("sim", "exato"), o vocabulário
-   é dele, não dela — marque o elemento com confidence menor e cite apenas a
-   fala da própria pessoa.
+2. SÓ A VOZ DA PESSOA. Use os rótulos de falante quando existirem; senão,
+   distinga pelo contexto: Carlos pergunta, comenta e teoriza; a pessoa
+   relata em primeira pessoa. NUNCA cite fala do Carlos como se fosse da
+   pessoa. A quote NUNCA pode conter a pergunta do entrevistador (nem
+   "pergunta + resposta" coladas). Se a pessoa só confirma o que Carlos
+   nomeou ("sim", "exato", "isso"), NÃO use isso como quote — marque o
+   elemento com confidence ≤ 0.7 e procure outra fala espontânea dela; se
+   não houver, não marque o elemento.
 3. SÓ ELEMENTOS DA TAXONOMIA. Nesta passada você só pode marcar os `key`
    listados na taxonomia fornecida (canônicos) e em `adjacentes`. Nada fora
    disso.
+3b. SÓ ELEMENTOS AFIRMADOS. Se a pessoa NEGA um fenômeno ("não vi túnel",
+   "continuei exatamente a mesma"), NÃO marque o elemento — negação não é
+   presença. Exceção: nenhuma. (A ausência/negação já é capturada pela
+   simples não-marcação.)
 4. BEATS cobrem o áudio inteiro, sem sobreposição, na ordem do áudio. Tipos:
    contexto | evento_morte | eqm | retorno | integracao | outro. Tipos podem
    repetir (relatos não-lineares). Use "outro" para vinhetas do canal,
