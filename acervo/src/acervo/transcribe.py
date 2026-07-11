@@ -39,12 +39,22 @@ def has_transcript(cfg: AcervoConfig, video_id: str) -> bool:
     return transcript_path(cfg, video_id).exists()
 
 
-TRANSCRIBE_DEADLINE_S = 1500  # 25 min por vídeo (upload + fila + inferência)
+TRANSCRIBE_DEADLINE_S = 1500  # 25 min por vídeo (fila + inferência)
+NET_CALL_TIMEOUT_S = 300  # timeout duro por chamada de rede individual
+
+
+def _with_timeout(fn, timeout_s: float, *args, **kwargs):
+    """Executa uma chamada bloqueante com timeout duro (o fal_client não expõe
+    timeouts — uploads/status pendurados eram a causa raiz dos travamentos)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(fn, *args, **kwargs).result(timeout=timeout_s)
 
 
 def _transcribe_fal(cfg: AcervoConfig, audio: Path) -> dict[str, Any]:
-    """Upload + submit + polling com deadline — conexão pendurada não trava
-    mais o batch (aprendido na prática: 2 travamentos em batches longos)."""
+    """Upload + submit + polling, cada chamada de rede com timeout duro e o
+    conjunto com deadline — nenhuma conexão pendurada trava o batch."""
     import fal_client
 
     if not os.environ.get("FAL_KEY"):
@@ -53,7 +63,7 @@ def _transcribe_fal(cfg: AcervoConfig, audio: Path) -> dict[str, Any]:
     last: Exception | None = None
     for attempt in range(3):
         try:
-            audio_url = fal_client.upload_file(str(audio))
+            audio_url = _with_timeout(fal_client.upload_file, NET_CALL_TIMEOUT_S, str(audio))
             arguments: dict[str, Any] = {
                 "audio_url": audio_url,
                 "task": "transcribe",
@@ -65,12 +75,14 @@ def _transcribe_fal(cfg: AcervoConfig, audio: Path) -> dict[str, Any]:
             if cfg.transcribe.prompt:
                 arguments["prompt"] = cfg.transcribe.prompt
 
-            handle = fal_client.submit(cfg.transcribe.model, arguments=arguments)
+            handle = _with_timeout(
+                fal_client.submit, 60, cfg.transcribe.model, arguments=arguments
+            )
             deadline = time.time() + TRANSCRIBE_DEADLINE_S
             while time.time() < deadline:
-                status = handle.status(with_logs=False)
+                status = _with_timeout(handle.status, 60, with_logs=False)
                 if isinstance(status, fal_client.Completed):
-                    return handle.get()
+                    return _with_timeout(handle.get, 120)
                 time.sleep(5)
             raise TimeoutError(
                 f"transcrição excedeu {TRANSCRIBE_DEADLINE_S}s (request {handle.request_id})"
