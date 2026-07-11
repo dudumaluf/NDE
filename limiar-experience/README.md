@@ -62,6 +62,19 @@ node scripts/screenshot.mjs "http://localhost:5199/?leva=0&clip=1" out.png
 
 Requer Chrome instalado (usa `playwright-core` com `channel: "chrome"`).
 
+### Personagens/animações próprios (VAT sem Houdini)
+
+`tools/vat-bake.mjs` assa texturas VAT a partir de GLB/GLTF com skinned mesh
+(fluxo típico: Mixamo → GLB) no formato `.bin` float16 + `vat.json`, carregado
+com `?vat=<nome>`. Guia completo (export do Mixamo, opções, limites):
+**[tools/README.md](tools/README.md)**.
+
+```bash
+node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \
+  --skip TPose --selftest
+# → http://localhost:5199/?vat=soldier&scene=personagem
+```
+
 ## Próximos marcos (docs/03 §12)
 
 - M3 — data layer (`content/` fake com contrato do pipeline)

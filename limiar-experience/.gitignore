@@ -3,3 +3,5 @@ dist
 *.local
 .DS_Store
 shots/
+# demo gerada pelo vat-bake (reproduzível: ver tools/README.md)
+public/vat/soldier/

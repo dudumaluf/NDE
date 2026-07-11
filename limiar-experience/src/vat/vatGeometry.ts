@@ -1,9 +1,18 @@
 import * as THREE from "three/webgpu";
 
-/** Geometria "vazia": só reserva vertexCount vértices — a posição real vem da VAT. */
-export function buildSoupGeometry(vertexCount: number): THREE.BufferGeometry {
+/**
+ * Geometria "vazia": só reserva vertexCount vértices — a posição real vem da
+ * VAT. `indices` (opcional, do vat-bake topologia "indexed") permite malhas
+ * cuja soup não caberia na largura máxima de textura: o vertexIndex do shader
+ * continua sendo a coluna da VAT.
+ */
+export function buildSoupGeometry(
+  vertexCount: number,
+  indices?: Uint32Array | null,
+): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   fillBaseAttributes(geometry, vertexCount);
+  if (indices) geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   return geometry;
 }
 
@@ -20,9 +29,11 @@ export interface CrowdAttributes {
 export function buildCrowdGeometry(
   vertexCount: number,
   maxInstances: number,
+  indices?: Uint32Array | null,
 ): { geometry: THREE.BufferGeometry; attrs: CrowdAttributes } {
   const geometry = new THREE.BufferGeometry();
   fillBaseAttributes(geometry, vertexCount);
+  if (indices) geometry.setIndex(new THREE.BufferAttribute(indices, 1));
 
   const attrs: CrowdAttributes = {
     colorScale: new THREE.InstancedBufferAttribute(

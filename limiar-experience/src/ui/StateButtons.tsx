@@ -1,21 +1,26 @@
 import { button, useControls } from "leva";
 import { vatPlayer } from "../vat/VatClipPlayer";
+import { vat } from "../vat/runtime";
 import { cancelStoryArc, playStoryArc } from "../vat/storyArc";
 
 /**
  * Botões de estado narrativo (doc 01 §4). Cada clique morfa a animação
  * atual na escolhida — em qualquer ordem, sem pop. Vale para o personagem
  * e para a multidão inteira (ambos leem o mesmo player neste protótipo).
+ * Os botões vêm do descriptor ativo (?vat= troca clipes junto).
  */
 export function StateButtons() {
+  const clipButtons = Object.fromEntries(
+    vat().clips.map((clip, i) => [
+      `${i} · ${clip.name}${clip.loop ? "" : " (one-shot)"}`,
+      button(() => vatPlayer.play(i)),
+    ]),
+  );
   useControls("Estados (morph seamless)", {
-    "0 · idle": button(() => vatPlayer.play(0)),
-    "1 · andar": button(() => vatPlayer.play(1)),
-    "2 · idle var.": button(() => vatPlayer.play(2)),
-    "3 · morrer": button(() => vatPlayer.play(3)),
-    "4 · levantar": button(() => vatPlayer.play(4)),
-    "5 · rezar": button(() => vatPlayer.play(5)),
-    "arco da história": button(() => playStoryArc(vatPlayer)),
+    ...clipButtons,
+    ...(vat().clipCount >= 6
+      ? { "arco da história": button(() => playStoryArc(vatPlayer)) }
+      : {}),
     parar: button(() => {
       cancelStoryArc();
       vatPlayer.play(0);

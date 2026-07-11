@@ -20,7 +20,7 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
-import { VAT } from "../vat/descriptor";
+import { vat } from "../vat/runtime";
 import { mouseTarget } from "./mouseTarget";
 
 type N = any;
@@ -114,7 +114,7 @@ export class CrowdSim {
 
       const ang: N = rnd(3).mul(Math.PI * 2);
       this.headings.element(instanceIndex).assign(vec2(ang.sin(), ang.cos()));
-      this.phases.element(instanceIndex).assign(rnd(4).mul(VAT.framesPerClip));
+      this.phases.element(instanceIndex).assign(rnd(4).mul(vat().framesPerClip));
     })().compute(this.maxCount);
   }
 
@@ -208,7 +208,7 @@ export class CrowdSim {
       const ph: N = this.phases.element(instanceIndex);
       this.phases
         .element(instanceIndex)
-        .assign(ph.add(spd.mul(dt).mul(u.phasePerUnit)).mod(VAT.framesPerClip));
+        .assign(ph.add(spd.mul(dt).mul(u.phasePerUnit)).mod(vat().framesPerClip));
     })().compute(this.maxCount);
   }
 

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { useFrame, useThree } from "@react-three/fiber";
 import { button, useControls } from "leva";
-import { VAT } from "../vat/descriptor";
+import { vat } from "../vat/runtime";
 import { buildCrowdGeometry } from "../vat/vatGeometry";
 import { useVatTextures } from "../vat/useVatTextures";
 import { vatPlayer } from "../vat/VatClipPlayer";
@@ -28,7 +28,7 @@ export function CrowdMesh() {
 
   const sim = useMemo(() => new CrowdSim(MAX_GRID * MAX_GRID), []);
   const { geometry, attrs } = useMemo(
-    () => buildCrowdGeometry(VAT.vertexCount, MAX_GRID * MAX_GRID),
+    () => buildCrowdGeometry(vat().vertexCount, MAX_GRID * MAX_GRID, vat().indices),
     [],
   );
   const bundle = useMemo(

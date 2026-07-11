@@ -1,4 +1,4 @@
-import { VAT } from "./descriptor";
+import { vat } from "./runtime";
 import type { VatClipPlayer } from "./VatClipPlayer";
 
 let timers: number[] = [];
@@ -14,8 +14,9 @@ export function cancelStoryArc(): void {
  * integração. Preview em miniatura do futuro `director/` dirigido por beats.
  */
 export function playStoryArc(player: VatClipPlayer): void {
+  if (vat().clipCount < 6) return; // arco pressupõe os 6 estados do asset legado
   cancelStoryArc();
-  const clipDur = VAT.clipSeconds / Math.max(player.speed, 0.001);
+  const clipDur = vat().clipSeconds / Math.max(player.speed, 0.001);
   const at = (s: number, fn: () => void) =>
     timers.push(window.setTimeout(fn, s * 1000));
 

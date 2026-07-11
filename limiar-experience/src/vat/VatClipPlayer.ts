@@ -1,4 +1,4 @@
-import { VAT, VAT_FPS } from "./descriptor";
+import { vat } from "./runtime";
 
 /**
  * Estado de blend entre dois clipes num instante — o contrato entre o player
@@ -19,7 +19,8 @@ interface Slot {
   time: number;
 }
 
-const lastFrame = VAT.framesPerClip - 1;
+const lastFrame = (): number => vat().framesPerClip - 1;
+const clipLoop = (clip: number): boolean => vat().clips[clip]?.loop ?? true;
 
 /**
  * Player de clipes VAT com crossfade seamless.
@@ -50,6 +51,7 @@ export class VatClipPlayer {
   }
 
   play(clip: number, opts: { fade?: number } = {}): void {
+    if (clip < 0 || clip >= vat().clipCount) return;
     this.staticState = null;
     if (this.currentClip === clip) return;
     if (this.b) {
@@ -74,10 +76,10 @@ export class VatClipPlayer {
     this.staticState = {
       clipA,
       frameA: s.frameA ?? 0,
-      loopA: VAT.clips[clipA].loop,
+      loopA: clipLoop(clipA),
       clipB,
       frameB: s.frameB ?? s.frameA ?? 0,
-      loopB: VAT.clips[clipB].loop,
+      loopB: clipLoop(clipB),
       blend: s.blend ?? 0,
     };
   }
@@ -85,7 +87,7 @@ export class VatClipPlayer {
   /** Pula direto para um clipe sem fade (estado inicial). */
   snapTo(clip: number): void {
     this.staticState = null;
-    this.a = { clip, time: 0 };
+    this.a = { clip: Math.min(Math.max(clip, 0), vat().clipCount - 1), time: 0 };
     this.b = null;
     this.blend = 0;
   }
@@ -108,14 +110,14 @@ export class VatClipPlayer {
   /** Progresso [0,1] do clipe alvo (para sequenciar one-shots). */
   progress(): number {
     const slot = this.b ?? this.a;
-    return Math.min(1, (slot.time * VAT_FPS) / lastFrame);
+    return Math.min(1, (slot.time * vat().fps) / lastFrame());
   }
 
   private frameOf(slot: Slot): number {
-    const f = slot.time * VAT_FPS;
-    return VAT.clips[slot.clip].loop
-      ? f % VAT.framesPerClip
-      : Math.min(f, lastFrame);
+    const f = slot.time * vat().fps;
+    return clipLoop(slot.clip)
+      ? f % vat().framesPerClip
+      : Math.min(f, lastFrame());
   }
 
   getState(): VatBlendState {
@@ -125,10 +127,10 @@ export class VatClipPlayer {
     return {
       clipA: a.clip,
       frameA: this.frameOf(a),
-      loopA: VAT.clips[a.clip].loop,
+      loopA: clipLoop(a.clip),
       clipB: b.clip,
       frameB: this.frameOf(b),
-      loopB: VAT.clips[b.clip].loop,
+      loopB: clipLoop(b.clip),
       blend: this.b ? this.blend : 0,
     };
   }

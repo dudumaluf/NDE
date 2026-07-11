@@ -39,6 +39,12 @@ Leia antes de qualquer tarefa, nesta ordem:
   é o upgrade planejado para >4096 agentes.
 - Fase do passo por agente integra a velocidade (`phasePerUnit` frames por
   unidade percorrida) — o walk cycle gruda no chão em qualquer velocidade.
+- **VATs próprias sem Houdini**: `tools/vat-bake.mjs` (GLB/Mixamo → .bin
+  float16 + vat.json em `public/vat/<nome>/`; guia em `tools/README.md`).
+  Em runtime, `?vat=<nome>` troca o descriptor ativo (`src/vat/runtime.ts`,
+  basis `identity`, pés no y=0); sem o parâmetro, vale o asset legado acima.
+  Assets custom podem ser `indexed` (index buffer + textura por vértice
+  único) quando a soup não cabe nas 8192 colunas de textura.
 
 ## Verificação
 

@@ -12,7 +12,8 @@ import {
   uniform,
   vertexIndex,
 } from "three/tsl";
-import { VAT, basisMatrix } from "./descriptor";
+import { basisMatrix } from "./descriptor";
+import { vat } from "./runtime";
 import type { VatBlendState } from "./VatClipPlayer";
 
 /**
@@ -24,7 +25,7 @@ type N = any;
 export interface VatSampler {
   /** Posição local Y-up (sem escala) de uma coluna/vértice arbitrária. */
   localPosition(columnF: N): N;
-  /** Normal flat do triângulo do vértice corrente (soup: trincas). */
+  /** Normal flat do triângulo do vértice corrente (só topologia soup: trincas). */
   flatNormal(): N;
   /** Normal da textura irmã (mais barata: 8 loads vs 16 do flat). */
   texNormal(): N;
@@ -50,15 +51,16 @@ export function createVatSampler(
   nrmTex: THREE.Texture,
   phaseNode?: N,
 ): VatSampler {
+  const v = vat();
   const uFrameA: N = uniform(0);
-  const uClipBaseA: N = uniform(VAT.framesPerClip);
+  const uClipBaseA: N = uniform(v.framesPerClip);
   const uPhaseScaleA: N = uniform(1);
   const uFrameB: N = uniform(0);
-  const uClipBaseB: N = uniform(VAT.framesPerClip);
+  const uClipBaseB: N = uniform(v.framesPerClip);
   const uPhaseScaleB: N = uniform(1);
   const uBlend: N = uniform(0);
-  const uBasis: N = uniform(basisMatrix("x_negz_y"));
-  const uOffset: N = uniform(new THREE.Vector3(...VAT.bakeOffset));
+  const uBasis: N = uniform(basisMatrix(v.basis));
+  const uOffset: N = uniform(new THREE.Vector3(...v.bakeOffset));
 
   const phase: N = phaseNode ?? float(0);
 
@@ -70,9 +72,9 @@ export function createVatSampler(
     frame: N,
     phaseScale: N,
   ): N => {
-    const fEff: N = frame.add(phase.mul(phaseScale)).mod(VAT.framesPerClip);
+    const fEff: N = frame.add(phase.mul(phaseScale)).mod(v.framesPerClip);
     const f0: N = fEff.floor();
-    const f1: N = f0.add(1).mod(VAT.framesPerClip);
+    const f1: N = f0.add(1).mod(v.framesPerClip);
     const t0 = textureLoad(tex, ivec2(int(columnF), int(clipBase.add(f0)))).xyz;
     const t1 = textureLoad(tex, ivec2(int(columnF), int(clipBase.add(f1)))).xyz;
     return mix(t0, t1, fract(fEff));
@@ -102,10 +104,10 @@ export function createVatSampler(
 
   const applyState = (s: VatBlendState): void => {
     uFrameA.value = s.frameA;
-    uClipBaseA.value = s.clipA * VAT.framesPerClip;
+    uClipBaseA.value = s.clipA * v.framesPerClip;
     uPhaseScaleA.value = s.loopA ? 1 : 0;
     uFrameB.value = s.frameB;
-    uClipBaseB.value = s.clipB * VAT.framesPerClip;
+    uClipBaseB.value = s.clipB * v.framesPerClip;
     uPhaseScaleB.value = s.loopB ? 1 : 0;
     uBlend.value = s.blend;
   };
