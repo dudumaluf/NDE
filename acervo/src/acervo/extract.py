@@ -141,25 +141,42 @@ def build_prompts(
 # ── chamada LLM ───────────────────────────────────────────────────────────
 
 
+FALLBACK_MODEL = "google/gemini-2.5-pro"
+
+
 def call_llm(cfg: AcervoConfig, system: str, user: str) -> tuple[str, dict]:
+    import time as _time
+
     import fal_client
 
     if not os.environ.get("FAL_KEY"):
         raise RuntimeError("FAL_KEY ausente — preencha o .env.")
 
-    result = fal_client.subscribe(
-        ROUTER_ENDPOINT,
-        arguments={
-            "model": cfg.extract.model,
-            "system_prompt": system,
-            "prompt": user,
-            "temperature": 0.2,
-            "max_tokens": 8000,
-        },
-    )
-    if result.get("error"):
-        raise RuntimeError(f"router error: {result['error']}")
-    return result.get("output", ""), result.get("usage") or {}
+    last: Exception | None = None
+    # 3 tentativas no modelo principal (erros transientes do provider),
+    # depois 1 no modelo de fallback — melhor um vídeo com modelo alternativo
+    # do que uma pessoa inteira travada.
+    plans = [cfg.extract.model] * 3 + [FALLBACK_MODEL]
+    for i, model in enumerate(plans):
+        try:
+            result = fal_client.subscribe(
+                ROUTER_ENDPOINT,
+                arguments={
+                    "model": model,
+                    "system_prompt": system,
+                    "prompt": user,
+                    "temperature": 0.2,
+                    "max_tokens": 8000,
+                },
+            )
+            if result.get("error"):
+                raise RuntimeError(f"router error: {result['error']}")
+            return result.get("output", ""), result.get("usage") or {}
+        except Exception as exc:  # noqa: BLE001 — retry consciente
+            last = exc
+            if i < len(plans) - 1:
+                _time.sleep(4 * (i + 1))
+    raise RuntimeError(f"LLM falhou após retries+fallback: {last}")
 
 
 def parse_json_output(raw: str) -> dict:

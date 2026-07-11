@@ -50,10 +50,36 @@ def person_document(p: Person) -> str:
     return "\n".join(x for x in parts if x)[:24000]
 
 
+def element_signature(persons: list[Person]) -> np.ndarray:
+    """Matriz pessoa×elemento ponderada por IDF — elementos raros diferenciam,
+    universais (ex.: `missao`, 17/17) quase não pesam."""
+    keys = sorted(
+        {e.key for p in persons for e in p.elements}
+        | {t for p in persons for t in p.adjacent_tags}
+    )
+    idx = {k: i for i, k in enumerate(keys)}
+    n = len(persons)
+    m = np.zeros((n, len(keys)))
+    for i, p in enumerate(persons):
+        for e in p.elements:
+            m[i][idx[e.key]] = e.confidence
+        for t in p.adjacent_tags:
+            m[i][idx[t]] = 0.8
+    df = (m > 0).sum(axis=0).clip(min=1)
+    idf = np.log(n / df) + 0.1
+    m = m * idf
+    norms = np.linalg.norm(m, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    return m / norms
+
+
 def embed_people(cfg: AcervoConfig, persons: list[Person]) -> np.ndarray:
+    """Híbrido: 40% semântica do texto + 60% assinatura de elementos (IDF)."""
     model = get_model(cfg)
     docs = [person_document(p) for p in persons]
-    return np.asarray(model.encode(docs, normalize_embeddings=True, show_progress_bar=False))
+    text = np.asarray(model.encode(docs, normalize_embeddings=True, show_progress_bar=False))
+    sig = element_signature(persons)
+    return np.hstack([0.4 * text, 0.6 * sig])
 
 
 def embed_texts(cfg: AcervoConfig, texts: list[str]) -> np.ndarray:
@@ -83,25 +109,43 @@ def umap_layout(emb: np.ndarray, n_components: int, seed: int) -> np.ndarray:
     return out / span
 
 
+def _agglomerative(emb: np.ndarray, k: int) -> np.ndarray:
+    from sklearn.cluster import AgglomerativeClustering
+
+    return AgglomerativeClustering(
+        n_clusters=k, metric="cosine", linkage="average"
+    ).fit_predict(emb)
+
+
 def cluster_people(emb: np.ndarray, seed: int) -> np.ndarray:
-    """Agrupamento com fallback: HDBSCAN se disponível, senão Agglomerative."""
+    """Corpus pequeno (<40): aglomerativo com k escolhido por silhouette.
+    Corpus grande: HDBSCAN (densidades reais), com o mesmo fallback."""
+    from sklearn.metrics import silhouette_score
+
     n = len(emb)
-    try:
-        from sklearn.cluster import HDBSCAN  # sklearn>=1.3 tem HDBSCAN nativo
+    if n >= 40:
+        try:
+            from sklearn.cluster import HDBSCAN
 
-        labels = HDBSCAN(min_cluster_size=max(2, n // 8), metric="cosine").fit_predict(emb)
-    except Exception:  # noqa: BLE001
-        from sklearn.cluster import AgglomerativeClustering
+            labels = np.asarray(
+                HDBSCAN(min_cluster_size=max(3, n // 20), metric="cosine").fit_predict(emb)
+            )
+            valid = labels[labels >= 0]
+            if len(set(valid)) >= 3 and Counter(valid).most_common(1)[0][1] <= 0.6 * n:
+                return labels
+        except Exception:  # noqa: BLE001
+            pass
 
-        k = max(2, round(np.sqrt(n / 2)))
-        labels = AgglomerativeClustering(n_clusters=k, metric="cosine", linkage="average").fit_predict(emb)
-    # HDBSCAN pode marcar tudo -1 (ruído) em N pequeno → fallback aglomerativo
-    if (np.asarray(labels) == -1).all():
-        from sklearn.cluster import AgglomerativeClustering
-
-        k = max(2, round(np.sqrt(n / 2)))
-        labels = AgglomerativeClustering(n_clusters=k, metric="cosine", linkage="average").fit_predict(emb)
-    return np.asarray(labels)
+    best, best_score = None, -2.0
+    for k in range(3, min(7, n // 2) + 1):
+        labels = _agglomerative(emb, k)
+        biggest = Counter(labels).most_common(1)[0][1]
+        if biggest > 0.7 * n:
+            continue
+        score = silhouette_score(emb, labels, metric="cosine")
+        if score > best_score:
+            best, best_score = labels, score
+    return best if best is not None else _agglomerative(emb, 3)
 
 
 def knn_graph(persons: list[Person], emb: np.ndarray, k: int) -> list[dict]:
