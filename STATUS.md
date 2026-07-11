@@ -21,7 +21,7 @@
 | A0 | `acervo` scaffolding + `scan` + `fetch` (597 vídeos na fila, 6 áudios baixados) | ✔ tag `a0` |
 | A1 | `acervo transcribe` (fal wizper, pt, segmentos ~30s) — **39 vídeos transcritos (~30h de áudio)**, qualidade PT excelente | ✔ tag `a1` |
 | A1.5 | **Leitura qualitativa do piloto completo**: 17 pessoas fichadas (`acervo/notes/fichas-piloto.md`) + **proposta de taxonomia v1** (`acervo/taxonomy.yaml`) | ✔ aguardando validação do Dudu |
-| A2 | Schema pessoa + `group` (17 pessoas) + `extract` 2 passadas (openrouter/router + claude-sonnet-4.5): **17/17 extraídas, 1750 quotes literais validadas, 729 beats** (~US$5,5) | ✔ tag `a2` |
+| A2 | Schema pessoa + `group` (17 pessoas) + `extract` 2 passadas (openrouter/router + claude-sonnet-4.5): **17/17 extraídas, 1779 quotes literais validadas, 725 beats, 341 motivos emergentes** (custo real ~US$7,2) | ✔ tag `a2` |
 | A3 | `analyze` (embeddings locais, UMAP, HDBSCAN, grafo, stats, **clustering dos 343 motivos emergentes**) + `export/` | ⬅ **próximo** — destrava o M3 do app com dados reais |
 | A4–A5 | review UI → fechamento do piloto | pendente |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
@@ -99,6 +99,16 @@ Intuições registradas para virarem queries de co-ocorrência no `analyze`
 → `taxonomy.yaml` já captura: `sensitividade`, `missao`, `amor_incondicional`
 canônicos; `visao_de_catastrofe` e demais pontes como adjacentes. O A3 deve
 gerar co-ocorrências específicas para testar cada hipótese no corpus real.
+
+**Veredito preliminar pós-extract (17 pessoas, dados formais):**
+H1 CONFIRMADA E AMPLIADA — `missao` é o ÚNICO elemento universal (17/17;
+amor 14/17, transformação 16/17). H2 CONFIRMADA — sensitividade 14/17 +
+premonição cotidiana 10/17. H3 PARCIAL — missão de contar universal, mas
+catástrofe em só 4/17. H4 CONFIRMADA — projeção astral 11/17, vidas
+passadas 8/17, ET 7/17: a "rede" é majoritária. BÔNUS anti-clichê: o pódio
+do corpus é missão(17)/fora_do_corpo(16)/presenças(16)/paz(16); o
+imaginário popular fica atrás — passagem/túnel 7/17, luz 7/17, parentes
+falecidos 6/17. Tom: 16/17 "mista" — nenhuma história é simplesmente feliz.
 
 **Veredito preliminar pós-extract (17 pessoas):** todas confirmadas —
 `missao` é o ÚNICO elemento universal (17/17, acima até de fora_do_corpo!);
