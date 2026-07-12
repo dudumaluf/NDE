@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SCHEMA_VERSION = 1
 
@@ -76,6 +76,79 @@ class PersonMeta(BaseModel):
     cause_category: CauseCategory = "nao_informado"
 
 
+class Demographics(BaseModel):
+    """Metadados demográficos declarados no vídeo (passada complementar barata).
+
+    Tudo opcional: só o que a pessoa declara explicitamente — nunca inferido,
+    exceto `sexo`, que pode vir do contexto do relato/nome (fonte marcada)."""
+
+    sexo: Literal["feminino", "masculino"] | None = None
+    sexo_fonte: Literal["declarado", "inferido_contexto"] | None = None
+    religiao_contexto: str | None = None
+    local_evento: str | None = None
+    local_origem: str | None = None
+    ano_evento: int | None = None
+    tempo_clinico_declarado: str | None = None
+    tempo_subjetivo_declarado: str | None = None
+    profissao: str | None = None
+
+    # Tolerância a saídas imperfeitas do LLM (modelo barato):
+    @field_validator("sexo", mode="before")
+    @classmethod
+    def _coerce_sexo(cls, v: object) -> str | None:
+        s = str(v or "").strip().lower()
+        if s.startswith(("f", "mulher")):
+            return "feminino"
+        if s.startswith(("m", "homem")) and not s.startswith("mulher"):
+            return "masculino"
+        return None
+
+    @field_validator("sexo_fonte", mode="before")
+    @classmethod
+    def _coerce_sexo_fonte(cls, v: object) -> str | None:
+        s = str(v or "").strip().lower()
+        if s.startswith("declarad"):
+            return "declarado"
+        if s.startswith("inferid"):
+            return "inferido_contexto"
+        return None
+
+    @field_validator("ano_evento", mode="before")
+    @classmethod
+    def _coerce_ano(cls, v: object) -> int | None:
+        if v is None:
+            return None
+        m = re.search(r"\b(19|20)\d{2}\b", str(v))
+        return int(m.group()) if m else None
+
+    @field_validator(
+        "religiao_contexto",
+        "local_evento",
+        "local_origem",
+        "tempo_clinico_declarado",
+        "tempo_subjetivo_declarado",
+        "profissao",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_texto(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        low = s.lower()
+        if not s or low in {"null", "none", "nao informado", "não informado", "n/a"}:
+            return None
+        return s[:200]
+
+    @model_validator(mode="after")
+    def _fonte_exige_sexo(self) -> "Demographics":
+        if self.sexo is None:
+            self.sexo_fonte = None
+        elif self.sexo_fonte is None:
+            self.sexo_fonte = "inferido_contexto"
+        return self
+
+
 class Summary(BaseModel):
     one_liner: str = ""
     short: str = ""
@@ -99,6 +172,8 @@ class Person(BaseModel):
     channel: str = ""
     sources: list[SourceVideo] = []
     person: PersonMeta
+    demographics: Demographics = Demographics()
+    demographics_version: str | None = None  # cache da passada demográfica
     beats: list[Beat] = []
     elements: list[ElementHit] = []
     emergent_motifs: list[EmergentMotif] = []

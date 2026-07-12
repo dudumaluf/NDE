@@ -144,7 +144,9 @@ def build_prompts(
 FALLBACK_MODEL = "google/gemini-2.5-pro"
 
 
-def call_llm(cfg: AcervoConfig, system: str, user: str) -> tuple[str, dict]:
+def call_llm(
+    cfg: AcervoConfig, system: str, user: str, model: str | None = None
+) -> tuple[str, dict]:
     import time as _time
 
     import fal_client
@@ -156,7 +158,7 @@ def call_llm(cfg: AcervoConfig, system: str, user: str) -> tuple[str, dict]:
     # 3 tentativas no modelo principal (erros transientes do provider),
     # depois 1 no modelo de fallback — melhor um vídeo com modelo alternativo
     # do que uma pessoa inteira travada.
-    plans = [cfg.extract.model] * 3 + [FALLBACK_MODEL]
+    plans = [model or cfg.extract.model] * 3 + [FALLBACK_MODEL]
     for i, model in enumerate(plans):
         try:
             result = fal_client.subscribe(
@@ -190,7 +192,7 @@ def parse_json_output(raw: str) -> dict:
 
 
 def call_with_repair(
-    cfg: AcervoConfig, system: str, user: str
+    cfg: AcervoConfig, system: str, user: str, model: str | None = None
 ) -> tuple[dict, dict]:
     """Chama o LLM e tenta reparar saída inválida (req. de retry do doc 02)."""
     attempts = cfg.extract.max_retries + 1
@@ -198,7 +200,7 @@ def call_with_repair(
     usage_acc: dict = {}
     prompt = user
     for _ in range(attempts):
-        raw, usage = call_llm(cfg, system, prompt)
+        raw, usage = call_llm(cfg, system, prompt, model=model)
         for k, v in usage.items():
             if isinstance(v, (int, float)):
                 usage_acc[k] = usage_acc.get(k, 0) + v

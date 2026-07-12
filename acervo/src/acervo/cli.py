@@ -322,6 +322,86 @@ def extract(
 
 
 @app.command()
+def demographics(
+    slugs: list[str] = typer.Argument(None, help="Pessoas específicas (default: pendentes)."),
+    all_: bool = typer.Option(False, "--all", help="Roda em todas as pessoas."),
+    limit: int = typer.Option(0, help="Máximo de pessoas nesta execução."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Só estima tokens/custo (req. 4)."),
+    force: bool = typer.Option(False, "--force", help="Re-extrai mesmo com cache válido."),
+    workers: int = typer.Option(3, help="Pessoas em paralelo."),
+) -> None:
+    """Passada complementar barata: metadados demográficos declarados (1 chamada/pessoa)."""
+    from . import demographics as dg
+    from . import people as ppl
+
+    cfg = load_config()
+
+    persons = [p for p in ppl.list_people(cfg) if p.sources]
+    if slugs:
+        persons = [p for p in persons if p.id in set(slugs)]
+    else:
+        if not force:
+            persons = [p for p in persons if p.demographics_version != dg.cache_key()]
+        if not all_ and limit == 0:
+            limit = 1  # default conservador: uma pessoa por vez
+    if limit:
+        persons = persons[:limit]
+    if not persons:
+        console.print("Nada a fazer — todas as pessoas já têm demographics desta versão.")
+        return
+
+    if dry_run:
+        est = dg.dry_run_estimate(cfg, persons)
+        console.print_json(json.dumps(est, ensure_ascii=False))
+        return
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    usages: list[dict] = []
+
+    def worker(p) -> tuple[str, str, str, dict]:
+        try:
+            updated, usage = dg.extract_demographics(cfg, p)
+            ppl.save_person(cfg, updated)
+            d = updated.demographics
+            filled = sum(
+                1 for v in d.model_dump(exclude={"sexo_fonte"}).values() if v is not None
+            )
+            resumo = ", ".join(
+                s for s in (
+                    d.sexo,
+                    str(d.ano_evento) if d.ano_evento else None,
+                    d.local_evento,
+                    d.profissao,
+                ) if s
+            )
+            return p.id, "ok", f"{filled}/8 campos · {resumo or 'nada declarado'}", usage
+        except Exception as exc:  # noqa: BLE001 — resumível
+            return p.id, "fail", str(exc)[:220], {}
+
+    ok, failed = 0, 0
+    console.print(f"Demographics de {len(persons)} pessoas ({workers} em paralelo, {dg.MODEL}) …")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(worker, p): p.id for p in persons}
+        for fut in as_completed(futures):
+            pid, st, msg, usage = fut.result()
+            usages.append(usage)
+            if st == "fail":
+                failed += 1
+                console.print(f"[red]falhou[/red] {pid}: {msg}")
+            else:
+                ok += 1
+                console.print(f"[green]ok[/green] {pid} · {msg}")
+
+    console.print(
+        f"[bold]{ok} pessoas ok · {failed} falhas · "
+        f"custo real ≈ US$ {dg.real_cost_usd(usages):.2f}[/bold]"
+    )
+    if failed:
+        raise typer.Exit(2)
+
+
+@app.command()
 def status() -> None:
     """Contagem por status + últimos erros (visão rápida da fila)."""
     cfg = load_config()

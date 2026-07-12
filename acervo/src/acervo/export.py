@@ -116,6 +116,7 @@ def public_person(p: Person, audio_index: dict, analysis_row: dict | None) -> di
         "anonymized": p.person.anonymized,
         "age_at_event": p.person.age_at_event,
         "cause_category": p.person.cause_category,
+        "demographics": p.demographics.model_dump(),
         "status": p.status,
         "sources": [
             {"video_id": s.video_id, "part": s.part, "parts_total": s.parts_total,

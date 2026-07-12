@@ -4,7 +4,7 @@
 > em qualquer máquina deve conseguir retomar o trabalho lendo isto + os docs.
 > **Ritual**: atualizar ao final de cada marco/sessão relevante, antes do push.
 
-Última atualização: **2026-07-12, tarde** (M3: data layer do app — multidão dirigida pelo corpus real de 46 pessoas)
+Última atualização: **2026-07-12, tarde** (M3: data layer do app + passada demográfica nas 46 pessoas)
 
 ---
 
@@ -27,6 +27,7 @@
 | A3 | `analyze` + `export/`: embedding híbrido (40% texto bge-m3 + 60% assinatura IDF de elementos), **7 núcleos nomeados via LLM**, 86 fios, 6 temas emergentes transversais, co-ocorrências; export completo com **1592 cortes de áudio** (manifest `f948b7cbd21e3608`, 1,0 GB) → **M3 do app destravado com dados reais** | ✔ tag `a3` |
 | VAT-baker/Studio | Motor `tools/vat-core.mjs` + **VAT Studio** (`npm run studio` → localhost:5198): drag-and-drop de GLB/Mixamo, preview 3D com clipes, loops/one-shots renomeáveis e reordenáveis, presets multidão/personagem, **orçamento com semáforo** (vértices/textura/download) e **redução de malha em 1 clique** (meshoptimizer, antes/depois lado a lado), bake com progresso SSE + selftest + botão "testar na experiência". CLI `tools/vat-bake.mjs` (mesmo motor, `--max-verts`, `--selftest`). App carrega via `?vat=<nome>` (aditivo — default segue o asset legado). Validado E2E com Soldier.glb nos 2 backends (7434→2036 verts, textura 2036×180, 4,2 MB, tudo verde). Guia: `limiar-experience/tools/README.md` | ✔ |
 | Lote 2 | **Corpus de 46 pessoas** (97 vídeos, ~75h): re-análise com voz da depoente — **12 núcleos nomeados via LLM** (maior = 9 pessoas, 20%; silhouette 0,177), 250 fios, 8 temas emergentes transversais; **4027 quotes validadas** (373 rejeitadas na extração), média 22,8 elementos/pessoa; export com **4061 cortes de áudio** (manifest `d1a2c16f7298fa59`, 2,7 GB). Ranking top-5: missão 45/46, presenças 43, inefabilidade 43, corpo_como_veículo 43, transformação 42 — clichês continuam atrás (luz 25, passagem 24, parentes 20) | ✔ |
+| Demográficos | **Passada complementar barata** (`acervo demographics`, 1 chamada/pessoa, claude-haiku-4.5, custo real **US$ 0,55**): sexo (31F/14M/1null — o null é o vídeo-lixo `nayda-cabral`), religião antes/depois 28/46 (padrão dominante "católica na época → espírita/espiritualidade hoje"), local do evento 42/46 (16 estados + Noruega, Portugal, EUA), ano 37/46 (de 1969 a 2025; 16 nos 2020s), tempo clínico 18/46 (comas de 4–44 dias, paradas de 15–20 min), tempo subjetivo 17/46 ("lá não existia tempo", "anos dentro do coma"), profissão 42/46. Schema `Demographics` (migração suave), prompt `demo-v1`, cache por `demographics_version`, export atualizado (JSONs com `demographics`, hash `c8c437af007d3008`, cortes intactos), bloco somente-leitura na UI de revisão | ✔ |
 | A5 | Fechamento do piloto: curadoria do Dudu na UI + report | ⬅ próximo |
 | M3 | **Data layer no app**: multidão dirigida pelo export real (46 pessoas → primeiros slots, resto dormente escuro); cores por núcleo (12, matiz espaçado por ângulo áureo via `iColorScale` — zero vertex buffer novo); **gravidade** (seek do umap3d escalado, arrival+damping, toggle no leva + `?gravity=1`, slider escala do mapa ~14); **fios** (LineSegments TSL, endpoints lendo posições vivas: storage read-only no vertex em WebGPU, PBO em WebGL2; alpha × weight); **Lentes v0** (dropdown com os 36 elementos da taxonomy: quem tem gravita ao anel central, quem não tem recua à borda); HUD "46 pessoas · 12 núcleos · manifest d1a2c16f"; `sync-content` em predev/prebuild; fallback silencioso sem content/ (roda procedural como no M2) | ✔ tag `m3` |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
@@ -211,7 +212,16 @@ circunstância dominava; os nomes do LLM ainda puxam para circunstância em
 - **iCloud desta máquina trava processos**: `~/Documents` sincroniza no
   iCloud; arquivos evictados ("dataless") fazem git/tsc dormirem para sempre
   em `read`. Cura: `brctl download <caminho>` ou reinstalar `node_modules`.
-  Registrado também no `limiar-experience/AGENTS.md`. (2026-07-12: aconteceu
+  Registrado também no `limiar-experience/AGENTS.md`.
+- **Variante do problema acima no venv Python**: o iCloud às vezes marca
+  arquivos com a flag `UF_HIDDEN` — o CPython **ignora silenciosamente**
+  `.pth` escondidos (site-packages), o que quebra o install editable do
+  acervo com `ModuleNotFoundError: acervo.cli`. Cura:
+  `chflags -R nohidden acervo/.venv` (+ `brctl download acervo/.venv`).
+- **Demographics: revisar na curadoria (A5)** — `ano_evento` pode vir de
+  "em 2025 ele…" dito pelo Carlos na abertura (ok) ou de conta com "há X
+  anos" (conferir); `nayda-cabral` (vídeo que não é EQM) veio toda null,
+  como esperado. (2026-07-12: aconteceu
   de novo no início do M3 — `find . -flags +dataless` localiza os presos;
   matar `bird`/`fileproviderd` + `brctl download` re-materializou.)
 - **Trabalho órfão no `acervo/` (não commitado, herdado de sessão que caiu)**:
