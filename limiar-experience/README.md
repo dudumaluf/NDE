@@ -64,10 +64,12 @@ Requer Chrome instalado (usa `playwright-core` com `channel: "chrome"`).
 
 ### Personagens/animações próprios (VAT sem Houdini)
 
-`tools/vat-bake.mjs` assa texturas VAT a partir de GLB/GLTF com skinned mesh
-(fluxo típico: Mixamo → GLB) no formato `.bin` float16 + `vat.json`, carregado
-com `?vat=<nome>`. Guia completo (export do Mixamo, opções, limites):
-**[tools/README.md](tools/README.md)**.
+O **VAT Studio** (`npm run studio` → http://localhost:5198) é a interface
+visual: arraste GLBs do Mixamo, veja o preview 3D, escolha loops/one-shots,
+confira o orçamento (semáforo de vértices/textura/peso, redução de malha em
+1 clique) e gere as texturas com validação automática. Para automação existe
+a CLI `tools/vat-bake.mjs` (mesmo motor). Guia completo (export do Mixamo,
+opções, limites): **[tools/README.md](tools/README.md)**.
 
 ```bash
 node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \

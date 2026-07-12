@@ -4,7 +4,7 @@
 > em qualquer máquina deve conseguir retomar o trabalho lendo isto + os docs.
 > **Ritual**: atualizar ao final de cada marco/sessão relevante, antes do push.
 
-Última atualização: **2026-07-11, tarde** (VAT-baker: ferramenta própria GLB→VAT, fim da dependência do Houdini)
+Última atualização: **2026-07-11, noite** (VAT Studio: interface visual do baker GLB→VAT em localhost:5198 — Dudu não decide mais número técnico nenhum)
 
 ---
 
@@ -25,7 +25,7 @@
 | Premium | Re-transcrição (whisper word-level + diarização, 39 vídeos) + re-extração v2 com prompts corrigidos pela auditoria (96,2% de atribuição de voz correta na v1; v2 com falantes rotulados) | ✔ |
 | A4 (adiantado) | **UI de revisão no ar**: `acervo review` → http://localhost:8777 — dashboard da fila/custos, cards das 17 pessoas, página por pessoa (players por parte, timeline de beats colorida, quotes que tocam no clique, aprovar/anonimizar/editar com locked_fields) | ✔ v1 |
 | A3 | `analyze` + `export/`: embedding híbrido (40% texto bge-m3 + 60% assinatura IDF de elementos), **7 núcleos nomeados via LLM**, 86 fios, 6 temas emergentes transversais, co-ocorrências; export completo com **1592 cortes de áudio** (manifest `f948b7cbd21e3608`, 1,0 GB) → **M3 do app destravado com dados reais** | ✔ tag `a3` |
-| VAT-baker | **`tools/vat-bake.mjs`**: gera VAT (.bin f16 + vat.json) de GLB/Mixamo sem Houdini — skinning assado por frame, loops/one-shots, normalização pé-no-chão, `--selftest`; app carrega via `?vat=<nome>` (`src/vat/runtime.ts`, aditivo — default segue o asset legado). Validado com Soldier.glb nos 2 backends. Guia: `limiar-experience/tools/README.md` | ✔ protótipo |
+| VAT-baker/Studio | Motor `tools/vat-core.mjs` + **VAT Studio** (`npm run studio` → localhost:5198): drag-and-drop de GLB/Mixamo, preview 3D com clipes, loops/one-shots renomeáveis e reordenáveis, presets multidão/personagem, **orçamento com semáforo** (vértices/textura/download) e **redução de malha em 1 clique** (meshoptimizer, antes/depois lado a lado), bake com progresso SSE + selftest + botão "testar na experiência". CLI `tools/vat-bake.mjs` (mesmo motor, `--max-verts`, `--selftest`). App carrega via `?vat=<nome>` (aditivo — default segue o asset legado). Validado E2E com Soldier.glb nos 2 backends (7434→2036 verts, textura 2036×180, 4,2 MB, tudo verde). Guia: `limiar-experience/tools/README.md` | ✔ |
 | A5 | Fechamento do piloto: curadoria do Dudu na UI + report | ⬅ próximo (junto com M3) |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
@@ -170,6 +170,10 @@ corpus validadas: `corpo_como_veiculo` 16/17, `familiaridade` 16/17,
 - Warning `THREE.Clock deprecated` no console — cosmético, ignorar.
 - Docs duplicados: `Docs/` (raiz, canônico) e `limiar-experience/docs/`
   (espelho para quando se abre só a subpasta). Em caso de conflito, raiz vence.
+- **iCloud desta máquina trava processos**: `~/Documents` sincroniza no
+  iCloud; arquivos evictados ("dataless") fazem git/tsc dormirem para sempre
+  em `read`. Cura: `brctl download <caminho>` ou reinstalar `node_modules`.
+  Registrado também no `limiar-experience/AGENTS.md`.
 
 ## Como retomar numa máquina nova
 
