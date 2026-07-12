@@ -402,6 +402,80 @@ def demographics(
 
 
 @app.command()
+def arc(
+    slugs: list[str] = typer.Argument(None, help="Pessoas específicas (default: pendentes)."),
+    all_: bool = typer.Option(False, "--all", help="Roda em todas as pessoas."),
+    limit: int = typer.Option(0, help="Máximo de pessoas nesta execução."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Só estima tokens/custo (req. 4)."),
+    force: bool = typer.Option(False, "--force", help="Re-extrai mesmo com cache válido."),
+    workers: int = typer.Option(3, help="Pessoas em paralelo."),
+) -> None:
+    """Passada complementar barata: arco emocional por beat + timeline normalizada."""
+    from . import arc as ar
+    from . import people as ppl
+
+    cfg = load_config()
+
+    persons = [p for p in ppl.list_people(cfg) if p.sources and p.beats]
+    if slugs:
+        persons = [p for p in persons if p.id in set(slugs)]
+    else:
+        if not force:
+            persons = [p for p in persons if p.arc_version != ar.cache_key(p)]
+        if not all_ and limit == 0:
+            limit = 1  # default conservador: uma pessoa por vez
+    if limit:
+        persons = persons[:limit]
+    if not persons:
+        console.print("Nada a fazer — todas as pessoas já têm arc desta versão.")
+        return
+
+    if dry_run:
+        est = ar.dry_run_estimate(cfg, persons)
+        console.print_json(json.dumps(est, ensure_ascii=False))
+        return
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    usages: list[dict] = []
+
+    def worker(p) -> tuple[str, str, str, dict]:
+        try:
+            updated, usage, n_missing = ar.extract_arc(cfg, p)
+            ppl.save_person(cfg, updated)
+            a = updated.arc
+            resumo = (
+                f"{len(a.beats_emotion)} beats · entrada {a.entrada.valence} → "
+                f"saída {a.saida.valence} · virada no beat {a.virada}"
+                + (f" · [yellow]{n_missing} preenchidos por vizinho[/yellow]" if n_missing else "")
+            )
+            return p.id, "ok", resumo, usage
+        except Exception as exc:  # noqa: BLE001 — resumível
+            return p.id, "fail", str(exc)[:220], {}
+
+    ok, failed = 0, 0
+    console.print(f"Arco emocional de {len(persons)} pessoas ({workers} em paralelo, {ar.MODEL}) …")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(worker, p): p.id for p in persons}
+        for fut in as_completed(futures):
+            pid, st, msg, usage = fut.result()
+            usages.append(usage)
+            if st == "fail":
+                failed += 1
+                console.print(f"[red]falhou[/red] {pid}: {msg}")
+            else:
+                ok += 1
+                console.print(f"[green]ok[/green] {pid} · {msg}")
+
+    console.print(
+        f"[bold]{ok} pessoas ok · {failed} falhas · "
+        f"custo real ≈ US$ {ar.real_cost_usd(usages):.2f}[/bold]"
+    )
+    if failed:
+        raise typer.Exit(2)
+
+
+@app.command()
 def status() -> None:
     """Contagem por status + últimos erros (visão rápida da fila)."""
     cfg = load_config()

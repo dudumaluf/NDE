@@ -89,6 +89,17 @@
   .demo .dsrc { color: var(--faint); font-size: 10.5px; margin-left: 6px; }
   .attn { color: var(--mix); font-size: 12px; }
   .empty { color: var(--faint); padding: 60px 0; text-align: center; }
+  /* arco emocional */
+  .arc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+         padding: 12px 14px; }
+  .arc .endp { font-size: 12.5px; color: var(--dim); padding: 4px 0; }
+  .arc .endp b { color: var(--tx); font-weight: 600; }
+  .spark { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 0; align-items: flex-end; }
+  .sbeat { border-radius: 4px; padding: 2px 7px; font-size: 10.5px; cursor: pointer;
+           border: 1px solid transparent; color: #e8e9ec; white-space: nowrap; opacity: .9; }
+  .sbeat:hover { opacity: 1; border-color: var(--acc); }
+  .sbeat.virada { border-color: #d8c47a; }
+  .sarrow { color: var(--faint); font-size: 10px; align-self: center; }
 </style>
 </head>
 <body>
@@ -171,6 +182,9 @@ async function person(slug) {
     <section><h4>Demográficos ${p.demographics_version ? `<span style="text-transform:none;letter-spacing:0">(${esc(p.demographics_version)})</span>` : "(pendente — rode acervo demographics)"}</h4>
       <div class="demo">${demoRows(p.demographics || {})}</div>
     </section>
+    <section><h4>Arco ${p.arc_version ? `<span style="text-transform:none;letter-spacing:0">(${esc(p.arc_version)})</span>` : "(pendente — rode acervo arc)"}</h4>
+      ${arcBlock(p)}
+    </section>
     <section><h4>Áudio & beats</h4>${partHtml}</section>
     <section><h4>Elementos (${p.elements.length})</h4>
       ${p.elements.map((e,i) => `<div class="el" id="el-${i}">
@@ -200,6 +214,27 @@ async function person(slug) {
       <textarea class="oneliner" rows="4" style="resize:vertical"
         onchange="save('${p.id}', {short: this.value})">${esc(p.summary.short)}</textarea>
     </section>`;
+}
+
+const VAL_COLORS = { "-2":"#8a4a4a", "-1":"#7d5c50", "0":"#4a4c55", "1":"#5d7a5f", "2":"#79b287" };
+const fmtVal = v => v == null ? "?" : v > 0 ? `+${v}` : v < 0 ? `−${-v}` : "0";
+function arcBlock(p) {
+  const a = p.arc || {};
+  if (!p.arc_version || !(a.beats_emotion||[]).length)
+    return `<div class="arc"><div class="endp" style="color:var(--faint);font-style:italic">sem arco extraído</div></div>`;
+  const spark = a.beats_emotion.map((be, k) => {
+    const b = p.beats[be.beat_index] || {};
+    const chip = `<span class="sbeat ${be.beat_index === a.virada ? "virada" : ""}"
+      style="background:${VAL_COLORS[String(be.valence)] || "#333"}"
+      title="beat ${be.beat_index} · ${b.type||"?"} · ${esc(be.label||"")} — ${esc(b.summary||"")}"
+      onclick="seek('${b.video_id}',${b.start ?? 0})">${b.type||"?"} ${fmtVal(be.valence)}${be.beat_index === a.virada ? " ★" : ""}</span>`;
+    return k ? `<span class="sarrow">→</span>${chip}` : chip;
+  }).join("");
+  return `<div class="arc">
+    <div class="endp">← <b>entrada (${fmtVal(a.entrada?.valence)})</b> ${esc(a.entrada?.resumo || "—")}</div>
+    <div class="spark">${spark}</div>
+    <div class="endp">→ <b>saída (${fmtVal(a.saida?.valence)})</b> ${esc(a.saida?.resumo || "—")}</div>
+  </div>`;
 }
 
 const DEMO_LABELS = {

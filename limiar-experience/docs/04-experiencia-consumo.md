@@ -171,17 +171,45 @@ que ainda está "lá", os que já voltaram. É a tese do projeto em modo
 panorâmico — a mesma travessia, centenas de ritmos.
 
 O **degradê emocional** é a pele visual da Maré: a cor/luz de cada figura
-evolui do tom de entrada ao tom de saída da própria história (dados de
-`tone` por beat, que o pipeline já extrai) — o Campo inteiro escurece na
-onda das mortes e reaquece na onda dos retornos. Evolução visual, não
-efeito: é dado temporal tornado atmosfera.
+evolui pela valência do beat que ela está vivendo — o Campo inteiro
+escurece na onda das mortes e reaquece na onda dos retornos. Evolução
+visual, não efeito: é dado temporal tornado atmosfera. No follow, o mesmo
+degradê vira a evolução da figura seguida (entrada → virada → saída); no
+agregado, vira o clima do Campo em cada ponto do scrub.
 
-- **Dados:** beats com timestamps + `tone` (já no export); duração por
-  história para a normalização.
+**Dados reais desde 2026-07-12 (passada `acervo arc` + timeline
+normalizada):** cada pessoa do export carrega `arc` (valência -2..+2 por
+beat com label curto, `entrada`/`saida` com uma frase e valência cada,
+`virada` = índice do beat do ponto de virada) e `timeline_norm` (duração
+total da história + offset de cada parte); cada beat e cada quote ganharam
+`t_norm` [0,1] — o scrub global é uma consulta, não uma conta. O achado
+agregado do corpus de 46 dá o formato da onda: quase todo mundo entra
+baixo (média −0,84) e sai no teto (+1,98 — 44 de 45 saem em +2), com a
+virada cedo na história contada (t_norm mediano 0,15, quase sempre num
+beat de EQM) — a Maré tem, portanto, uma subida coletiva previsível, e as
+exceções (arcos internamente sombrios, viradas tardias) são exatamente o
+que impede a onda de virar clichê.
+
+Regras de honestidade (herdam o §9 e o req. 7 do doc 02):
+
+- **Tudo deriva de timestamps e valências extraídas com validação** — a
+  valência é por beat, calibrada nos trechos do transcript e revisável na
+  UI do acervo (bloco "Arco"); `t_norm` é aritmética sobre as durações
+  reais das partes. **Nenhuma coreografia inventada**: se a figura cai no
+  scrub 0,3, é porque a pessoa contou a morte naquele ponto da própria
+  história.
+- Beats de moldura do canal (vinheta, apresentação, encerramento) são
+  neutros por regra de prompt — a onda emocional vem do relato, não da
+  edição do vídeo.
+- Lacunas são marcadas (`needs_attention`), nunca preenchidas em silêncio.
+
+- **Dados:** `arc` + `timeline_norm` + `t_norm` em beats/quotes (export,
+  manifest `d27de65adf0ea1d3`).
 - **Custo:** moderado — a state machine por agente (doc 03 §4.2) já é
   dirigida por comandos; a Maré é "todos os diretores ao mesmo tempo" +
-  um controle de scrub. Respeita o princípio §1.1: a leitura vem das ondas,
-  não do caos.
+  um controle de scrub. Estados por agente (§5.5) + valência por beat
+  dirigem animação e cor. Respeita o princípio §1.1: a leitura vem das
+  ondas, não do caos.
 - **Entra em:** pós-M6 (precisa de beats reais por pessoa no Campo);
   protótipo debug possível quando o M4 fechar o beat→estado.
 
@@ -325,6 +353,13 @@ Decisões:
 - Relação com o Diário (doc 01 §5): o Diário é o objeto pessoal do
   visitante; a legenda é a leitura do **estado presente da cena**. Papéis
   diferentes, sem fusão.
+- **A frase do visitante (2026-07-12):** cada lente ativa (elemento,
+  adjacente ou lente demográfica) mostra no bottom a sua
+  `frase_visitante` — uma linha da voz editorial do LIMIAR desmistificando
+  o que se vê ("Estas pessoas relatam ter existido em mais de um lugar ao
+  mesmo tempo…"), fiel ao corpus e sem jargão. Fonte:
+  `acervo/taxonomy.yaml` → `taxonomy.json` do export (campos em
+  `elementos`, `adjacentes_detalhe` e `lentes_demograficas`).
 
 - **Dados:** nomes/cores dos núcleos, contagens, lente ativa — tudo já no
   contentStore do M3.

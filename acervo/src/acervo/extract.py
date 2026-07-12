@@ -188,7 +188,13 @@ def parse_json_output(raw: str) -> dict:
     start, end = s.find("{"), s.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("saída sem objeto JSON")
-    return json.loads(s[start : end + 1])
+    s = s[start : end + 1]
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        # tolerância: números com sinal + explícito ("valence": +1) não são
+        # JSON válido — só tentamos remover quando o parse estrito já falhou
+        return json.loads(re.sub(r"([:\[,]\s*)\+(?=\d)", r"\1", s))
 
 
 def call_with_repair(

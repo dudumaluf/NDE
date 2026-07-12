@@ -108,7 +108,10 @@ def export_person_audio(cfg: AcervoConfig, p: Person, out_root: Path) -> dict:
 
 
 def public_person(p: Person, audio_index: dict, analysis_row: dict | None) -> dict:
+    from .arc import compute_timeline, t_norm_of
+
     name = "Anônima" if p.person.anonymized else p.person.display_name
+    timeline = compute_timeline(p)  # recomputável — não depende do person.json
     return {
         "schema_version": p.schema_version,
         "id": p.id,
@@ -125,12 +128,26 @@ def public_person(p: Person, audio_index: dict, analysis_row: dict | None) -> di
         ],
         "summary": p.summary.model_dump(),
         "tone": p.tone.model_dump(),
-        "beats": [b.model_dump() for b in p.beats if b.type != "outro"],
+        "arc": p.arc.model_dump(),
+        "timeline_norm": timeline.model_dump(),
+        "beats": [
+            b.model_dump()
+            | {
+                "beat_index": i,  # índice no arc.beats_emotion (lista completa)
+                "t_norm": t_norm_of(timeline, b.video_id, b.start),
+                "t_norm_end": t_norm_of(timeline, b.video_id, b.end),
+            }
+            for i, b in enumerate(p.beats)
+            if b.type != "outro"
+        ],
         "elements": [
             {
                 "key": e.key,
                 "confidence": e.confidence,
-                "quotes": [q.model_dump() for q in e.quotes[:4]],
+                "quotes": [
+                    q.model_dump() | {"t_norm": t_norm_of(timeline, q.video_id, q.start)}
+                    for q in e.quotes[:4]
+                ],
             }
             for e in p.elements
         ],
@@ -168,16 +185,26 @@ def run_export(cfg: AcervoConfig, allow_unreviewed: bool = False, with_audio: bo
     (out / "people").mkdir(exist_ok=True)
 
     tax = yaml.safe_load((cfg.root / "taxonomy.yaml").read_text(encoding="utf-8"))
+    # adjacentes é mapping key → {label, frase_visitante}; publicamos a lista
+    # de keys (compat com o app) + detalhe com a voz editorial (doc 04 §6).
+    adjacentes = tax.get("adjacentes") or {}
     (out / "taxonomy.json").write_text(
         json.dumps(
             {
                 "version": tax.get("version"),
                 "dominios": tax.get("dominios"),
                 "elementos": [
-                    {k: el.get(k) for k in ("key", "label", "dominio", "nota")}
+                    {k: el.get(k) for k in ("key", "label", "dominio", "nota", "frase_visitante")}
                     for el in tax.get("elementos", [])
                 ],
-                "adjacentes": tax.get("adjacentes", []),
+                "adjacentes": list(adjacentes),
+                "adjacentes_detalhe": [
+                    {"key": k,
+                     "label": (v or {}).get("label"),
+                     "frase_visitante": (v or {}).get("frase_visitante")}
+                    for k, v in adjacentes.items()
+                ],
+                "lentes_demograficas": tax.get("lentes_demograficas", []),
             },
             ensure_ascii=False,
             indent=1,

@@ -149,6 +149,86 @@ class Demographics(BaseModel):
         return self
 
 
+def _coerce_valence_int(v: object) -> int | None:
+    """Valência inteira -2..+2, tolerante a '+2', '-1.0', 'null' (modelo barato)."""
+    if v is None:
+        return None
+    m = re.search(r"[+-]?\d+", str(v))
+    if not m:
+        return None
+    return max(-2, min(2, int(m.group())))
+
+
+class BeatEmotion(BaseModel):
+    """Valência emocional de UM beat (alinhado por índice a Person.beats)."""
+
+    beat_index: int
+    valence: int = Field(ge=-2, le=2)
+    label: str = ""  # 1-3 palavras pt ("medo e dor", "paz absoluta")
+
+    @field_validator("valence", mode="before")
+    @classmethod
+    def _coerce_valence(cls, v: object) -> int:
+        return _coerce_valence_int(v) or 0
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _coerce_label(cls, v: object) -> str:
+        return str(v or "").strip()[:60]
+
+
+class ArcEndpoint(BaseModel):
+    """Como a pessoa estava ANTES do evento / o que se tornou DEPOIS."""
+
+    resumo: str = ""
+    valence: int | None = Field(default=None, ge=-2, le=2)
+
+    @field_validator("resumo", mode="before")
+    @classmethod
+    def _coerce_resumo(cls, v: object) -> str:
+        return str(v or "").strip()[:300]
+
+    @field_validator("valence", mode="before")
+    @classmethod
+    def _coerce_valence(cls, v: object) -> int | None:
+        return _coerce_valence_int(v)
+
+
+class Arc(BaseModel):
+    """Arco emocional da história (passada complementar barata, 1 chamada/pessoa).
+
+    `beats_emotion` é alinhada 1:1 aos beats existentes (mesma ordem/índice);
+    `virada` é o beat_index do ponto de virada emocional (geralmente a EQM)."""
+
+    beats_emotion: list[BeatEmotion] = []
+    entrada: ArcEndpoint = ArcEndpoint()
+    saida: ArcEndpoint = ArcEndpoint()
+    virada: int | None = None
+
+    @field_validator("virada", mode="before")
+    @classmethod
+    def _coerce_virada(cls, v: object) -> int | None:
+        if v is None:
+            return None
+        m = re.search(r"\d+", str(v))
+        return int(m.group()) if m else None
+
+
+class TimelinePart(BaseModel):
+    video_id: str
+    offset_s: float = 0.0  # início desta parte no tempo global da história
+    duration_s: float = 0.0
+
+
+class Timeline(BaseModel):
+    """Timeline normalizada da história (derivação local, recomputável):
+    duração total = soma das partes na ordem; t_norm de beats/quotes =
+    (offset da parte + start local) / total_s."""
+
+    total_s: float = 0.0
+    parts: list[TimelinePart] = []
+
+
 class Summary(BaseModel):
     one_liner: str = ""
     short: str = ""
@@ -174,6 +254,9 @@ class Person(BaseModel):
     person: PersonMeta
     demographics: Demographics = Demographics()
     demographics_version: str | None = None  # cache da passada demográfica
+    arc: Arc = Arc()
+    arc_version: str | None = None  # cache da passada de arco emocional
+    timeline_norm: Timeline = Timeline()  # derivado local, recomputável
     beats: list[Beat] = []
     elements: list[ElementHit] = []
     emergent_motifs: list[EmergentMotif] = []
