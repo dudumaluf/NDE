@@ -35,9 +35,14 @@ _model_cache: dict[str, Any] = {}
 def get_model(cfg: AcervoConfig):
     name = cfg.embeddings.model
     if name not in _model_cache:
+        import os
+
         from sentence_transformers import SentenceTransformer
 
-        _model_cache[name] = SentenceTransformer(name)
+        # MPS trava (deadlock em waitUntilCompleted) com docs de ~8k tokens
+        # no Air de 16 GB — ACERVO_EMBED_DEVICE=cpu contorna (lote 2).
+        device = os.environ.get("ACERVO_EMBED_DEVICE") or None
+        _model_cache[name] = SentenceTransformer(name, device=device)
     return _model_cache[name]
 
 
@@ -98,7 +103,11 @@ def embed_people(cfg: AcervoConfig, persons: list[Person]) -> np.ndarray:
     """Híbrido: 40% semântica (voz da depoente) + 60% assinatura IDF."""
     model = get_model(cfg)
     docs = [person_document(p, cfg) for p in persons]
-    text = np.asarray(model.encode(docs, normalize_embeddings=True, show_progress_bar=False))
+    # batch pequeno: docs de ~8k tokens × batch 32 estouram os 16 GB do Air
+    # (thrashing observado no lote 2, 46 pessoas); 4 por vez cabe folgado.
+    text = np.asarray(
+        model.encode(docs, batch_size=4, normalize_embeddings=True, show_progress_bar=False)
+    )
     sig = element_signature(persons)
     return np.hstack([0.4 * text, 0.6 * sig])
 
@@ -152,13 +161,19 @@ def cluster_people(emb: np.ndarray, seed: int) -> np.ndarray:
                 HDBSCAN(min_cluster_size=max(3, n // 20), metric="cosine").fit_predict(emb)
             )
             valid = labels[labels >= 0]
-            if len(set(valid)) >= 3 and Counter(valid).most_common(1)[0][1] <= 0.6 * n:
+            if (
+                len(set(valid)) >= 3
+                and Counter(valid).most_common(1)[0][1] <= 0.6 * n
+                # lote 2 (n=46): HDBSCAN deixou 48% do corpus como ruído —
+                # inaceitável para a constelação; cai no aglomerativo.
+                and (labels < 0).sum() <= 0.25 * n
+            ):
                 return labels
         except Exception:  # noqa: BLE001
             pass
 
     best, best_score = None, -2.0
-    for k in range(3, min(7, n // 2) + 1):
+    for k in range(3, min(13, n // 3) + 1):
         labels = _agglomerative(emb, k)
         biggest = Counter(labels).most_common(1)[0][1]
         if biggest > 0.7 * n:

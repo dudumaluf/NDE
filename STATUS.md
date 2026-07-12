@@ -4,7 +4,7 @@
 > em qualquer máquina deve conseguir retomar o trabalho lendo isto + os docs.
 > **Ritual**: atualizar ao final de cada marco/sessão relevante, antes do push.
 
-Última atualização: **2026-07-11, noite** (VAT Studio: interface visual do baker GLB→VAT em localhost:5198 — Dudu não decide mais número técnico nenhum)
+Última atualização: **2026-07-12, madrugada** (lote 2: corpus de 46 pessoas analisado e exportado)
 
 ---
 
@@ -26,6 +26,7 @@
 | A4 (adiantado) | **UI de revisão no ar**: `acervo review` → http://localhost:8777 — dashboard da fila/custos, cards das 17 pessoas, página por pessoa (players por parte, timeline de beats colorida, quotes que tocam no clique, aprovar/anonimizar/editar com locked_fields) | ✔ v1 |
 | A3 | `analyze` + `export/`: embedding híbrido (40% texto bge-m3 + 60% assinatura IDF de elementos), **7 núcleos nomeados via LLM**, 86 fios, 6 temas emergentes transversais, co-ocorrências; export completo com **1592 cortes de áudio** (manifest `f948b7cbd21e3608`, 1,0 GB) → **M3 do app destravado com dados reais** | ✔ tag `a3` |
 | VAT-baker/Studio | Motor `tools/vat-core.mjs` + **VAT Studio** (`npm run studio` → localhost:5198): drag-and-drop de GLB/Mixamo, preview 3D com clipes, loops/one-shots renomeáveis e reordenáveis, presets multidão/personagem, **orçamento com semáforo** (vértices/textura/download) e **redução de malha em 1 clique** (meshoptimizer, antes/depois lado a lado), bake com progresso SSE + selftest + botão "testar na experiência". CLI `tools/vat-bake.mjs` (mesmo motor, `--max-verts`, `--selftest`). App carrega via `?vat=<nome>` (aditivo — default segue o asset legado). Validado E2E com Soldier.glb nos 2 backends (7434→2036 verts, textura 2036×180, 4,2 MB, tudo verde). Guia: `limiar-experience/tools/README.md` | ✔ |
+| Lote 2 | **Corpus de 46 pessoas** (97 vídeos, ~75h): re-análise com voz da depoente — **12 núcleos nomeados via LLM** (maior = 9 pessoas, 20%; silhouette 0,177), 250 fios, 8 temas emergentes transversais; **4027 quotes validadas** (373 rejeitadas na extração), média 22,8 elementos/pessoa; export com **4061 cortes de áudio** (manifest `d1a2c16f7298fa59`, 2,7 GB). Ranking top-5: missão 45/46, presenças 43, inefabilidade 43, corpo_como_veículo 43, transformação 42 — clichês continuam atrás (luz 25, passagem 24, parentes 20) | ✔ |
 | A5 | Fechamento do piloto: curadoria do Dudu na UI + report | ⬅ próximo (junto com M3) |
 | M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
@@ -113,13 +114,22 @@ do corpus é missão(17)/fora_do_corpo(16)/presenças(16)/paz(16); o
 imaginário popular fica atrás — passagem/túnel 7/17, luz 7/17, parentes
 falecidos 6/17. Tom: 16/17 "mista" — nenhuma história é simplesmente feliz.
 
-**Veredito preliminar pós-extract (17 pessoas):** todas confirmadas —
-`missao` é o ÚNICO elemento universal (17/17, acima até de fora_do_corpo!);
-`amor_incondicional` 14/17; `sensitividade` 14/17; rede adjacente forte
-(projeção astral 11, vidas passadas 8, ET 7). E os clichês são minoritários:
-passagem/túnel 7/17, luz 7/17, parentes falecidos 6/17. As promoções do
-corpus validadas: `corpo_como_veiculo` 16/17, `familiaridade` 16/17,
-`reentrada_dolorosa` 14/17, `instancias_simultaneas` 9/17.
+**Veredito no corpus de 46 (lote 2, 2026-07-12) — os padrões do piloto
+seguram:** H1 mantida — `missao` 45/46 (98%; a única exceção é um vídeo que
+não é relato de EQM, ver pendência Nayda); amor 34/46, transformação 42/46.
+H2 mantida — sensitividade 37/46 (80%) + premonição cotidiana 19/46.
+H3 igual (parcial) — catástrofe caiu para 4/46 (9%): era peculiaridade do
+piloto, não padrão. H4 mantida — projeção astral 24/46 (52%), vidas
+passadas 20/46, ET 14/46. Anti-clichê CONFIRMADO com N maior: pódio =
+missão(45)/presenças(43)/inefabilidade(43)/corpo_como_veículo(43)/
+transformação(42); clichês na metade de baixo — luz 25/46 (54%), passagem
+24/46 (52%), parentes falecidos 20/46 (43%), túnel nem aparece como key
+própria. Tom: 36/46 mista, 10/46 positiva. Clustering: os 12 núcleos agora
+têm assinatura fenomenológica (estado_de_graca 4,6×, visao_cosmica 5,8×,
+parentes+memória_pré-encarnação, angustiante+presença_perturbadora…) com
+causas de morte misturadas dentro de cada um — melhor que o piloto, onde
+circunstância dominava; os nomes do LLM ainda puxam para circunstância em
+2-3 casos ("Na mesa de cirurgia").
 
 ## Pendências e questões abertas
 
@@ -164,7 +174,22 @@ corpus validadas: `corpo_como_veiculo` 16/17, `familiaridade` 16/17,
 - Os **núcleos do piloto refletem circunstância** (coma, parto, infância...)
   mais que conteúdo da EQM — esperado com N=17; no corpus completo (597) a
   clusterização deve capturar padrões fenomenológicos. Re-avaliar pesos do
-  embedding híbrido (40/60) quando escalar.
+  embedding híbrido (40/60) quando escalar. → **Lote 2 (N=46): melhorou.**
+  HDBSCAN degenerou (48% ruído) e foi descartado por guarda-rail novo
+  (≤25% ruído); aglomerativo com k até 13 escolhido por silhouette (k=12,
+  0,177 vs 0,209 do HDBSCAN mas com todo mundo dentro). Pesos 40/60
+  mantidos (varredura em `notes/exp_cluster46.py`: 30/70 e 50/50 não
+  ganham de forma consistente).
+- **Curadoria (A5) — lixo conhecido no corpus de 46**: `nayda-cabral`
+  ("O que é orar") **não é relato de EQM** (0 elementos, monólogo sobre
+  oração) — remover ou marcar; Nayda Cabral tem **3 entradas** de pessoa
+  (3 vídeos avulsos não agrupados); 4 slugs vêm de título, não de nome
+  (`a-impressionante-kerly-costa-...`, `era-quantica-...`,
+  `o-meu-corpo-e-uma-coisa-...`, `vou-te-mostrar-...` — este sem nome).
+- **Mac Air 16 GB: embeddings do analyze rodam na CPU** — MPS deu deadlock
+  (waitUntilCompleted eterno) e depois thrashing de memória com docs de
+  ~8k tokens; `ACERVO_EMBED_DEVICE=cpu` + batch_size=4 resolvem (~20 min
+  para 46 pessoas). Registrado em `analyze.py`.
 - `faceFlip` default parece correto (pessoas de costas quando se afastam),
   mas conferir em movimento; há toggle no painel.
 - Warning `THREE.Clock deprecated` no console — cosmético, ignorar.
