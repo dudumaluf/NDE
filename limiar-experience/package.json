@@ -6,10 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "node scripts/sync-content.mjs",
     "studio": "node tools/vat-studio.mjs",
     "build": "tsc -b && vite build",
+    "prebuild": "node scripts/sync-content.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "sync-content": "node scripts/sync-content.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

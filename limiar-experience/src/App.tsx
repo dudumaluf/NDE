@@ -4,6 +4,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Leva } from "leva";
 import { Scene, initialSceneMode } from "./scene/Scene";
 import { qpBool, qpStr } from "./lib/urlParams";
+import { useContent } from "./data/contentStore";
 
 /** Sinaliza prontidão (2 frames), detecta o backend e mede FPS médio. */
 function Probe({
@@ -59,6 +60,7 @@ export default function App() {
   const [backend, setBackend] = useState<string | null>(null);
   const [fps, setFps] = useState<number | null>(null);
   const showUi = qpBool("leva", true);
+  const content = useContent((s) => s.content);
 
   return (
     <>
@@ -102,6 +104,26 @@ export default function App() {
         {backend ? `render: ${backend}` : "inicializando renderer…"}
         {fps !== null ? ` · ${fps.toFixed(0)} fps` : ""}
       </div>
+      {content && (
+        <div
+          style={{
+            position: "fixed",
+            right: 10,
+            bottom: 10,
+            padding: "4px 10px",
+            borderRadius: 6,
+            background: "rgba(0,0,0,0.45)",
+            color: "#cfcac2",
+            fontSize: 12,
+            pointerEvents: "none",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {content.manifest.counts.people} pessoas ·{" "}
+          {content.clusters.length} núcleos · manifest{" "}
+          {content.manifest.content_hash.slice(0, 8)}
+        </div>
+      )}
     </>
   );
 }

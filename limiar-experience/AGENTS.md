@@ -37,6 +37,31 @@ Leia antes de qualquer tarefa, nesta ordem:
   com WebGL2). Separação é O(N²) com `Loop` — só roda no backend WebGPU
   (transform feedback não tem acesso aleatório a buffers); hash grid espacial
   é o upgrade planejado para >4096 agentes.
+- **Transform feedback (compute WebGL2) tem teto de 4 varyings** — TODA
+  leitura de storage num pass TF vira attribute+varying no GLSLNodeBuilder,
+  mesmo sem escrita. Os 4 slots já estão tomados (pos/vel/heading/phase);
+  buffer novo lido pelo compute (ex.: targets do M3) entra como
+  **DataTexture + textureLoad** no pass sem separação (mesmo Float32Array
+  espelhado nos dois recursos; `commitTargets()` marca os dois).
+- **Storage buffer lido no VERTEX stage do render**: WebGPU permite direto
+  (acesso vira read-only automaticamente); WebGL2 exige `.setPBO(true)` no
+  nó `storage()` — o backend copia o buffer TF para uma DataTexture após
+  cada compute e o vertex shader lê via texelFetch. É assim que os fios
+  (`src/render/CrowdWires.tsx`) seguem os agentes sem tráfego CPU↔GPU.
+- Data layer M3 (`src/data/`): `contentStore.ts` (zustand) carrega
+  `public/content/` (cópia de `acervo/export/` via `npm run sync-content`,
+  automático em predev/prebuild; gitignored). Sem content/ → fallback
+  procedural silencioso. Pessoas reais = slots 0..45 (ordem do manifest);
+  cor por núcleo no `iColorScale` (nenhum vertex buffer novo); alvos
+  (gravidade/lentes) via `computeTargets()` + `sim.commitTargets()`.
+- Debug M3: query params `gravity`, `mapScale`, `lens`, `wires`,
+  `wiresAlpha`, `gravForca`; debug cor "alvo" (R=dist/20, G=tem-alvo);
+  `scripts/probe.mjs "<url>"` imprime estado do seek + readback GPU real
+  das posições (`window.__limiarSim` / `__limiarReadPositions`, só em dev).
+- O pre-roll do `?simT` espera o 2º frame (leva entrega valores reais após
+  o 1º commit — no 1º frame rodaria com defaults).
+- Spawn permuta o índice (`i×197 mod count`) para as pessoas reais não
+  nascerem enfileiradas no canto do grid.
 - Fase do passo por agente integra a velocidade (`phasePerUnit` frames por
   unidade percorrida) — o walk cycle gruda no chão em qualquer velocidade.
 - **VATs próprias sem Houdini**: motor em `tools/vat-core.mjs`, com duas

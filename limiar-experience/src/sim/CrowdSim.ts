@@ -10,12 +10,14 @@ import {
   instanceIndex,
   instancedArray,
   int,
+  ivec2,
   length,
   min,
   mix,
   mx_noise_float,
   normalize,
   smoothstep,
+  textureLoad,
   uniform,
   vec2,
   vec3,
@@ -37,6 +39,16 @@ type N = any;
  *                 não dá acesso aleatório aos buffers — doc 03 §10)
  *   contenção  — banda suave no raio do Campo (o "distance check" do patch)
  *   mouse      — atrai/repele em torno do alvo raycastado no chão
+ *   seek       — M3: agentes com alvo (pessoa real com posição UMAP ou lente)
+ *                buscam targets[i].xyz com arrival (desacelera chegando) e
+ *                damping tangencial (não orbita). targets[i].w = tem-alvo;
+ *                uSeekWeight (a "gravidade") liga/desliga globalmente.
+ *
+ * Os alvos moram num Float32Array espelhado em DOIS recursos GPU: storage
+ * buffer (lido pelo compute WebGPU) e DataTexture (lida pelo compute do
+ * fallback WebGL2 via texelFetch) — ler storage extra num pass de transform
+ * feedback estouraria o limite de 4 varyings do TF (cada leitura de storage
+ * vira um varying no GLSLNodeBuilder, mesmo sem escrita).
  *
  * A fase do passo integra a velocidade real: quem anda devagar pisa devagar.
  */
@@ -47,6 +59,13 @@ export class CrowdSim {
   readonly velocities: N;
   readonly headings: N;
   readonly phases: N;
+  /** vec4 por agente: xyz = alvo no mundo, w = tem-alvo (0/1). CPU escreve. */
+  readonly targets: N;
+  /** Espelho CPU de `targets` — escrever aqui e chamar commitTargets(). */
+  readonly targetsArray: Float32Array;
+  /** O mesmo array como DataTexture — caminho do compute no fallback WebGL2. */
+  private targetsTexture: THREE.DataTexture;
+  private texSide: number;
 
   readonly u = {
     count: uniform(1024),
@@ -70,6 +89,12 @@ export class CrowdSim {
     mouseMode: uniform(0), // -1 repele, 0 off, +1 atrai
     mouseRadius: uniform(7),
     mouseWeight: uniform(1.2),
+    /** Gravidade dos dados (M3): 0 = solto (wander puro), >0 = busca o alvo. */
+    seekWeight: uniform(0),
+    /** Raio de chegada: dentro dele o alvo deixa de puxar (arrival). */
+    seekArrive: uniform(1.6),
+    /** Damping extra perto do alvo (mata órbita e overshoot). */
+    seekDamp: uniform(1.2),
     turnRate: uniform(6),
     /** Frames de walk cycle por unidade percorrida (acopla passo à velocidade). */
     phasePerUnit: uniform(34),
@@ -85,16 +110,40 @@ export class CrowdSim {
     this.velocities = instancedArray(maxCount, "vec3");
     this.headings = instancedArray(maxCount, "vec2");
     this.phases = instancedArray(maxCount, "float");
+    this.targets = instancedArray(maxCount, "vec4");
+    this.targetsArray = this.targets.value.array as Float32Array;
+
+    this.texSide = Math.ceil(Math.sqrt(maxCount));
+    this.targetsTexture = new THREE.DataTexture(
+      this.targetsArray,
+      this.texSide,
+      this.texSide,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
+    this.targetsTexture.magFilter = THREE.NearestFilter;
+    this.targetsTexture.minFilter = THREE.NearestFilter;
+    this.targetsTexture.needsUpdate = true;
 
     this.resetPass = this.buildResetPass();
     this.updateFull = this.buildUpdatePass(true);
     this.updateNoSep = this.buildUpdatePass(false);
   }
 
+  /** Sobe o espelho CPU dos alvos para a GPU (após computeTargets). */
+  commitTargets(): void {
+    (this.targets.value as THREE.BufferAttribute).needsUpdate = true;
+    this.targetsTexture.needsUpdate = true;
+  }
+
   private buildResetPass(): N {
     const u = this.u;
     return Fn(() => {
-      const i: N = float(instanceIndex);
+      // Índice permutado para a POSIÇÃO de spawn (i×197 mod count, 197 primo
+      // → bijeção p/ count=N²): as pessoas reais (slots 0..45, M3) nascem
+      // espalhadas pela multidão em vez de enfileiradas no canto do grid.
+      const count: N = u.gridN.mul(u.gridN);
+      const i: N = float(instanceIndex).mul(197).mod(count);
       const n: N = u.gridN;
       const ix: N = i.mod(n);
       const iz: N = i.div(n).floor();
@@ -125,6 +174,25 @@ export class CrowdSim {
       const p: N = this.positions.element(instanceIndex).toVar();
       const v: N = this.velocities.element(instanceIndex).toVar();
 
+      // --- seek (M3), parte 1: onde estou em relação ao meu alvo? ---
+      // targets.w=1 marca agente com pessoa/alvo; uSeekWeight é a gravidade
+      // global. `arrive` desacelera chegando; `nearT` alimenta o damping e a
+      // atenuação do wander (perto do alvo o noise não re-arranca o agente).
+      // No pass sem separação (fallback WebGL2/TF) o alvo vem da textura:
+      // um 5º storage read estouraria os 4 varyings do transform feedback.
+      const side = int(this.texSide);
+      const tgt: N = withSeparation
+        ? this.targets.element(instanceIndex)
+        : textureLoad(
+            this.targetsTexture,
+            ivec2(selfI.mod(side), selfI.div(side)),
+          );
+      const seekGate: N = tgt.w.mul(smoothstep(0.0, 0.05, u.seekWeight));
+      const toTgt: N = tgt.xz.sub(p.xz);
+      const tDist: N = length(toTgt).add(1e-5);
+      const arrive: N = smoothstep(float(0), u.seekArrive, tDist);
+      const nearT: N = float(1).sub(arrive).mul(seekGate);
+
       // --- wander: curl de um potencial de noise (campo sem divergência) ---
       const pot = (xz: N): N =>
         mx_noise_float(
@@ -139,7 +207,8 @@ export class CrowdSim {
       const dPdz: N = pot(p.xz.add(vec2(0, e))).sub(pot(p.xz.sub(vec2(0, e))));
       const wander: N = normalize(vec2(dPdz, dPdx.negate()).add(vec2(1e-5, 0)));
 
-      const acc: N = wander.mul(u.wanderWeight).toVar();
+      const wanderAtten: N = float(1).sub(nearT.mul(0.85));
+      const acc: N = wander.mul(u.wanderWeight).mul(wanderAtten).toVar();
 
       // --- separação: vizinhos empurram (evitação de sobreposição) ---
       if (withSeparation) {
@@ -180,11 +249,18 @@ export class CrowdSim {
         toMouse.div(mDist).mul(mFall).mul(u.mouseMode).mul(u.mouseWeight),
       );
 
+      // --- seek (M3), parte 2: a força em si (arrival zera no alvo) ---
+      acc.addAssign(
+        toTgt.div(tDist).mul(arrive).mul(u.seekWeight).mul(seekGate),
+      );
+
       // --- integração com drag e teto de velocidade ---
+      // O damping do arrival soma ao drag base: quem chegou perde inércia.
       const dt: N = u.dt;
+      const dragTotal: N = u.drag.add(nearT.mul(u.seekDamp));
       const vel2: N = v.xz
         .add(acc.mul(u.accel).mul(dt))
-        .mul(exp(u.drag.negate().mul(dt)))
+        .mul(exp(dragTotal.negate().mul(dt)))
         .toVar();
       const speed: N = length(vel2).add(1e-6);
       vel2.assign(vel2.mul(min(float(1), u.maxSpeed.div(speed))));

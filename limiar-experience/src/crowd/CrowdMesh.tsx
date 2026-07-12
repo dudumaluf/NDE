@@ -9,8 +9,13 @@ import { vatPlayer } from "../vat/VatClipPlayer";
 import { CrowdSim } from "../sim/CrowdSim";
 import { mouseTarget, type MouseMode } from "../sim/mouseTarget";
 import { buildCrowdMaterial } from "./crowdMaterial";
-import { fillStaticAttributes } from "./spawn";
+import { fillContentAttributes, fillStaticAttributes } from "./spawn";
 import { qpBool, qpNum, qpStr } from "../lib/urlParams";
+import { useContent } from "../data/contentStore";
+import { computeTargets } from "../data/agentMapping";
+import { CrowdWires } from "../render/CrowdWires";
+
+const NO_LENS = "nenhuma";
 
 const MAX_GRID = 64; // 4096 pessoas — teto do protótipo
 
@@ -25,6 +30,7 @@ export function CrowdMesh() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const markerRef = useRef<THREE.Mesh>(null);
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
+  const content = useContent((s) => s.content);
 
   const sim = useMemo(() => new CrowdSim(MAX_GRID * MAX_GRID), []);
   const { geometry, attrs } = useMemo(
@@ -73,18 +79,56 @@ export function CrowdMesh() {
     passo: { value: 34, min: 5, max: 90, label: "passo/unidade" },
     faceFlip: { value: qpBool("faceflip", false), label: "inverter facing" },
     debug: {
-      value: qpStr<"off" | "velocidade" | "direção">("debug", "off", [
+      value: qpStr<"off" | "velocidade" | "direção" | "alvo">("debug", "off", [
         "off",
         "velocidade",
         "direção",
+        "alvo",
       ]),
-      options: ["off", "velocidade", "direção"],
+      options: ["off", "velocidade", "direção", "alvo"],
       label: "debug cor",
     },
   });
 
+  // --- M3: o Campo dirigido pelos dados reais (só aparece com content/) ---
+  const lensOptions = useMemo(
+    () =>
+      content
+        ? [NO_LENS, ...content.taxonomy.elementos.map((e) => e.key)]
+        : [NO_LENS],
+    [content],
+  );
+  const d = useControls(
+    "Dados (M3)",
+    {
+      gravidade: { value: qpBool("gravity", false), label: "gravidade (UMAP)" },
+      mapScale: {
+        value: qpNum("mapScale", 14),
+        min: 4,
+        max: 30,
+        label: "escala do mapa",
+      },
+      gravForca: { value: qpNum("gravForca", 2.2), min: 0.3, max: 6, label: "gravidade força" },
+      lente: {
+        value: qpStr("lens", NO_LENS),
+        options: lensOptions,
+        label: "lente (elemento)",
+      },
+      fios: { value: qpBool("wires", true), label: "fios (grafo)" },
+      fiosAlpha: {
+        value: qpNum("wiresAlpha", 0.22),
+        min: 0,
+        max: 0.5,
+        label: "fios alpha",
+      },
+      fiosAltura: { value: 1.05, min: 0, max: 2, label: "fios altura" },
+    },
+    [lensOptions],
+  );
+
   const resetRef = useRef(true);
   const initTimeRef = useRef(qpNum("simT", 0));
+  const frameCount = useRef(0);
 
   // Identidade no instanceMatrix (o node de instancing multiplica por ele).
   useLayoutEffect(() => {
@@ -96,9 +140,12 @@ export function CrowdMesh() {
   }, []);
 
   // Parâmetros de spawn mudaram → re-preenche atributos e agenda reset GPU.
+  // Com content/ carregado, as cores vêm dos núcleos (pessoas nos primeiros
+  // 46 slots, resto dormente); sem ele, paleta procedural do M1.
   useEffect(() => {
     const count = c.grid * c.grid;
-    fillStaticAttributes(attrs, count, c.seed);
+    if (content) fillContentAttributes(attrs, count, c.seed, content);
+    else fillStaticAttributes(attrs, count, c.seed);
     sim.u.count.value = count;
     sim.u.gridN.value = c.grid;
     sim.u.spawnArea.value = c.area;
@@ -106,7 +153,18 @@ export function CrowdMesh() {
     sim.u.seed.value = c.seed;
     if (meshRef.current) meshRef.current.count = count;
     resetRef.current = true;
-  }, [attrs, sim, c.grid, c.area, c.ruido, c.seed]);
+  }, [attrs, sim, content, c.grid, c.area, c.ruido, c.seed]);
+
+  // Alvos dos dados (gravidade/lente) — 46 escritas por mudança, nada por frame.
+  useEffect(() => {
+    if (!content) return;
+    computeTargets(content, MAX_GRID * MAX_GRID, sim.targetsArray, {
+      mapScale: d.mapScale,
+      containRadius: s.contRaio,
+      lens: d.lente === NO_LENS ? null : d.lente,
+    });
+    sim.commitTargets();
+  }, [content, sim, d.mapScale, d.lente, s.contRaio]);
 
   useFrame((_, delta) => {
     mouseTarget.mode = s.mouseModo;
@@ -122,8 +180,31 @@ export function CrowdMesh() {
     sim.u.mouseWeight.value = s.mouseForca;
     sim.u.turnRate.value = s.giro;
     sim.u.phasePerUnit.value = s.passo;
+    // Gravidade: lente ativa força o seek mesmo com o toggle desligado —
+    // aplicar uma lente sem gravidade não teria efeito nenhum.
+    const seekOn = content && (d.gravidade || d.lente !== NO_LENS);
+    sim.u.seekWeight.value = seekOn ? d.gravForca : 0;
+    if (import.meta.env.DEV) {
+      const w = window as unknown as Record<string, unknown>;
+      w.__limiarSim = {
+        seekWeight: sim.u.seekWeight.value,
+        lente: d.lente,
+        gravidade: d.gravidade,
+        tgt0: Array.from(sim.targetsArray.slice(0, 4)),
+        tgt45: Array.from(sim.targetsArray.slice(45 * 4, 45 * 4 + 4)),
+        tgtVersion: (sim.targets.value as THREE.BufferAttribute).version,
+      };
+      w.__limiarReadPositions = async (n: number) => {
+        const buf = await gl.getArrayBufferAsync(sim.positions.value);
+        return Array.from(new Float32Array(buf).slice(0, n * 3));
+      };
+    }
 
-    if (resetRef.current) {
+    // O reset (e o pre-roll do ?simT) espera o 2º frame: o leva só entrega os
+    // valores reais dos controles após o primeiro commit — no 1º frame um
+    // pre-roll rodaria com defaults (ex.: gravidade desligada).
+    frameCount.current += 1;
+    if (resetRef.current && frameCount.current >= 2) {
       resetRef.current = false;
       sim.reset(gl);
       // simT na URL: pré-roda a simulação (screenshots de estado "assentado")
@@ -139,7 +220,9 @@ export function CrowdMesh() {
     bundle.sampler.applyState(vatPlayer.getState());
     bundle.setScale(c.escala);
     bundle.setPaletteAmount(c.paleta ? 1 : 0);
-    bundle.setDebugMode(s.debug === "velocidade" ? 1 : s.debug === "direção" ? 2 : 0);
+    bundle.setDebugMode(
+      s.debug === "velocidade" ? 1 : s.debug === "direção" ? 2 : s.debug === "alvo" ? 3 : 0,
+    );
     bundle.setFaceFlip(s.faceFlip ? -1 : 1);
 
     if (markerRef.current) {
@@ -156,6 +239,15 @@ export function CrowdMesh() {
         args={[geometry, bundle.material, MAX_GRID * MAX_GRID]}
         frustumCulled={false}
       />
+      {content && (
+        <CrowdWires
+          sim={sim}
+          content={content}
+          visible={d.fios}
+          alpha={d.fiosAlpha}
+          lift={d.fiosAltura}
+        />
+      )}
       <mesh ref={markerRef}>
         <sphereGeometry args={[0.06, 16, 16]} />
         <meshBasicMaterial color="#ffffff" />

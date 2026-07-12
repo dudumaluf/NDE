@@ -4,7 +4,7 @@
 > em qualquer máquina deve conseguir retomar o trabalho lendo isto + os docs.
 > **Ritual**: atualizar ao final de cada marco/sessão relevante, antes do push.
 
-Última atualização: **2026-07-12, madrugada** (lote 2: corpus de 46 pessoas analisado e exportado)
+Última atualização: **2026-07-12, tarde** (M3: data layer do app — multidão dirigida pelo corpus real de 46 pessoas)
 
 ---
 
@@ -27,8 +27,8 @@
 | A3 | `analyze` + `export/`: embedding híbrido (40% texto bge-m3 + 60% assinatura IDF de elementos), **7 núcleos nomeados via LLM**, 86 fios, 6 temas emergentes transversais, co-ocorrências; export completo com **1592 cortes de áudio** (manifest `f948b7cbd21e3608`, 1,0 GB) → **M3 do app destravado com dados reais** | ✔ tag `a3` |
 | VAT-baker/Studio | Motor `tools/vat-core.mjs` + **VAT Studio** (`npm run studio` → localhost:5198): drag-and-drop de GLB/Mixamo, preview 3D com clipes, loops/one-shots renomeáveis e reordenáveis, presets multidão/personagem, **orçamento com semáforo** (vértices/textura/download) e **redução de malha em 1 clique** (meshoptimizer, antes/depois lado a lado), bake com progresso SSE + selftest + botão "testar na experiência". CLI `tools/vat-bake.mjs` (mesmo motor, `--max-verts`, `--selftest`). App carrega via `?vat=<nome>` (aditivo — default segue o asset legado). Validado E2E com Soldier.glb nos 2 backends (7434→2036 verts, textura 2036×180, 4,2 MB, tudo verde). Guia: `limiar-experience/tools/README.md` | ✔ |
 | Lote 2 | **Corpus de 46 pessoas** (97 vídeos, ~75h): re-análise com voz da depoente — **12 núcleos nomeados via LLM** (maior = 9 pessoas, 20%; silhouette 0,177), 250 fios, 8 temas emergentes transversais; **4027 quotes validadas** (373 rejeitadas na extração), média 22,8 elementos/pessoa; export com **4061 cortes de áudio** (manifest `d1a2c16f7298fa59`, 2,7 GB). Ranking top-5: missão 45/46, presenças 43, inefabilidade 43, corpo_como_veículo 43, transformação 42 — clichês continuam atrás (luz 25, passagem 24, parentes 20) | ✔ |
-| A5 | Fechamento do piloto: curadoria do Dudu na UI + report | ⬅ próximo (junto com M3) |
-| M3 | Data layer no app — passa a consumir o export **real** do piloto (fake como fallback) | depois do piloto |
+| A5 | Fechamento do piloto: curadoria do Dudu na UI + report | ⬅ próximo |
+| M3 | **Data layer no app**: multidão dirigida pelo export real (46 pessoas → primeiros slots, resto dormente escuro); cores por núcleo (12, matiz espaçado por ângulo áureo via `iColorScale` — zero vertex buffer novo); **gravidade** (seek do umap3d escalado, arrival+damping, toggle no leva + `?gravity=1`, slider escala do mapa ~14); **fios** (LineSegments TSL, endpoints lendo posições vivas: storage read-only no vertex em WebGPU, PBO em WebGL2; alpha × weight); **Lentes v0** (dropdown com os 36 elementos da taxonomy: quem tem gravita ao anel central, quem não tem recua à borda); HUD "46 pessoas · 12 núcleos · manifest d1a2c16f"; `sync-content` em predev/prebuild; fallback silencioso sem content/ (roda procedural como no M2) | ✔ tag `m3` |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
 ## Decisões tomadas (e porquês)
@@ -67,6 +67,19 @@
   plugáveis por config (whisper local e API Anthropic como alternativas).
   PC RTX 2080S = reserva, não é peça necessária. Piloto estimado em poucos
   dólares; `--dry-run` obrigatório antes de cada lote LLM.
+- **M3: content/ é CÓPIA, não symlink** (2026-07-12): `npm run sync-content`
+  (roda em predev/prebuild) copia só os JSONs do `acervo/export/` para
+  `public/content/` (gitignored). Symlink arrastaria os ~2,7 GB de áudio para
+  cada `vite build` e quebraria em máquina sem o export. Áudio fica para o M4
+  (streaming direto vs cópia parcial).
+- **M3: pessoas reais = primeiros 46 slots** de agente (slot i =
+  `manifest.people[i]`); dormentes = resto da multidão, cinza quente escuro.
+  Cor entra pelo `iColorScale` existente (vec4 cor+escala) — nenhum atributo
+  novo (limite de 8 vertex buffers). Alvos (gravidade/lente) em storage buffer
+  vec4 (xyz alvo, w tem-alvo) escrito da CPU (46 escritas por mudança).
+- **M3: lente ativa força o seek** mesmo com gravidade desligada (aplicar
+  lente sem gravidade não teria efeito visível); ângulo do anel preservado do
+  UMAP para vizinhanças não embaralharem ao trocar de lente.
 
 ## Fatos técnicos verificados (nunca re-derivar)
 
@@ -198,7 +211,24 @@ circunstância dominava; os nomes do LLM ainda puxam para circunstância em
 - **iCloud desta máquina trava processos**: `~/Documents` sincroniza no
   iCloud; arquivos evictados ("dataless") fazem git/tsc dormirem para sempre
   em `read`. Cura: `brctl download <caminho>` ou reinstalar `node_modules`.
-  Registrado também no `limiar-experience/AGENTS.md`.
+  Registrado também no `limiar-experience/AGENTS.md`. (2026-07-12: aconteceu
+  de novo no início do M3 — `find . -flags +dataless` localiza os presos;
+  matar `bird`/`fileproviderd` + `brctl download` re-materializou.)
+- **Trabalho órfão no `acervo/` (não commitado, herdado de sessão que caiu)**:
+  passada demográfica barata (`demographics.py` + prompt + `Demographics` no
+  schema + CLI + coluna na webui) — 1 chamada por pessoa (haiku, abertura da
+  parte 1 + fechamento da última). Parece completo mas NUNCA RODOU num lote;
+  ficou fora do commit do M3 de propósito. Testar com `--dry-run`, rodar nas
+  46 e commitar como marco próprio (ou descartar se a curadoria A5 não pedir).
+- **M3 — pendências para o M4**: (a) fios são debug visual por enquanto —
+  na experiência final devem revelar-se progressivamente (doc 01/05);
+  (b) layout por lente é anel simples (tem/não-tem) — considerar espiral por
+  confiança do elemento ou peso do quote; (c) dormentes ainda caminham com
+  wander normal — avaliar velocidade menor/idle para leitura mais clara dos
+  núcleos; (d) posições UMAP dos 12 núcleos se sobrepõem parcialmente
+  (silhouette 0,177) — o `mapScale` ajuda mas núcleos vizinhos se tocam:
+  avaliar "explode por cluster" (offset radial por centroide) como opção de
+  leitura; (e) FPS headless subestima — validar sensação no navegador real.
 
 ## Como retomar numa máquina nova
 

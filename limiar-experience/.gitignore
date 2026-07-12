@@ -6,3 +6,5 @@ shots/
 # exports gerados pelo vat-bake/Studio (reproduzíveis: ver tools/README.md);
 # só os EXRs legados do patch (arquivos soltos em public/vat/) são versionados
 public/vat/*/
+# cópia do acervo/export (npm run sync-content) — nunca versionar
+public/content/

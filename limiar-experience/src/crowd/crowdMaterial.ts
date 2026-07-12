@@ -49,6 +49,7 @@ export function buildCrowdMaterial(
   const iHeading: N = (sim.headings as N).toAttribute();
   const iPhase: N = (sim.phases as N).toAttribute();
   const iVel: N = (sim.velocities as N).toAttribute();
+  const iTarget: N = (sim.targets as N).toAttribute();
 
   const sampler = createVatSampler(posTex, nrmTex, iPhase);
   const uScale: N = uniform(2.5);
@@ -91,11 +92,21 @@ export function buildCrowdMaterial(
     clamp(speed.mul(1.2), 0, 1),
   );
   const headingColor: N = vec3(dir.x.mul(0.5).add(0.5), 0.35, dir.y.mul(0.5).add(0.5));
+  // debug 3 (alvo): R = distância ao alvo /20, G = tem-alvo (w), B = 0.
+  const tgtColor: N = vec3(
+    clamp(length(iTarget.xz.sub(iPos.xz)).div(20), 0, 1),
+    iTarget.w,
+    0,
+  );
 
   material.colorNode = select(
     uDebug.lessThan(0.5),
     baseColor,
-    select(uDebug.lessThan(1.5), speedColor, headingColor),
+    select(
+      uDebug.lessThan(1.5),
+      speedColor,
+      select(uDebug.lessThan(2.5), headingColor, tgtColor),
+    ),
   );
 
   return {
