@@ -9,10 +9,14 @@
 # - `key` estável (nunca renomear; migração explícita — doc 02 req. 5).
 # - `vocabulario` = exemplos REAIS de como as pessoas do corpus nomeiam o
 #   elemento (alimenta prompts de extração, a Sintonia e o Coro).
+# - `frase_visitante` = a linha curta que a experiência mostra no bottom
+#   quando o elemento/lente é ativado — a voz editorial do LIMIAR dizendo em
+#   linguagem humana o que se vê (sóbria, fiel ao corpus, nunca
+#   sensacionalista nem clínica; doc 04 §6). Máx ~140 caracteres.
 # - Elementos em `emergentes_em_observacao` NÃO são marcados pela passada
 #   fechada; a passada aberta os vigia. Promoção a canônico = editar este
 #   arquivo + `acervo migrate-taxonomy`.
-# - `adjacente: true` = fenômeno biográfico-espiritual fora da EQM nuclear
+# - `adjacentes` = fenômenos biográfico-espirituais fora da EQM nuclear
 #   (o corpus mostrou que toda história é uma biografia, não um episódio).
 
 version: 1
@@ -34,6 +38,7 @@ elementos:
     dominio: percepcao
     fontes: [greyson, nde-c, nderf]
     nota: "Universal no piloto (17/17). Formas: em pé ao lado, a distância, de cima, desacoplado (corpo é movido e a visão não acompanha — Luana)."
+    frase_visitante: "Estas pessoas se viram de fora — em pé ao lado da cama, a alguns metros, ou do alto, olhando o próprio corpo."
     vocabulario:
       - "eu me vi em pé ao lado da cama"
       - "eu estava a uns 20 metros observando o meu corpo caindo"
@@ -44,6 +49,7 @@ elementos:
     dominio: percepcao
     fontes: [corpus, caps]
     nota: "360°/esférica, nitidez impossível (míope enxergando), ver através de paredes, percepção simultânea de pontos distintos."
+    frase_visitante: "Relatos de enxergar como nunca — 360 graus, através de paredes, com uma nitidez que os olhos, às vezes míopes, não tinham."
     vocabulario:
       - "um olhar 360 graus"
       - "via até as gotas da água escorrendo... de forma muito nítida"
@@ -54,6 +60,7 @@ elementos:
     dominio: percepcao
     fontes: [corpus]
     nota: "Emergente promovido: metáfora transversal (7+ pessoas) que nenhuma escala nomeia — corpo é roupa/máquina/papel que a consciência usa."
+    frase_visitante: "Para estas pessoas, o corpo apareceu como roupa, casca, escafandro — algo que a consciência usa, não o que ela é."
     vocabulario:
       - "nós vamos desligar ela?"
       - "a personagem Letícia"
@@ -65,6 +72,7 @@ elementos:
     dominio: percepcao
     fontes: [corpus]
     nota: "Emergente promovido: 4+ pessoas (útero+colo+em pé; corpo+espírito+olho; 'vivi nos dois lugares')."
+    frase_visitante: "Estas pessoas relatam ter existido em mais de um lugar ao mesmo tempo — no corpo e fora dele, ou em várias cenas de uma vez."
     vocabulario:
       - "era como se eu estivesse em dois lugares ao mesmo tempo"
       - "eu era dentro do útero... no colo... e também em pé"
@@ -74,6 +82,7 @@ elementos:
     label: "O tempo é outro"
     dominio: cognicao
     fontes: [greyson, meq]
+    frase_visitante: "Relatos em que o tempo é outro — minutos que foram dias, tudo em câmera lenta, ou 'lá o tempo não passa'."
     vocabulario:
       - "pra mim foi dias"
       - "lá o tempo não passa"
@@ -85,6 +94,7 @@ elementos:
     dominio: cenario
     fontes: [greyson, nderf]
     nota: "Túnel/portal/corredor/espiral. ATENÇÃO: o túnel clássico é RARO no piloto (3 explícitos, 3 negações diretas) — não assumir."
+    frase_visitante: "Aqui estão os que atravessaram algo — um portal, um corredor, uma espiral. O famoso túnel é mais raro do que se imagina."
     vocabulario:
       - "um portal circular, como um túnel"
       - "um corredor muito longo... infinito"
@@ -95,6 +105,7 @@ elementos:
     dominio: cenario
     fontes: [greyson, nderf]
     nota: "Limite que não se pode cruzar (senão não volta): cortina, teto, delimitação, corredor metálico."
+    frase_visitante: "Relatos de chegar a um limite — uma cortina, um teto, uma linha — e saber: quem cruza, não volta."
     vocabulario:
       - "tinha uma fronteira e eu não podia passar"
       - "se eu passasse pelo teto, eu não voltaria mais"
@@ -105,6 +116,7 @@ elementos:
     dominio: cenario
     fontes: [greyson, nde-c, nderf]
     nota: "Raramente 'no fim do túnel': desce como sol, ilumina o quarto, é inalcançável, é meio amarelada, é caminho."
+    frase_visitante: "A luz aparece de muitos jeitos — desce como sol, ilumina o quarto, vira caminho. Quase nunca no fim de um túnel."
     vocabulario:
       - "uma luz muito forte, brilhante, descendo em direção a mim"
       - "quando eu vi a luz eu não conseguia alcançar"
@@ -115,6 +127,7 @@ elementos:
     dominio: cenario
     fontes: [corpus, caps]
     nota: "Emergente promovido: a EQM acontece no hospital/praia/quarto real, não em paisagem — às vezes com staff 'inexistente'."
+    frase_visitante: "Nem sempre há outro mundo: estas pessoas ficaram no lugar de sempre — a UTI, o rio, o quarto — vendo tudo de fora."
     vocabulario:
       - "eu estava na minha própria UTI... ao lado do meu corpo"
       - "eu não estive em lugar nenhum... estive consciente ali no rio"
@@ -124,6 +137,7 @@ elementos:
     dominio: cenario
     fontes: [nderf, nde-c]
     nota: "Jardim, campo, sala branca, céu rosa, espaço cósmico — quando a EQM tem cenário próprio."
+    frase_visitante: "Aqui estão os que estiveram num lugar que não é daqui — um jardim de girassóis, um céu rosa, uma sala branca e redonda."
     vocabulario:
       - "um jardim cheio de girassol"
       - "era um céu rosa... eu sentia que eu estava em casa"
@@ -133,6 +147,7 @@ elementos:
     label: "Ver a Terra de fora"
     dominio: cenario
     fontes: [corpus, meq]
+    frase_visitante: "Estas pessoas contam ter visto a Terra de longe — o planeta lá embaixo, 'a coisa mais linda', como quem deixa um lar."
     vocabulario:
       - "já estava vendo a terra lá embaixo"
       - "eu vi o planeta... coisa mais linda"
@@ -143,6 +158,7 @@ elementos:
     dominio: encontros
     fontes: [greyson, nde-c, nderf]
     nota: "Seres/guias/figuras: médico, enfermeira, dupla, anciãos, monitores, mentores, ser grande. Hierarquias percebidas (idade, luminosidade, cuidado)."
+    frase_visitante: "Quase ninguém esteve sozinho: relatam seres e guias — um médico jovem, dois anciãos, 'a própria ternura materializada'."
     vocabulario:
       - "três seres... feitos de luz"
       - "dois homens... um mais novo e o outro já com uma certa idade"
@@ -153,6 +169,7 @@ elementos:
     dominio: encontros
     fontes: [greyson, nderf]
     nota: "Inclui o encontro NEGADO (Hudson: pedir para ver a mãe e não poder) — variação significativa."
+    frase_visitante: "Relatos de reencontrar quem já morreu — 'Oi, filha! Eu vim te ver'. Para alguns, o encontro pedido foi negado."
     vocabulario:
       - "Oi, filha! Eu vim te ver"
       - "será que eu posso ver minha mãe? / não é o momento"
@@ -162,6 +179,7 @@ elementos:
     dominio: encontros
     fontes: [greyson, nde-c]
     nota: "Modo padrão de comunicação no corpus (12+). Inclui antecipação (saber o que será dito antes da fala — Letícia)."
+    frase_visitante: "Lá não se conversa com a boca: estas pessoas se comunicaram por pensamento — algumas ouviam o que ainda ia ser dito."
     vocabulario:
       - "a gente se comunicava sem falar"
       - "é tão mais prático falar pela mente"
@@ -172,6 +190,7 @@ elementos:
     dominio: encontros
     fontes: [corpus, greyson-angustiante]
     nota: "Emergente promovido: presença fria/neutra, voz firme ('cala a boca'), seres que testam ou aterrorizam."
+    frase_visitante: "Nem toda presença acolhe: aqui estão os que encontraram seres frios, vozes duras, figuras que testam ou apavoram."
     vocabulario:
       - "era fria... não tinha amor... 'é só a morte'"
       - "uma presença masculina tentando me aterrorizar"
@@ -180,6 +199,7 @@ elementos:
     label: "Ninguém me vê"
     dominio: encontros
     fontes: [corpus, nderf]
+    frase_visitante: "Estas pessoas tentaram falar com os vivos — e ninguém as via, ninguém as ouvia."
     vocabulario:
       - "ninguém me via, ninguém me ouvia, ninguém me escutava"
       - "eu sabia que elas não podiam me ver"
@@ -190,6 +210,7 @@ elementos:
     dominio: cognicao
     fontes: [greyson, wcei, nderf]
     nota: "Formas MUITO variadas: telão, tela de cinema, ficha consultada, revivência gestacional completa, quadros, replay tardio (dias depois — Raí)."
+    frase_visitante: "Relatos de ver a própria vida passar — num telão, numa tela de cinema, numa 'ficha' que outros consultam."
     vocabulario:
       - "como se fosse um telão... passando tudo o que eu já tinha vivenciado"
       - "como uma tela de cinema"
@@ -199,6 +220,7 @@ elementos:
     label: "Saber tudo de uma vez"
     dominio: cognicao
     fontes: [greyson, meq, nde-c]
+    frase_visitante: "Estas pessoas dizem ter sabido tudo de uma vez — perguntas respondidas antes de feitas, como quem lembra, não como quem aprende."
     vocabulario:
       - "bilhões de perguntas respondidas instantaneamente... como lembrança"
       - "eu era o conhecimento"
@@ -209,6 +231,7 @@ elementos:
     dominio: cognicao
     fontes: [corpus, nderf]
     nota: "Planejamento pré-vida, reunião, 'programação', memória perinatal. Frequente no corpus (6+), ausente das escalas."
+    frase_visitante: "Aqui estão os que lembraram do que veio antes de nascer — o plano, a reunião, o momento de aceitar vir."
     vocabulario:
       - "estávamos planejando a nossa vinda para a Terra"
       - "eles explicam tudinho... e você aceita"
@@ -218,6 +241,7 @@ elementos:
     dominio: cognicao
     fontes: [corpus, caps]
     nota: "Dentro da EQM (roupa azul da mãe — Selma) ou como sequela dela."
+    frase_visitante: "Relatos de ver o que ainda não tinha acontecido — uma roupa, um velório, uma filha anunciada — e ver acontecer depois."
     vocabulario:
       - "memória futura"
       - "eu vi meu velório"
@@ -227,6 +251,7 @@ elementos:
     dominio: cognicao
     fontes: [corpus, nde-c]
     nota: "Percepções verídicas confirmadas depois (4+ no piloto): queimadura, supositório, roupa, telefonema. Peso probatório central para as pessoas."
+    frase_visitante: "Estas pessoas viram, desacordadas, coisas que não podiam ver — e alguém depois confirmou os detalhes."
     vocabulario:
       - "quando eu acordei, contei... e tinha acontecido exatamente assim"
 
@@ -235,6 +260,7 @@ elementos:
     label: "A paz"
     dominio: afeto
     fontes: [greyson, nde-c, nderf]
+    frase_visitante: "A primeira coisa que muitos contam: uma paz como nunca tinham sentido — sem aflição, sem falta de ar, sem medo."
     vocabulario:
       - "uma paz como se eu nunca tivesse sentido antes na minha vida"
       - "não senti aflição, não senti vontade de respirar"
@@ -243,6 +269,7 @@ elementos:
     label: "O amor incondicional"
     dominio: afeto
     fontes: [nde-c, nderf, meq]
+    frase_visitante: "'Eu te amo exatamente como você é' — relatos de um amor sem condição, que recebe a pessoa inteira."
     vocabulario:
       - "Eu te amo completamente, inteiramente, exatamente como você é"
       - "um amor que não dá para explicar com palavras"
@@ -251,6 +278,7 @@ elementos:
     label: "Ser tudo"
     dominio: afeto
     fontes: [meq, nde-c]
+    frase_visitante: "Relatos de se dissolver no todo — 'uma gota no oceano', 'eu era o rio, eu era a pedra' — sem fronteira entre si e o resto."
     vocabulario:
       - "como uma gota que você joga no oceano"
       - "eu era o rio... eu era a pedra"
@@ -261,6 +289,7 @@ elementos:
     dominio: afeto
     fontes: [corpus]
     nota: "Emergente promovido (8+): saudade de origem, 'em casa', 'já estive aqui', reconhecimento — a EQM como retorno, não descoberta. É o bordão do canal ('saudade desse lugar')."
+    frase_visitante: "Aqui estão os que sentiram que já conheciam aquele lugar — e que dele sentem saudade."
     vocabulario:
       - "sinto saudade desse lugar"
       - "eu não acredito que eu estou aqui de novo"
@@ -270,6 +299,7 @@ elementos:
     label: "Não cabe em palavras"
     dominio: afeto
     fontes: [greyson, meq]
+    frase_visitante: "'Não dá para explicar com palavras' — quase todos esbarram nesse limite. Estas pessoas tentaram contar mesmo assim."
     vocabulario:
       - "não dá para explicar com palavras"
       - "não coubesse no nosso cérebro terreno"
@@ -279,6 +309,7 @@ elementos:
     dominio: afeto
     fontes: [greyson-angustiante, nderf]
     nota: "Obrigatório por honestidade (doc 00). Formas: escuridão fria, gritos, seres aterrorizantes, inferno visionário, pavor de não ter corpo."
+    frase_visitante: "Nem toda travessia é doce: há relatos de escuridão, gritos e pavor — e eles estão aqui, contados com a mesma honestidade."
     vocabulario:
       - "pessoas gritando... muito grito horrível"
       - "eu fiquei apavorado por não ter um corpo"
@@ -289,6 +320,7 @@ elementos:
     dominio: afeto
     fontes: [corpus, nde-c]
     nota: "Indiferença ao próprio corpo/vínculos durante a experiência (inclusive ao recém-nascido — Luana; 'até o dia 13 eu não tinha filho' — Márcia)."
+    frase_visitante: "Relatos de olhar o próprio corpo sem apego nenhum — na hora, dizem, nem os vínculos mais queridos pesavam."
     vocabulario:
       - "olhei para o meu corpo e não senti apego nenhum"
       - "lembrava dos filhos... mas aquilo não tinha peso na hora"
@@ -298,6 +330,7 @@ elementos:
     label: "Não queria voltar"
     dominio: retorno
     fontes: [nderf, corpus]
+    frase_visitante: "'Eu não queria voltar de jeito nenhum' — aqui estão os que pediram para ficar."
     vocabulario:
       - "eu não queria voltar de jeito nenhum"
       - "mas eu não quero voltar... eu quero ficar aqui"
@@ -307,6 +340,7 @@ elementos:
     dominio: retorno
     fontes: [greyson, nderf, corpus]
     nota: "O eixo de agência é dado central do corpus: ordem ('não é a hora'), negociação, escolha oferecida (Gilson), rendição paradoxal (aceitar ficar = voltar — Letícia), puxão involuntário (avó — Luana)."
+    frase_visitante: "A volta raramente é escolha simples: alguém ordena, negocia ou oferece — e há quem tenha voltado justamente ao aceitar ficar."
     vocabulario:
       - "não... não é a hora ainda dela"
       - "me deram a oportunidade de voltar... o livre-arbítrio foi meu"
@@ -317,6 +351,7 @@ elementos:
     dominio: retorno
     fontes: [corpus]
     nota: "Emergente promovido (8+): o choque de densidade da volta ao corpo."
+    frase_visitante: "Para muitos, voltar ao corpo dói — descrevem peso, esmagamento, um 'aspirador' puxando de volta."
     vocabulario:
       - "como um aspirador me puxando de volta"
       - "fui sugada de volta... dor em todo o corpo"
@@ -327,6 +362,7 @@ elementos:
     dominio: retorno
     fontes: [nderf, corpus]
     nota: "Razão da volta (10+): levar conhecimento, ser amor, iluminar. Frequentemente inclui a ordem de CONTAR (às vezes ao próprio canal!)."
+    frase_visitante: "Quase todos voltaram com uma tarefa — ajudar, iluminar, ser amor. Muitos, com a ordem explícita de contar o que viram."
     vocabulario:
       - "você é um fósforo... precisa ajudar a iluminar a vida de outras pessoas"
       - "sua missão na Terra é o amor"
@@ -338,6 +374,7 @@ elementos:
     dominio: depois
     fontes: [greyson, nderf]
     nota: "Quase universal, MAS com contraexemplo (Selma: 'continuei exatamente a mesma') — nunca assumir."
+    frase_visitante: "Depois, a vida muda — 'da água para o vinho'. Mas nem sempre: há quem tenha continuado exatamente igual."
     vocabulario:
       - "a minha vida completamente mudou, da água para o vinho"
       - "nada era razão para sofrer"
@@ -346,6 +383,7 @@ elementos:
     label: "O medo da morte acaba"
     dominio: depois
     fontes: [nderf, nde-c]
+    frase_visitante: "'Você tem medo da morte?' 'De jeito nenhum.' O medo, dizem, ficou lá."
     vocabulario:
       - "você tem medo da morte? De jeito nenhum"
 
@@ -354,6 +392,7 @@ elementos:
     dominio: depois
     fontes: [corpus, caps]
     nota: "Mediunidade/percepção ampliada pós-EQM (10+): sentir energias, premonições, 'porta entreaberta', 'véu mais fino'."
+    frase_visitante: "Estas pessoas contam que algo ficou aberto — 'a porta', 'o véu mais fino': passaram a sentir o que antes não sentiam."
     vocabulario:
       - "a porta ficou aberta"
       - "o véu ficou mais fino... eu consigo olhar por trás dele"
@@ -363,6 +402,7 @@ elementos:
     dominio: depois
     fontes: [corpus]
     nota: "Período de êxtase/leveza logo após o retorno (dias a meses — Tânia: 2 meses; Eunice: 1 semana)."
+    frase_visitante: "Alguns voltaram e viveram dias, às vezes meses, num 'estado de graça' — uma leveza que foi se despedindo devagar."
     vocabulario:
       - "eu ainda fiquei uma semana em estado de graça"
 
@@ -385,13 +425,62 @@ emergentes_em_observacao:
   - protecao_de_infancia       # presença protetora que some aos ~7 anos (Daniela, Carmen)
   - oracao_como_forca          # orações alheias sentidas/atuantes (Hudson, Amanda, Luana)
 
-# Fenômenos ADJACENTES (biografia espiritual; taggeáveis fora da EQM nuclear):
+# Fenômenos ADJACENTES (biografia espiritual; taggeáveis fora da EQM nuclear).
+# Formato: mapping key → {label, frase_visitante}. Iterar o mapping continua
+# rendendo as keys (extract.py intacto); o export publica a lista de keys
+# (compat com o app) + `adjacentes_detalhe` com label e frase.
 adjacentes:
-  - projecao_astral
-  - sonho_lucido
-  - memoria_perinatal
-  - vidas_passadas
-  - contato_extraterrestre
-  - deslizamento_temporal
-  - premonicao_cotidiana
-  - visao_de_catastrofe
+  projecao_astral:
+    label: "Projeção astral"
+    frase_visitante: "Sair do corpo sem estar morrendo: muitos já visitavam esses lugares em projeções — dormindo, meditando, com prática."
+  sonho_lucido:
+    label: "Sonho lúcido"
+    frase_visitante: "Sonhos em que se sabe estar sonhando — para várias destas pessoas, outra porta para o mesmo lugar."
+  memoria_perinatal:
+    label: "Memória do nascimento"
+    frase_visitante: "Relatos de lembrar do próprio nascimento — o útero, o parto, as vozes ao redor — como quem lembra de ontem."
+  vidas_passadas:
+    label: "Vidas passadas"
+    frase_visitante: "Aqui estão os que dizem ter visto outras vidas suas — outros nomes, outros séculos, a mesma consciência."
+  contato_extraterrestre:
+    label: "Contato extraterrestre"
+    frase_visitante: "Parte das histórias inclui encontros de outra ordem — naves, seres, contatos que a pessoa não sabe nomear de outro jeito."
+  deslizamento_temporal:
+    label: "Deslizamento no tempo"
+    frase_visitante: "Relatos raros de escorregar no tempo — ver uma rua como era décadas atrás e voltar sem saber como."
+  premonicao_cotidiana:
+    label: "Premonição no cotidiano"
+    frase_visitante: "Depois de voltar, muitos passaram a pressentir o dia a dia — souberam de mortes, ligações e notícias antes da hora."
+  visao_de_catastrofe:
+    label: "Visões de catástrofe"
+    frase_visitante: "Algumas pessoas trouxeram visões de catástrofe — água subindo, um mundo em transição. No acervo, são minoria."
+
+# Lentes DEMOGRÁFICAS (doc 04 §5.3/§6): recortes de quem/quando/onde — não
+# são elementos fenomenológicos. Keys alinhadas às do app
+# (src/data/demoLens.ts: sexo, decada, causa, geo, religiao, tempo).
+# `campo` aponta a fonte nos people/*.json do export.
+lentes_demograficas:
+  - key: sexo
+    label: "Quem conta"
+    campo: "demographics.sexo"
+    frase_visitante: "Quem conta essas histórias: neste acervo, as mulheres são duas em cada três vozes."
+  - key: decada
+    label: "Quando aconteceu"
+    campo: "demographics.ano_evento"
+    frase_visitante: "As histórias ordenadas por quando aconteceram — a mais antiga é de 1969."
+  - key: causa
+    label: "A causa"
+    campo: "cause_category"
+    frase_visitante: "As histórias agrupadas pelo que as levou ao limiar — acidente, cirurgia, doença, afogamento. A morte chega de muitos jeitos."
+  - key: geo
+    label: "De onde"
+    campo: "demographics.local_evento"
+    frase_visitante: "De onde cada voz fala: dezesseis estados do Brasil — e algumas de mais longe: Noruega, Portugal, Estados Unidos."
+  - key: religiao
+    label: "A fé, antes e depois"
+    campo: "demographics.religiao_contexto"
+    frase_visitante: "A fé antes e depois do limiar. O caminho mais comum do acervo: católica na época do evento, espírita ou espiritualista hoje."
+  - key: tempo
+    label: "Os dois tempos"
+    campo: "demographics.tempo_clinico_declarado × demographics.tempo_subjetivo_declarado"
+    frase_visitante: "Dois relógios para a mesma hora: minutos de parada no hospital — e, por dentro, dias, anos ou tempo nenhum."
