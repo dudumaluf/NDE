@@ -10,7 +10,7 @@
 
 > **ERRATA (verificado contra o grafo real do patch — ver `ANALISE_TECNICA.md`):**
 > 1. A malha tem **1590 vértices** (530 triângulos, triangle soup sem índices) — não 256. "256" no nome do arquivo refere-se ao tamanho da multidão (grade 16×16).
-> 2. A VAT usada em produção é a **`..._ANIM_*360f.exr` (1590×360): 6 clipes de 60 frames empilhados verticalmente**, selecionados pelo slider "Posed Animations". A `WalkCycle28f_Dying28f` (1590×56) é legado (só empresta a largura). O conteúdo de cada um dos 6 blocos deve ser identificado visualmente no M0 e registrado no descriptor.
+> 2. A VAT usada em produção é a **`..._ANIM_*360f.exr` (1590×360): 6 clipes de 60 frames empilhados verticalmente**, selecionados pelo slider "Posed Animations". A `WalkCycle28f_Dying28f` (1590×56) é legado (só empresta a largura). Conteúdo dos 6 blocos **identificado visualmente no M0**: 0 = idle · 1 = andar (default do patch) · 2 = idle variação · 3 = queda/morte (one-shot, termina deitado) · 4 = levantar (one-shot, do chão a mãos juntas) · 5 = rezar (loop). Cobre a máquina de estados inteira do doc 01 §4.
 > 3. Este export **não usa** RGBE8 nem normais compactadas no alpha (`XYZ is RGB = 1`) — EXR float direto. O prebuild é mais simples que o descrito abaixo.
 > 4. Transformação de espaço necessária ao amostrar o EXR cru: `pos_final = M × (raw − (0.37, 0.40, 0.37))`, onde M = rotação X 90° (feita em compose no patch) combinada com o swizzle `.xzy` (feito no shader). Confirmar sinal empiricamente no M0.
 
@@ -142,3 +142,75 @@ Antes do export real existir, `content/` inclui um **corpus fake gerado por scri
 ## 13. Estrutura de repositório e convenções
 
 `limiar-experience/` com `docs/` (00, 01, 03), `CLAUDE.md` apontando para eles, TypeScript estrito, ESLint+Prettier, commits convencionais, tag por marco (`m0`, `m1`, …). Smoke test opcional com Playwright (página carrega, canvas presente, sem erros de console) a partir do M2.
+
+## 14. Ferramentas e evoluções pós-M3 (2026-07-12)
+
+> Seção aditiva — registra decisões técnicas das sessões de 2026-07-12 sem
+> mexer na numeração histórica (§1–13). Fatos verificados vivem no
+> `limiar-experience/AGENTS.md`; aqui fica o *porquê* e o desenho.
+
+### 14.1 VAT Studio — o guarda-roupa de animações é nosso
+
+O gargalo de assets (depender de Houdini para assar VATs) foi eliminado com
+ferramenta própria: motor `tools/vat-core.mjs` + **VAT Studio** (UI local em
+`localhost:5198`, `npm run studio`) + CLI `tools/vat-bake.mjs`. Pipeline:
+GLB (Mixamo ou qualquer skinned mesh) → texturas float16 `.bin` + descriptor
+JSON, drop-in no app via `?vat=<nome>`.
+
+Decisões de design da ferramenta:
+
+- **Orçamento de performance inteligente, não censura:** semáforo
+  (vértices / colunas de textura / download) com **presets de intenção**
+  (multidão × personagem próximo) e **decimação em 1 clique**
+  (meshoptimizer, antes/depois lado a lado). O artista vê o custo antes de
+  assar; a ferramenta educa em vez de bloquear.
+- **Root motion, resolvido de vez:** o bake é **in-place** (raiz travada) e
+  a **trajetória da raiz é exportada à parte no descriptor**. Na multidão, o
+  movimento SEMPRE vem da simulação (in-place é o contrato); a trajetória
+  fica disponível para **one-shots dirigidos** (câmera/director puxando um
+  gesto específico) sem re-assar nada.
+- **Track único combinável:** clipes de GLBs diferentes podem ser
+  **combinados num único track VAT** (ferramenta `tools/merge-clips.mjs`) —
+  é assim que o "guarda-roupa" (idle/andar/correr/gestos) de fontes soltas
+  vira um asset coeso. Deletar/renomear/reordenar clipes já existe no
+  Studio. Na fila: importar FBX direto (hoje: converter para GLB antes).
+- **Regra dura de morph:** crossfade A/B entre clipes **exige malha
+  idêntica** — mesmo `meshHash` no descriptor (mesma soup de vértices; a VAT
+  só troca posições). Consequência arquitetural: o guarda-roupa escala por
+  **texturas paralelas da mesma malha** (N clipes × mesma geometria), nunca
+  por uma textura gigante multi-malha. Personagens diferentes = descriptors
+  diferentes = sem morph entre eles (por construção, não por bug).
+
+### 14.2 Pós-processamento com orçamento dinâmico
+
+Filosofia (Dudu): **efeitos bonitos e baratos — a experiência tem que ser
+fluida em máquinas comuns, nunca "só roda numa 5090"**. O §4.5 dizia
+"vignette e nada além disso até M7"; o caminho para o M7 fica registrado:
+
+- **SSR/SSGI descartados** por custo/benefício: caros, frágeis na nossa
+  cena (multidão + névoa), ganho estético marginal sobre luz bem dirigida.
+- **Menu Effects com custo MEDIDO**: cada efeito exibe seu custo real em
+  **ms por frame na máquina atual** (medido, não estimado) — decisão
+  informada, no espírito do semáforo do Studio (§14.1).
+- **Presets Mínimo / Leve / Médio / Alto** + **auto-degradação por fps**:
+  se o frame rate cai abaixo do alvo, efeitos caem degrau a degrau na ordem
+  inversa de custo×valor. O piso (Mínimo) preserva a leitura da cena —
+  atmosfera é névoa+luz+cor, nunca dependente de post.
+
+### 14.3 Fatos técnicos consolidados no M3 (referência)
+
+Verificados durante o data layer (detalhe canônico no
+`limiar-experience/AGENTS.md` — não re-derivar):
+
+- **Transform feedback (compute WebGL2) tem teto de 4 varyings** — toda
+  leitura de storage num pass TF vira attribute+varying no GLSLNodeBuilder.
+  Os 4 slots já estão tomados (pos/vel/heading/phase); buffer novo lido
+  pelo compute (ex.: targets do M3) entra como **DataTexture +
+  textureLoad**, com o mesmo Float32Array espelhado nos dois recursos.
+- **Storage buffer lido no vertex stage do render:** WebGPU permite direto
+  (vira read-only); WebGL2 exige **PBO** (`.setPBO(true)` — o backend copia
+  o buffer para DataTexture após cada compute). É assim que os fios seguem
+  os agentes sem tráfego CPU↔GPU.
+- Implicação para o roadmap: mecânicas novas que leem estado da sim no
+  render (fios inteligentes, palavras no espaço, Maré — doc 04 §5.4–5.7)
+  já têm o padrão de acesso resolvido nos dois backends.

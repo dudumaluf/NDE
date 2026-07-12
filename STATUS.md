@@ -4,7 +4,7 @@
 > em qualquer máquina deve conseguir retomar o trabalho lendo isto + os docs.
 > **Ritual**: atualizar ao final de cada marco/sessão relevante, antes do push.
 
-Última atualização: **2026-07-12, tarde** (M3: data layer do app + passada demográfica nas 46 pessoas)
+Última atualização: **2026-07-12, tarde** (M3: data layer do app + passada demográfica nas 46 pessoas; Docs: consolidação das ideias de 2026-07-12 + regra permanente de documentação)
 
 ---
 
@@ -81,6 +81,15 @@
 - **M3: lente ativa força o seek** mesmo com gravidade desligada (aplicar
   lente sem gravidade não teria efeito visível); ângulo do anel preservado do
   UMAP para vizinhanças não embaralharem ao trocar de lente.
+- **Docs: consolidação das ideias de 2026-07-12 + regra permanente de
+  documentação** — doc 04 ganhou o princípio "um sistema se organizando,
+  não ruído" (§1.1), a cadeia de interação do M4 (§4.1) e as mecânicas
+  novas: Maré (§5.4), estados de animação como linguagem da sim (§5.5),
+  fios inteligentes (§5.6), palavras no espaço (§5.7), lentes demográficas
+  (§5.8), legenda viva (§6.1); doc 03 ganhou o §14 (VAT Studio + post com
+  orçamento dinâmico + fatos WebGL2 do M3); AGENTS.md raiz ganhou a regra:
+  **nenhuma ideia de sessão fica sem registro nos docs antes do fim da
+  sessão**.
 
 ## Fatos técnicos verificados (nunca re-derivar)
 

@@ -39,4 +39,9 @@ envolver curadoria/patrocínio.)
   screenshot.mjs`) — sempre nos dois backends (WebGPU e `?forceWebGL=1`).
 - **Atualizar `STATUS.md` ao final de cada marco/sessão** e dar push — é a
   memória compartilhada entre as máquinas do Dudu.
+- **Toda ideia nova de design ou técnica que surgir em sessão/chat DEVE ser
+  registrada nos docs antes do fim da sessão** (regra do Dudu, 2026-07-12):
+  UX/consumo → doc 04; técnica/ferramentas → doc 03; decisões e pendências →
+  `STATUS.md`. Nada vive só no chat. Ao fechar qualquer sessão, fazer a
+  varredura: *"o que foi dito e não está documentado?"*
 - `git pull` no início de qualquer sessão.

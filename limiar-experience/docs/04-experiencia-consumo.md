@@ -1,9 +1,10 @@
 # LIMIAR — A Experiência de Consumo (UX)
 
-> **Papel deste documento:** consolida as decisões de UX da sessão de 2026-07-10
-> (Dudu + agente). Estende o doc 01, resolve suas perguntas abertas (§11) e
-> adiciona três mecânicas novas. Onde este doc e o 01 divergirem, **este vence**
-> (é mais recente); a técnica que o serve continua no doc 03.
+> **Papel deste documento:** consolida as decisões de UX das sessões de
+> 2026-07-10 e 2026-07-12 (Dudu + agente). Estende o doc 01, resolve suas
+> perguntas abertas (§11) e adiciona as mecânicas novas. Onde este doc e o 01
+> divergirem, **este vence** (é mais recente); a técnica que o serve continua
+> no doc 03.
 
 ---
 
@@ -21,6 +22,21 @@ Triângulo de referências que define o gênero:
 - ***We Feel Fine*** (Jonathan Harris) — cada ponto de dado é uma pessoa real.
 
 LIMIAR vive no centro desse triângulo.
+
+## 1.1 Princípio: um sistema se organizando, não ruído (2026-07-12)
+
+Formulação do Dudu, elevada a princípio de teste — irmã do arrepio-tese (§2)
+no papel de régua:
+
+> **O Campo deve sempre parecer um organismo ordenando-se — nunca ruído.**
+
+Já estava latente no doc 01 (Ato 3: "um organismo se ordenando, não um
+gráfico dando refresh"); agora vale para **tudo**, não só para a gravidade.
+**Clareza de leitura vence densidade de acontecimentos**: se uma mecânica
+visual nova (fios, palavras, animações, lentes, maré) deixa a cena mais
+cheia mas menos legível, ela está errada — recua, filtra ou espera sua vez.
+Toda mecânica visual nova se testa contra isso, na mesma mesa em que se
+testa contra o arrepio-tese do §2.
 
 ## 2. A emoção central (a tese em uma frase)
 
@@ -74,7 +90,27 @@ dilui esse momento?
   trecho foi escutado. Quem pula tudo não colhe nada — consequência, não
   punição. É a mecânica protegendo a ética.
 
-## 5. As três mecânicas novas (batizadas em 2026-07-10)
+### 4.1 A cadeia de interação, refinada (2026-07-12, para o M4)
+
+A escada hover → clique → escuta, fechada com o Dudu:
+
+1. **Hover = apresentação.** Passar o cursor sobre uma pessoa faz seu **nome
+   aparecer em texto flutuante que a segue** (billboard discreto, fade
+   rápido) — e, junto, o **sussurro da Sintonia** (§5.1): identidade e voz
+   no mesmo gesto, sem nenhum painel. É o "quem é você?" respondido antes
+   do clique.
+2. **Clique = compromisso.** Clicar entra no **follow em terceira pessoa**
+   (rig do doc 03 §6) e a história começa — o corte editado por beats
+   (padrão acima).
+3. **Durante a escuta**, a **timeline minimalista com hotspots** já decidida
+   acima ganha forma concreta: uma linha fina com marcas clicáveis e o
+   texto do momento (o rótulo do beat) — **saltar entre momentos** da
+   história, não scrub arbitrário. Continua navegação estruturada.
+
+Nada disso adiciona UI persistente: nome e timeline só existem enquanto o
+gesto (hover, follow) existe.
+
+## 5. As mecânicas novas (batizadas em 2026-07-10 e 2026-07-12)
 
 ### 5.1 A Sintonia (hover-rádio)
 
@@ -119,6 +155,143 @@ re-clusterização interativa dirigida pela curiosidade do visitante.
   trabalho é o layout por lente (radial por pertencimento ou pré-calculado).
 - **Entra em:** M6, protótipo debug possível no M3.
 
+### 5.4 A Maré (scrub global de tempo + degradê emocional) — 2026-07-12
+
+Os dois modos de consumo da experiência, nomeados: **seguir UMA história**
+(o follow, §4) ou **ver TODAS em sincronia** — a Maré.
+
+A Maré é um **scrub global de tempo normalizado** (0 → 1 = início → fim de
+cada história, cada uma no seu próprio ritmo): arrastar o tempo faz **cada
+figura viver a fase da própria história** naquele ponto — beats dirigindo
+estado de animação e cor como no follow, mas para todas ao mesmo tempo.
+Como as histórias têm estruturas diferentes (uma pessoa passa metade do
+relato na EQM, outra três quartos na integração), **clusters temporais
+formam-se e dissolvem-se** diante do visitante: a onda de quedas, o grupo
+que ainda está "lá", os que já voltaram. É a tese do projeto em modo
+panorâmico — a mesma travessia, centenas de ritmos.
+
+O **degradê emocional** é a pele visual da Maré: a cor/luz de cada figura
+evolui do tom de entrada ao tom de saída da própria história (dados de
+`tone` por beat, que o pipeline já extrai) — o Campo inteiro escurece na
+onda das mortes e reaquece na onda dos retornos. Evolução visual, não
+efeito: é dado temporal tornado atmosfera.
+
+- **Dados:** beats com timestamps + `tone` (já no export); duração por
+  história para a normalização.
+- **Custo:** moderado — a state machine por agente (doc 03 §4.2) já é
+  dirigida por comandos; a Maré é "todos os diretores ao mesmo tempo" +
+  um controle de scrub. Respeita o princípio §1.1: a leitura vem das ondas,
+  não do caos.
+- **Entra em:** pós-M6 (precisa de beats reais por pessoa no Campo);
+  protótipo debug possível quando o M4 fechar o beat→estado.
+
+### 5.5 Estados de animação como linguagem da simulação (2026-07-12)
+
+Os clipes deixam de ser decorativos: **a animação comunica o estado do
+agente na simulação** — o visitante lê o Campo pelo corpo das figuras:
+
+| Animação | O que diz |
+|---|---|
+| Parada / idle | Sem contexto ativo — ninguém a chamou, nada a puxa |
+| Andar | Buscando — gravidade/lente moderada, a caminho |
+| **Correr** | **Chamado forte** — longe do alvo com atração alta |
+| Assentar (idle ou ajoelhar/rezar) | Chegou ao núcleo, encontrou o lugar |
+
+Regras fechadas com o Dudu:
+
+- **Transições dirigidas pela velocidade REAL da simulação, com histerese**
+  — nunca por script. O agente corre porque a física o puxa forte; a
+  histerese impede flicker andar↔correr na fronteira. A animação é
+  instrumento de medição da sim, não coreografia.
+- **Onda de chegada:** quem está mais distante do alvo corre mais — os de
+  longe alcançam enquanto os de perto assentam, e a formação de um núcleo
+  fica **rápida E legível** (princípio §1.1: organismo, não ruído).
+- **Chegada com ponderação poética:** ao assentar no núcleo, a figura cai
+  em idle ou ajoelha/reza — e **quem carrega `transformacao` tende a
+  rezar**. O dado escolhe o gesto.
+- **No follow, o morph continua dirigido pelos beats** (doc 01 §4 — queda
+  na morte, hold, levantar, rezar): a Maré e o follow usam a mesma máquina
+  de estados; muda quem comanda (beats da história vs. física do Campo).
+- Clipe de corrida não existe no VAT legado (6 clipes) — entra pelo
+  guarda-roupa próprio do VAT Studio (doc 03 §14).
+
+- **Dados:** velocidade/distância-ao-alvo já vivem nos buffers da sim;
+  `transformacao` vem do export.
+- **Custo:** baixo — a state machine do doc 03 §4.2 ganha limiares por
+  velocidade com histerese; o crossfade A/B já existe desde o M0.5.
+- **Entra em:** M4–M5 (junto da gravidade progressiva); a base técnica
+  do M2/M3 já suporta.
+
+### 5.6 Fios com leitura inteligente (2026-07-12)
+
+Os fios (doc 03 §4.5) ganham regras de legibilidade — consequência direta
+do princípio §1.1 aplicada ao grafo:
+
+- **Alpha por distância dos endpoints:** fio entre pessoas distantes é mais
+  tênue; ao se aproximarem, o fio se afirma. A migração fica legível sem
+  teia de aranha global.
+- **Peso visual por afinidade:** o `weight` da aresta (já no export) vira
+  espessura/brilho — conexões fortes se destacam sozinhas.
+- **Modo "só núcleos formados":** os fios só aparecem quando **os dois
+  lados assentaram** nos seus núcleos — durante a migração, silêncio
+  visual; quando o sistema se ordena, as conexões se revelam. Menos ruído
+  exatamente na fase mais caótica.
+
+- **Dados:** arestas + weight (export); estado "assentado" vem da sim (§5.5).
+- **Custo:** baixo — os fios já leem posições vivas na GPU (M3); é
+  modulação de alpha/espessura por dados que já existem.
+- **Entra em:** M5–M6 (revelação progressiva já era o plano; isto define
+  o *como*).
+
+### 5.7 Palavras no espaço (2026-07-12)
+
+Quando um núcleo **se forma** (coesão atingida — os membros assentaram), o
+**nome do núcleo aparece em texto 3D flutuante no centro do grupo**: fade
+lento, billboard (sempre de frente para a câmera), tipografia discreta.
+"Ilustrar o que estamos vendo em cada cluster" (Dudu) — o Campo passa a se
+explicar sozinho, sem HUD.
+
+É a versão espacial do que o doc 01 §5 (Ato 3) prometia ("núcleos ganham
+nome quando ele os visita") — o nome agora vive **no mundo**, não num
+painel. Some quando o núcleo se dissolve (lente trocada, gravidade
+desligada): palavra também é estado, não etiqueta permanente.
+
+- **Dados:** nomes dos núcleos via LLM (já no export do A3).
+- **Custo:** baixo — texto SDF/troika billboard por núcleo, fade por
+  coesão (métrica barata: distância média ao centroide).
+- **Entra em:** M6 (constelação/clusters); protótipo debug junto das
+  Lentes v0.
+
+### 5.8 Lentes demográficas (2026-07-12 — estende §5.3)
+
+As Lentes do §5.3 reorganizam por **fenomenologia** (elementos vividos).
+A passada demográfica do acervo (2026-07-12) abre o segundo eixo: **lentes
+por quem a pessoa é / onde / quando** — eixos declarados no corpus, nunca
+inferidos:
+
+- **Sexo**, **causa da morte**, **geografia** (estados/países do evento),
+  **profissão**;
+- **Trajetória religiosa** — religião na época × hoje: o padrão descoberto
+  no corpus ("católica antes → espiritualidade própria depois") vira lente
+  navegável: o Campo mostra o fluxo entre margens;
+- **Década do evento como linha do tempo física**: 1969 → 2025 atravessando
+  o Campo — as figuras se ordenam sobre uma linha temporal andável;
+- **A lente do TEMPO**: tempo clínico declarado × tempo subjetivo — "20
+  minutos que viram uma vida". Os dois valores existem no corpus
+  (`tempo_clinico`, `tempo_subjetivo`); a lente confronta as duas durações
+  da mesma experiência.
+
+Regra de honestidade (herda o princípio 5 do doc 00): **campo null vai
+para a faixa "não declarado"** — visível, nunca escondida, nunca
+preenchida por inferência. O buraco no dado também é dado.
+
+- **Dados:** bloco `demographics` no export (hash `c8c437af007d3008`,
+  cobertura 28–42/46 conforme o campo).
+- **Custo:** igual às Lentes §5.3 (layout por faixa em vez de
+  tem/não-tem); a linha do tempo é um layout linear com marcos de década.
+- **Entra em:** M6, junto das Lentes completas; debug possível no M3+
+  (o dropdown de lentes já existe).
+
 ## 6. O loop de descoberta (fechado)
 
 ```
@@ -130,6 +303,34 @@ escutar → desbloquear tema → aplicar lente → o Campo se reorganiza
 Cada volta aprofunda o quebra-cabeça: é como desvendar algo que se encaixa
 cada vez mais — verdades que parecem as mesmas, contadas com palavras,
 interpretações e backgrounds diferentes.
+
+### 6.1 Legenda viva — a semente da UI da experiência (2026-07-12)
+
+Primeira peça de UI pensada **fora de qualquer painel de debug**: uma
+**legenda minimalista premium** do que está em cena — chips discretos de
+cor + label + contagem (núcleos visíveis, lente ativa, faixas demográficas)
+que **acompanham o estado do Campo com transições suaves**: um chip nasce
+quando seu grupo entra em cena, esvanece quando sai.
+
+Decisões:
+
+- **É o início da identidade visual do LIMIAR**: cinzas quentes como base,
+  cor **apenas como dado** (herda doc 01 §9) — a legenda é a primeira
+  superfície onde essa linguagem vira UI de verdade.
+- **Interativa sem virar menu:** clicar num chip **destaca o grupo** no
+  Campo (os demais recuam sutilmente) — irmã leve das Lentes; um segundo
+  clique solta. Nada de checkboxes, nada de painel.
+- Respeita as regras do §7: na escala íntima a legenda recolhe (nunca
+  números no chão); na god view / constelação ela é bem-vinda.
+- Relação com o Diário (doc 01 §5): o Diário é o objeto pessoal do
+  visitante; a legenda é a leitura do **estado presente da cena**. Papéis
+  diferentes, sem fusão.
+
+- **Dados:** nomes/cores dos núcleos, contagens, lente ativa — tudo já no
+  contentStore do M3.
+- **Custo:** baixo (DOM/HTML sobre o canvas, como o HUD do M3 — que ela
+  substitui e eleva).
+- **Entra em:** M4+ como evolução do HUD debug; versão premium no M6/M7.
 
 ## 7. Regras de linguagem por escala
 
@@ -226,13 +427,15 @@ corpus real e busca semântica); protótipo possível como comando de debug.
 
 | Marco | Adições deste doc |
 |---|---|
-| M3 | Lentes v0 via painel debug (forçar reorganização por elemento) |
-| M4 | Timeline de beats no follow; 3 níveis de profundidade (corte/íntegra/link YouTube); semente da Sintonia |
-| M5 | Unlock de temas por escuta; regra "colher exige ouvir"; semente do Coro |
-| M6 | Lentes completas no god view; Coro nos núcleos/fios; regra "números só em cima" |
+| M3 | Lentes v0 via painel debug (forçar reorganização por elemento) — ✔ entregue |
+| M4 | Cadeia hover/clique (§4.1: nome flutuante + semente da Sintonia + follow 3ª pessoa); timeline de hotspots; 3 níveis de profundidade (corte/íntegra/link YouTube); estados por velocidade v0 (§5.5); legenda viva v0 (§6.1) |
+| M5 | Unlock de temas por escuta; regra "colher exige ouvir"; semente do Coro; onda de chegada + chegada ponderada (§5.5); fios inteligentes v0 (§5.6) |
+| M6 | Lentes completas no god view (fenomenológicas §5.3 + demográficas §5.8); Coro nos núcleos/fios; palavras no espaço (§5.7); regra "números só em cima"; legenda viva premium |
 | M7 | Sintonia completa; vinhetas por elemento v0 (luz/névoa/céu por tom); gesto de saída |
+| pós-M6 | A Maré (§5.4) — scrub global com degradê emocional |
 
-**Dependência transversal:** Sintonia, Coro, Lentes, timeline e resumos
+**Dependência transversal:** Sintonia, Coro, Lentes, Maré, timeline e resumos
 consomem o mesmo insumo — beats timestampados, quotes por elemento, cortes de
-áudio, embeddings, clusters. Nenhuma exige tecnologia nova no app; todas
-exigem **os dados existirem**. Por isso o `acervo` (doc 02) abre antes do M3.
+áudio, embeddings, clusters, demographics. Nenhuma exige tecnologia nova no
+app; todas exigem **os dados existirem**. Por isso o `acervo` (doc 02) abre
+antes do M3.
