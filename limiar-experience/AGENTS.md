@@ -58,6 +58,17 @@ Leia antes de qualquer tarefa, nesta ordem:
   `wiresAlpha`, `gravForca`; debug cor "alvo" (R=dist/20, G=tem-alvo);
   `scripts/probe.mjs "<url>"` imprime estado do seek + readback GPU real
   das posições (`window.__limiarSim` / `__limiarReadPositions`, só em dev).
+- **Lentes demográficas** (`src/data/demoLens.ts` + `?dlens=sexo|decada|
+  causa|geo|religiao|tempo`): classificação/bucketing CPU dos campos
+  `demographics` (destilados em `content/demographics.json` pelo
+  sync-content), layouts por alvo (setores; década = linha do tempo no eixo
+  X; tempo = dois arcos), cores por categoria pela MESMA via `iColorScale`
+  (fillContentAttributes com `demoCls`), legenda no HUD via
+  `useDemoLens` (zustand). Exclusão mútua com a lente de elemento no
+  CrowdMesh (a que mudou vence; na URL com as duas, dlens ganha). Trocar
+  lente não reseta a sim. Verificação offline sem navegador:
+  `node scripts/demo-lens-check.mjs` (bundla o TS real com rolldown e roda
+  contra public/content/). `?simT` pré-rola até 60 s (3600 steps).
 - O pre-roll do `?simT` espera o 2º frame (leva entrega valores reais após
   o 1º commit — no 1º frame rodaria com defaults).
 - Spawn permuta o índice (`i×197 mod count`) para as pessoas reais não

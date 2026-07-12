@@ -31,6 +31,7 @@
 | Demográficos | **Passada complementar barata** (`acervo demographics`, 1 chamada/pessoa, claude-haiku-4.5, custo real **US$ 0,55**): sexo (31F/14M/1null — o null é o vídeo-lixo `nayda-cabral`), religião antes/depois 28/46 (padrão dominante "católica na época → espírita/espiritualidade hoje"), local do evento 42/46 (16 estados + Noruega, Portugal, EUA), ano 37/46 (de 1969 a 2025; 16 nos 2020s), tempo clínico 18/46 (comas de 4–44 dias, paradas de 15–20 min), tempo subjetivo 17/46 ("lá não existia tempo", "anos dentro do coma"), profissão 42/46. Schema `Demographics` (migração suave), prompt `demo-v1`, cache por `demographics_version`, export atualizado (JSONs com `demographics`, hash `c8c437af007d3008`, cortes intactos), bloco somente-leitura na UI de revisão | ✔ |
 | A5 | Fechamento do piloto: curadoria do Dudu na UI + report | ⬅ próximo |
 | M3 | **Data layer no app**: multidão dirigida pelo export real (46 pessoas → primeiros slots, resto dormente escuro); cores por núcleo (12, matiz espaçado por ângulo áureo via `iColorScale` — zero vertex buffer novo); **gravidade** (seek do umap3d escalado, arrival+damping, toggle no leva + `?gravity=1`, slider escala do mapa ~14); **fios** (LineSegments TSL, endpoints lendo posições vivas: storage read-only no vertex em WebGPU, PBO em WebGL2; alpha × weight); **Lentes v0** (dropdown com os 36 elementos da taxonomy: quem tem gravita ao anel central, quem não tem recua à borda); HUD "46 pessoas · 12 núcleos · manifest d1a2c16f"; `sync-content` em predev/prebuild; fallback silencioso sem content/ (roda procedural como no M2) | ✔ tag `m3` |
+| Lentes demográficas | **6 lentes não-fenomenológicas** no app (`src/data/demoLens.ts`, dropdown próprio no leva + `?dlens=sexo\|decada\|causa\|geo\|religiao\|tempo`, exclusão mútua com a lente de elemento): sexo, **década do evento em linha do tempo física** (eixo X 1969→2025, fileiras por ano), causa, geografia (parse UF/país do texto livre), trajetória religiosa (buckets heurísticos) e **tempo** (arco subjetivo com cor do bucket clínico — "20 min que viram uma vida"); null = faixa "não declarado" na borda, nunca inventado; cores temporárias por categoria pela MESMA via `iColorScale` + legenda com contagens no HUD; `sync-content` destila `demographics.json`; verificação offline `scripts/demo-lens-check.mjs` + screenshots nos 2 backends | ✔ |
 | M4+ | Follow/beats por agente, descoberta, constelação, polimento | pendente — ver adições do doc 04 §11 |
 
 ## Decisões tomadas (e porquês)
@@ -82,6 +83,15 @@
 - **M3: lente ativa força o seek** mesmo com gravidade desligada (aplicar
   lente sem gravidade não teria efeito visível); ângulo do anel preservado do
   UMAP para vizinhanças não embaralharem ao trocar de lente.
+- **Lentes demográficas (2026-07-12)**: bucketing heurístico DOCUMENTADO no
+  `demoLens.ts` — religião checa matriz africana antes de "espírit*" (senão
+  "…umbanda…, hoje espiritualidade" mudaria de bucket) e inclui "kardec";
+  geografia vence o match de MENOR índice no texto (o local do evento vem
+  primeiro); tempo clínico com fallback nominal (coma/UTI≈dias, desmaio≈min,
+  intervalo de datas≈mês) e subjetivo em rank 0–1 ("piscar"→0, "sem tempo"→1).
+  Trocar lente NÃO reseta a sim (as pessoas caminham ao novo arranjo); cores
+  por categoria pela MESMA via iColorScale (nenhum vertex buffer novo); null
+  sempre vira faixa "não declarado" na borda/atrás — nunca inventar dado.
 - **Docs: consolidação das ideias de 2026-07-12 + regra permanente de
   documentação** — doc 04 ganhou o princípio "um sistema se organizando,
   não ruído" (§1.1), a cadeia de interação do M4 (§4.1) e as mecânicas
@@ -240,6 +250,16 @@ circunstância dominava; os nomes do LLM ainda puxam para circunstância em
   parte 1 + fechamento da última). Parece completo mas NUNCA RODOU num lote;
   ficou fora do commit do M3 de propósito. Testar com `--dry-run`, rodar nas
   46 e commitar como marco próprio (ou descartar se a curadoria A5 não pedir).
+- **Lentes demográficas — ideias para a v2**: escala do corpo pelo tempo
+  subjetivo (quem viveu "uma vida" fica maior que o relógio diz); rótulos 3D
+  nos setores/anos em vez de legenda só no HUD; na lente tempo, um fio
+  ligando a posição clínica à subjetiva da mesma pessoa (a distorção vira
+  linha visível); parse de `local_origem` para uma lente "migração"
+  (origem→evento); profissão precisa de bucketing LLM (texto livre demais
+  para heurística). Limitações registradas: "crente em Deus sem religião"
+  cai no bucket evangélica pela palavra "crente"; tempo clínico usa valores
+  nominais quando o texto não traz número (coma/UTI≈5d); `parada cardíaca`
+  do cause_category some dentro de "clínico: minutos" na lente tempo.
 - **M3 — pendências para o M4**: (a) fios são debug visual por enquanto —
   na experiência final devem revelar-se progressivamente (doc 01/05);
   (b) layout por lente é anel simples (tem/não-tem) — considerar espiral por

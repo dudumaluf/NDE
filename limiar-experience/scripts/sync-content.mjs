@@ -11,7 +11,15 @@
  *
  * Sem acervo/export na máquina → sai em silêncio (o app roda procedural).
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,16 +50,33 @@ for (const f of DOCS) {
 rmSync(join(DST, "people"), { recursive: true, force: true });
 mkdirSync(join(DST, "people"), { recursive: true });
 let nPeople = 0;
+// demographics.json (derivado): o app só precisa de um punhado de campos por
+// pessoa para as lentes demográficas — destilar aqui evita 46 fetches no boot.
+const demographics = {};
+let nDemo = 0;
 if (existsSync(join(SRC, "people"))) {
   for (const f of readdirSync(join(SRC, "people"))) {
     if (!f.endsWith(".json")) continue;
     copyFileSync(join(SRC, "people", f), join(DST, "people", f));
     nPeople += 1;
+    const doc = JSON.parse(readFileSync(join(SRC, "people", f), "utf8"));
+    const dem = doc.demographics ?? {};
+    demographics[doc.id] = {
+      sexo: dem.sexo ?? null,
+      religiao_contexto: dem.religiao_contexto ?? null,
+      local_evento: dem.local_evento ?? null,
+      ano_evento: dem.ano_evento ?? null,
+      tempo_clinico_declarado: dem.tempo_clinico_declarado ?? null,
+      tempo_subjetivo_declarado: dem.tempo_subjetivo_declarado ?? null,
+      cause_category: doc.cause_category ?? null,
+    };
+    if (doc.demographics) nDemo += 1;
   }
 }
+writeFileSync(join(DST, "demographics.json"), JSON.stringify(demographics));
 
 const manifest = JSON.parse(readFileSync(join(DST, "manifest.json"), "utf8"));
 console.log(
-  `sync-content: ${manifest.counts?.people ?? "?"} pessoas (${nPeople} docs) · ` +
-    `manifest ${manifest.content_hash ?? "?"} → public/content/`,
+  `sync-content: ${manifest.counts?.people ?? "?"} pessoas (${nPeople} docs, ` +
+    `${nDemo} com demographics) · manifest ${manifest.content_hash ?? "?"} → public/content/`,
 );

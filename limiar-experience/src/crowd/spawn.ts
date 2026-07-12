@@ -1,5 +1,6 @@
 import type { CrowdAttributes } from "../vat/vatGeometry";
 import type { Content } from "../data/types";
+import type { DemoClassification } from "../data/demoLens";
 import { clusterColor, dormantColor } from "../data/palette";
 
 /** PRNG determinístico (mulberry32) — seed igual, multidão igual. */
@@ -42,19 +43,26 @@ export function fillStaticAttributes(
  * multidão é dormente — cinza quente mais escuro, levemente menor. A cor
  * entra pelo MESMO vec4 iColorScale de sempre (nenhum vertex buffer novo:
  * WebGPU limita a 8).
+ *
+ * Com uma lente demográfica ativa (`demoCls`), a cor da pessoa vira a da sua
+ * categoria — temporária: desativar a lente re-preenche com a cor do núcleo
+ * (o rng é determinístico por seed, então as escalas não mudam no caminho).
  */
 export function fillContentAttributes(
   attrs: CrowdAttributes,
   count: number,
   seed: number,
   content: Content,
+  demoCls?: DemoClassification | null,
 ): void {
   const rng = mulberry32(seed);
   const people = content.manifest.people;
   const n = Math.min(people.length, count);
 
   for (let i = 0; i < n; i++) {
-    const [r, g, b] = clusterColor(people[i].cluster_id);
+    const [r, g, b] = demoCls
+      ? demoCls.categories[demoCls.personCat[i]].color
+      : clusterColor(people[i].cluster_id);
     attrs.colorScale.setXYZW(i, r, g, b, 0.9 + rng() * 0.1);
   }
   for (let i = n; i < count; i++) {

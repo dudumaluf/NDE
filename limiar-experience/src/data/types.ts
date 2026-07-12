@@ -49,6 +49,23 @@ export interface Graph {
   edges: GraphEdge[];
 }
 
+/**
+ * Recorte demográfico por pessoa (destilado dos people/*.json pelo
+ * sync-content — campos da passada `acervo demographics` + cause_category).
+ * Tudo nullable: null = não declarado no vídeo, nunca inventado.
+ */
+export interface PersonDemographics {
+  sexo: string | null;
+  religiao_contexto: string | null;
+  local_evento: string | null;
+  ano_evento: number | null;
+  tempo_clinico_declarado: string | null;
+  tempo_subjetivo_declarado: string | null;
+  cause_category: string | null;
+}
+
+export type Demographics = Record<string, PersonDemographics>;
+
 export interface TaxonomyElement {
   key: string;
   label: string;
@@ -70,4 +87,5 @@ export interface Content {
   clusters: Cluster[];
   graph: Graph;
   taxonomy: Taxonomy;
+  demographics: Demographics;
 }

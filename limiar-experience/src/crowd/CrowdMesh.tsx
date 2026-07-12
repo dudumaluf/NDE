@@ -13,6 +13,14 @@ import { fillContentAttributes, fillStaticAttributes } from "./spawn";
 import { qpBool, qpNum, qpStr } from "../lib/urlParams";
 import { useContent } from "../data/contentStore";
 import { computeTargets } from "../data/agentMapping";
+import {
+  DEMO_LENS_KEYS,
+  DEMO_LENS_LABELS,
+  classifyDemoLens,
+  computeDemoTargets,
+  type DemoLensKey,
+} from "../data/demoLens";
+import { useDemoLens } from "../data/demoLensStore";
 import { CrowdWires } from "../render/CrowdWires";
 
 const NO_LENS = "nenhuma";
@@ -98,9 +106,9 @@ export function CrowdMesh() {
         : [NO_LENS],
     [content],
   );
-  const d = useControls(
+  const [d, setD] = useControls(
     "Dados (M3)",
-    {
+    () => ({
       gravidade: { value: qpBool("gravity", false), label: "gravidade (UMAP)" },
       mapScale: {
         value: qpNum("mapScale", 14),
@@ -122,9 +130,56 @@ export function CrowdMesh() {
         label: "fios alpha",
       },
       fiosAltura: { value: 1.05, min: 0, max: 2, label: "fios altura" },
-    },
+    }),
     [lensOptions],
   );
+
+  // --- Lentes demográficas: eixos não-fenomenológicos (sexo, década, …) ---
+  const dlensOptions = useMemo(() => {
+    const opts: Record<string, string> = { nenhuma: NO_LENS };
+    for (const k of DEMO_LENS_KEYS) opts[DEMO_LENS_LABELS[k]] = k;
+    return opts;
+  }, []);
+  const [dl, setDl] = useControls(
+    "Lente demográfica",
+    () => ({
+      dlente: {
+        value: qpStr("dlens", NO_LENS, [NO_LENS, ...DEMO_LENS_KEYS]),
+        options: dlensOptions,
+        label: "lente",
+      },
+    }),
+    [dlensOptions],
+  );
+
+  // Exclusão mútua: ativar uma lente desativa a outra (a que MUDOU vence).
+  // Na carga com as duas na URL, a demográfica ganha (checada primeiro).
+  const prevLens = useRef(NO_LENS);
+  const prevDlens = useRef(NO_LENS);
+  useEffect(() => {
+    const lensChanged = d.lente !== prevLens.current;
+    const dlensChanged = dl.dlente !== prevDlens.current;
+    prevLens.current = d.lente;
+    prevDlens.current = dl.dlente;
+    if (dlensChanged && dl.dlente !== NO_LENS && d.lente !== NO_LENS) {
+      setD({ lente: NO_LENS });
+    } else if (lensChanged && d.lente !== NO_LENS && dl.dlente !== NO_LENS) {
+      setDl({ dlente: NO_LENS });
+    }
+  }, [d.lente, dl.dlente, setD, setDl]);
+
+  // Classificação da lente ativa (46 pessoas, CPU) + legenda para o HUD.
+  const demoCls = useMemo(
+    () =>
+      content && dl.dlente !== NO_LENS
+        ? classifyDemoLens(dl.dlente as DemoLensKey, content)
+        : null,
+    [content, dl.dlente],
+  );
+  useEffect(() => {
+    useDemoLens.setState({ cls: demoCls });
+    return () => useDemoLens.setState({ cls: null });
+  }, [demoCls]);
 
   const resetRef = useRef(true);
   const initTimeRef = useRef(qpNum("simT", 0));
@@ -139,13 +194,18 @@ export function CrowdMesh() {
     mesh.instanceMatrix.needsUpdate = true;
   }, []);
 
-  // Parâmetros de spawn mudaram → re-preenche atributos e agenda reset GPU.
-  // Com content/ carregado, as cores vêm dos núcleos (pessoas nos primeiros
-  // 46 slots, resto dormente); sem ele, paleta procedural do M1.
+  // Cores por instância: núcleo (padrão) ou categoria da lente demográfica
+  // ativa — mesma via iColorScale; trocar lente NÃO reseta posições (as
+  // pessoas caminham para o novo arranjo) e o rng por seed mantém as escalas.
   useEffect(() => {
     const count = c.grid * c.grid;
-    if (content) fillContentAttributes(attrs, count, c.seed, content);
+    if (content) fillContentAttributes(attrs, count, c.seed, content, demoCls);
     else fillStaticAttributes(attrs, count, c.seed);
+  }, [attrs, content, demoCls, c.grid, c.seed]);
+
+  // Parâmetros de spawn mudaram → uniforms da sim e agenda reset GPU.
+  useEffect(() => {
+    const count = c.grid * c.grid;
     sim.u.count.value = count;
     sim.u.gridN.value = c.grid;
     sim.u.spawnArea.value = c.area;
@@ -153,18 +213,27 @@ export function CrowdMesh() {
     sim.u.seed.value = c.seed;
     if (meshRef.current) meshRef.current.count = count;
     resetRef.current = true;
-  }, [attrs, sim, content, c.grid, c.area, c.ruido, c.seed]);
+  }, [sim, content, c.grid, c.area, c.ruido, c.seed]);
 
-  // Alvos dos dados (gravidade/lente) — 46 escritas por mudança, nada por frame.
+  // Alvos dos dados (gravidade/lentes) — 46 escritas por mudança, nada por
+  // frame. Lente demográfica ativa vence a lente de elemento (exclusão mútua
+  // no efeito acima garante que só uma esteja ligada).
   useEffect(() => {
     if (!content) return;
-    computeTargets(content, MAX_GRID * MAX_GRID, sim.targetsArray, {
-      mapScale: d.mapScale,
-      containRadius: s.contRaio,
-      lens: d.lente === NO_LENS ? null : d.lente,
-    });
+    if (demoCls) {
+      computeDemoTargets(demoCls, MAX_GRID * MAX_GRID, sim.targetsArray, {
+        mapScale: d.mapScale,
+        containRadius: s.contRaio,
+      });
+    } else {
+      computeTargets(content, MAX_GRID * MAX_GRID, sim.targetsArray, {
+        mapScale: d.mapScale,
+        containRadius: s.contRaio,
+        lens: d.lente === NO_LENS ? null : d.lente,
+      });
+    }
     sim.commitTargets();
-  }, [content, sim, d.mapScale, d.lente, s.contRaio]);
+  }, [content, sim, demoCls, d.mapScale, d.lente, s.contRaio]);
 
   useFrame((_, delta) => {
     mouseTarget.mode = s.mouseModo;
@@ -180,15 +249,16 @@ export function CrowdMesh() {
     sim.u.mouseWeight.value = s.mouseForca;
     sim.u.turnRate.value = s.giro;
     sim.u.phasePerUnit.value = s.passo;
-    // Gravidade: lente ativa força o seek mesmo com o toggle desligado —
-    // aplicar uma lente sem gravidade não teria efeito nenhum.
-    const seekOn = content && (d.gravidade || d.lente !== NO_LENS);
+    // Gravidade: lente ativa (elemento OU demográfica) força o seek mesmo com
+    // o toggle desligado — aplicar uma lente sem gravidade não teria efeito.
+    const seekOn = content && (d.gravidade || d.lente !== NO_LENS || demoCls);
     sim.u.seekWeight.value = seekOn ? d.gravForca : 0;
     if (import.meta.env.DEV) {
       const w = window as unknown as Record<string, unknown>;
       w.__limiarSim = {
         seekWeight: sim.u.seekWeight.value,
         lente: d.lente,
+        dlente: dl.dlente,
         gravidade: d.gravidade,
         tgt0: Array.from(sim.targetsArray.slice(0, 4)),
         tgt45: Array.from(sim.targetsArray.slice(45 * 4, 45 * 4 + 4)),
@@ -211,7 +281,7 @@ export function CrowdMesh() {
       const pre = initTimeRef.current;
       initTimeRef.current = 0;
       if (pre > 0) {
-        const steps = Math.min(Math.ceil(pre / (1 / 60)), 1200);
+        const steps = Math.min(Math.ceil(pre / (1 / 60)), 3600);
         for (let i = 0; i < steps; i++) sim.update(gl, 1 / 60, isWebGPU(gl));
       }
     }
