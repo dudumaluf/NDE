@@ -199,11 +199,16 @@ async function main() {
               `  malha: ${ev.meshes} skinned mesh(es) · ${ev.uniqueVerts} vértices únicos · ` +
                 `${ev.triangles} triângulos → topologia ${ev.topology} (${ev.width} colunas)`,
             );
+            console.log(`  meshHash: ${ev.meshHash} (VATs com o mesmo hash podem cruzar morph no app)`);
             console.log(`  clipes (${ev.entries.length} × ${args.frames} frames @ ${args.fps} fps):`);
             ev.entries.forEach((e, i) =>
-              console.log(`    ${i} ${e.name} (${e.mode})  fonte ${e.duration.toFixed(3)}s · ${e.source}`),
+              console.log(
+                `    ${i} ${e.name} (${e.mode}${e.inPlace ? ", no lugar" : ""})  fonte ${e.duration.toFixed(3)}s · ${e.source}`,
+              ),
             );
           }
+          if (ev.type === "rootmotion")
+            console.log(`  root motion exportado: "${ev.clip}" desloca ${ev.travel} un. (descriptor.rootMotion)`);
           if (ev.type === "normalize")
             console.log(
               `  normalização: translate ${fmtV3(ev.translate)} · escala ${ev.scale.toFixed(4)}` +

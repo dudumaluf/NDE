@@ -2,22 +2,31 @@ import { useMemo } from "react";
 import * as THREE from "three/webgpu";
 import { useLoader } from "@react-three/fiber";
 import { EXRLoader } from "three/addons/loaders/EXRLoader.js";
-import { binToTexture, vat } from "./runtime";
+import { binToTexture, vat, vatB } from "./runtime";
 
 /**
  * Carrega o par de texturas da VAT (posições + normais) como DataTextures
  * float, configuradas para leitura exata por texel (textureLoad, sem filtro).
  * Duas codificações: EXR float32 (asset legado do Houdini) e .bin float16 raw
  * (saída do tools/vat-bake.mjs, doc 03 §3) — decidido pelo descriptor ativo.
+ *
+ * Com `?vatB=` (morph entre texturas), os bins da VAT B também são baixados
+ * e empilhados abaixo dos da A na MESMA DataTexture (binToTexture) — o
+ * sampler endereça os clipes de B por linha, sem bindings extras.
  */
 export function useVatTextures(): [THREE.Texture, THREE.Texture] {
   const v = vat();
+  const b = vatB();
   const isExr = v.encoding === "exr";
-  // O encoding é fixo pela URL (?vat=) durante toda a vida do app — a escolha
-  // de loader é estável entre renders (regra dos hooks preservada).
-  const [rawPos, rawNrm] = useLoader(
+  // URLs fixas pela URL da página (?vat=/&vatB=) durante toda a vida do app —
+  // a lista é estável entre renders (regra dos hooks preservada).
+  const urls =
+    !isExr && b
+      ? [v.positionsUrl, v.normalsUrl, b.positionsUrl, b.normalsUrl]
+      : [v.positionsUrl, v.normalsUrl];
+  const raws = useLoader(
     (isExr ? EXRLoader : THREE.FileLoader) as typeof EXRLoader,
-    [v.positionsUrl, v.normalsUrl],
+    urls,
     (loader) => {
       if (isExr) (loader as EXRLoader).setDataType(THREE.FloatType);
       else (loader as unknown as THREE.FileLoader).setResponseType("arraybuffer");
@@ -25,12 +34,13 @@ export function useVatTextures(): [THREE.Texture, THREE.Texture] {
   );
 
   return useMemo(() => {
+    const [rawPos, rawNrm, rawPosB, rawNrmB] = raws as unknown[];
     const pair = (
       isExr
         ? [rawPos, rawNrm]
         : [
-            binToTexture(rawPos as unknown as ArrayBuffer),
-            binToTexture(rawNrm as unknown as ArrayBuffer),
+            binToTexture(rawPos as ArrayBuffer, rawPosB as ArrayBuffer | undefined, "positions"),
+            binToTexture(rawNrm as ArrayBuffer, rawNrmB as ArrayBuffer | undefined, "normals"),
           ]
     ) as [THREE.Texture, THREE.Texture];
     for (const tex of pair) {
@@ -43,5 +53,5 @@ export function useVatTextures(): [THREE.Texture, THREE.Texture] {
       tex.needsUpdate = true;
     }
     return pair;
-  }, [rawPos, rawNrm, isExr]);
+  }, [raws, isExr]);
 }

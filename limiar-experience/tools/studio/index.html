@@ -81,6 +81,19 @@
              border-radius: 6px; font-size: 11px; padding: 2px 9px; cursor: pointer; }
   .playbtn:hover { border-color: var(--acc); color: var(--tx); }
   .playbtn.on { border-color: var(--acc); color: var(--acc); }
+  .delbtn { background: transparent; border: 1px solid transparent; color: var(--faint);
+            border-radius: 6px; font-size: 13px; padding: 0 6px; cursor: pointer; line-height: 1.4; }
+  .delbtn:hover { border-color: #4a3636; color: var(--bad); }
+  .combadge { font-size: 10px; color: var(--acc); border: 1px solid var(--line);
+              border-radius: 99px; padding: 0 7px; white-space: nowrap; }
+  .fadefield { display: inline-flex; align-items: center; gap: 4px; }
+  .fadefield input { width: 52px; padding: 1px 5px; font-size: 11px; }
+  .combobar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+              background: var(--panel2); border: 1px dashed var(--acc); border-radius: 8px;
+              padding: 8px 11px; margin-bottom: 8px; font-size: 12px; color: var(--dim); }
+  .combobar button { background: transparent; border: 1px solid var(--acc); color: var(--acc);
+                     border-radius: 6px; padding: 3px 12px; font-size: 12px; cursor: pointer; }
+  .combobar button:hover { background: var(--panel); }
 
   /* presets */
   .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -213,8 +226,10 @@
     <div class="stack">
       <div class="panel">
         <h4>Clipes — ordem na textura, nome e playback</h4>
+        <div class="combobar hidden" id="comboBar"></div>
         <div id="clips"></div>
         <div class="empty" id="clipsEmpty">nenhum clipe de animação encontrado nos arquivos</div>
+        <div class="empty" style="margin-top:6px">marque <b>comb.</b> em 2+ clipes para mesclá-los num track só · × remove da lista</div>
       </div>
 
       <div class="panel">

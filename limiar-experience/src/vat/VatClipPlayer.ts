@@ -1,8 +1,13 @@
-import { vat } from "./runtime";
+import { clipInfo, globalClipIndex, totalClipCount, vat } from "./runtime";
 
 /**
  * Estado de blend entre dois clipes num instante — o contrato entre o player
  * (CPU) e o sampler TSL (GPU). blend 0 = só A, 1 = só B.
+ *
+ * Os índices de clipe são GLOBAIS: com `?vatB=` carregada, os clipes da
+ * segunda textura continuam a numeração ([clipCount de A, total)) — a linha
+ * na textura combinada é clip × framesPerClip, então morfar entre texturas
+ * é literalmente o mesmo crossfade de sempre.
  */
 export interface VatBlendState {
   clipA: number;
@@ -20,7 +25,8 @@ interface Slot {
 }
 
 const lastFrame = (): number => vat().framesPerClip - 1;
-const clipLoop = (clip: number): boolean => vat().clips[clip]?.loop ?? true;
+const clipLoop = (clip: number): boolean => clipInfo(clip)?.loop ?? true;
+const clipFps = (clip: number): number => clipInfo(clip)?.fps ?? vat().fps;
 
 /**
  * Player de clipes VAT com crossfade seamless.
@@ -29,6 +35,10 @@ const clipLoop = (clip: number): boolean => vat().clips[clip]?.loop ?? true;
  * atual continua tocando no slot A enquanto o novo sobe no slot B; o shader
  * mistura as posições dos vértices. One-shots (morrer, levantar) seguram o
  * último frame ao terminar (hold), como pede o doc 01 §4 ("o limiar").
+ *
+ * Com a VAT B (`?vatB=`), `play(clip, { vat: "nome" })` aceita o índice
+ * LOCAL do clipe naquela VAT — resolvido para o índice global aqui. O fade
+ * cruza texturas sem caso especial.
  *
  * Nota: interromper um fade no meio "promove" o slot dominante — pode dar um
  * micro-pop se interrompido exatamente a 50%; com fades curtos é imperceptível.
@@ -45,19 +55,24 @@ export class VatClipPlayer {
   /** Duração default do crossfade, em segundos. */
   defaultFade = 0.35;
 
-  /** Clipe "alvo" atual (o que está subindo, ou o estável). */
+  /** Clipe "alvo" atual (o que está subindo, ou o estável) — índice global. */
   get currentClip(): number {
     return this.b ? this.b.clip : this.a.clip;
   }
 
-  play(clip: number, opts: { fade?: number } = {}): void {
-    if (clip < 0 || clip >= vat().clipCount) return;
+  /**
+   * Morfa para um clipe. `clip` é o índice global — ou, com `opts.vat`, o
+   * índice local dentro daquela VAT (`play(0, { vat: "soldier-b" })`).
+   */
+  play(clip: number, opts: { fade?: number; vat?: string } = {}): void {
+    const target = opts.vat !== undefined ? globalClipIndex(clip, opts.vat) : clip;
+    if (target < 0 || target >= totalClipCount()) return;
     this.staticState = null;
-    if (this.currentClip === clip) return;
+    if (this.currentClip === target) return;
     if (this.b) {
       if (this.blend > 0.5) this.a = this.b;
     }
-    this.b = { clip, time: 0 };
+    this.b = { clip: target, time: 0 };
     this.blend = 0;
     const fade = opts.fade ?? this.defaultFade;
     this.fadeSpeed = fade > 0 ? 1 / fade : Number.POSITIVE_INFINITY;
@@ -87,7 +102,7 @@ export class VatClipPlayer {
   /** Pula direto para um clipe sem fade (estado inicial). */
   snapTo(clip: number): void {
     this.staticState = null;
-    this.a = { clip: Math.min(Math.max(clip, 0), vat().clipCount - 1), time: 0 };
+    this.a = { clip: Math.min(Math.max(clip, 0), totalClipCount() - 1), time: 0 };
     this.b = null;
     this.blend = 0;
   }
@@ -110,11 +125,11 @@ export class VatClipPlayer {
   /** Progresso [0,1] do clipe alvo (para sequenciar one-shots). */
   progress(): number {
     const slot = this.b ?? this.a;
-    return Math.min(1, (slot.time * vat().fps) / lastFrame());
+    return Math.min(1, (slot.time * clipFps(slot.clip)) / lastFrame());
   }
 
   private frameOf(slot: Slot): number {
-    const f = slot.time * vat().fps;
+    const f = slot.time * clipFps(slot.clip);
     return clipLoop(slot.clip)
       ? f % vat().framesPerClip
       : Math.min(f, lastFrame());

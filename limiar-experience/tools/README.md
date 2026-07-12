@@ -30,15 +30,28 @@ Fluxo na página:
    botões do app), renomeie clicando no nome, e escolha **loop** (idle,
    andar…) ou **única** (morrer, levantar — congela no último frame).
    Clipes que deslocam a raiz ganham o toggle "andar no lugar" (sugerido
-   automaticamente — para multidão o passo vem da simulação).
-4. **Preset de intenção**: *Multidão* (18 fps, malha enxuta) ou *Personagem
+   automaticamente — ver *Root motion* abaixo). Cada linha tem ainda
+   **× (remover)** — tira o clipe da lista e o orçamento recalcula na hora —
+   e **⧉ (duplicar)** — para usar o mesmo clipe 2× (ex.: num combinado).
+4. **Combinar clipes**: marque **comb.** em 2+ clipes e clique "combinar" —
+   eles viram UM clipe contínuo (concatenação com crossfade curto e
+   configurável entre as partes, default 0,2 s). Útil para micro-variações:
+   idle + olhar + idle vira um idle longo sem gastar slots de clipe. A ordem
+   é a ordem em que você marcou; para o loop fechar, comece e termine com o
+   mesmo clipe cíclico (use ⧉). O preview toca EXATAMENTE o que será assado
+   (mesmo motor de merge, `tools/merge-clips.mjs`); "separar" desfaz.
+5. **Preset de intenção**: *Multidão* (18 fps, malha enxuta) ou *Personagem
    próximo* (30 fps, mais detalhe).
-5. **Orçamento** antes de assar: vértices por pessoa, dimensão da textura,
+6. **Orçamento** antes de assar: vértices por pessoa, dimensão da textura,
    peso do download — com semáforo verde/amarelo/vermelho e **correções de
    1 clique** (reduzir malha via meshoptimizer com preview antes/depois
    lado a lado; baixar frames por clipe).
-6. **Gerar texturas** → progresso ao vivo, validação automática (selftest) e
-   botão "testar na experiência" (abre o app com `?vat=<nome>`).
+7. **Gerar texturas** → progresso ao vivo, validação automática (selftest),
+   botão "testar na experiência" (abre o app com `?vat=<nome>`) e o aviso de
+   **morfabilidade**: se outro export tem o MESMO `meshHash` (mesma malha,
+   mesma redução), o resultado sai "morfável com X" com botão para testar o
+   morph entre as duas texturas (`?vat=a&vatB=b`); malha diferente sai
+   "não-morfável" — o esperado entre personagens diferentes.
 
 Limites que o semáforo usa (por que existem):
 
@@ -76,8 +89,8 @@ node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \
 | `--height <h>` | 0.7 | normaliza a altura (frame 0 do 1º clipe) para `h` — 0.7 é a convenção do asset legado (com escala 2.5 do app ≈ 1.75 no mundo); `0` mantém o tamanho original |
 | `--max-verts <n>` | 0 | decima a malha até ≤ n vértices únicos (meshoptimizer) antes do bake — ex.: `--max-verts 2500` para multidão |
 | `--topology soup\|indexed\|auto` | auto | `soup` = triangle soup como o asset legado; `indexed` = textura por vértice único + index buffer (menor download); `auto` = indexed sempre que a malha compartilha vértices |
-| `--in-place` | off | congela a translação XZ do osso raiz em todos os clipes (no Studio isso é por clipe) |
-| `--selftest` | off | valida o resultado (dimensões, NaN, loops fecham, pé no chão, normais) |
+| `--in-place` | off | congela a translação XZ do osso raiz em todos os clipes (no Studio isso é por clipe) e **exporta a trajetória removida** em `rootMotion` no vat.json |
+| `--selftest` | off | valida o resultado (dimensões, NaN, loops fecham, pé no chão, normais, rootMotion) |
 
 `--selftest` sozinho (sem inputs) revalida um diretório já assado:
 `node tools/vat-bake.mjs --out public/vat/soldier --selftest`.
@@ -119,12 +132,26 @@ node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \
   como no asset legado).
 - `indices_u32.bin` — topologia `indexed`: index buffer da malha (o
   `vertexIndex` do shader segue sendo a coluna da VAT).
-- `vat.json` — descriptor (`format: "vat-bake/1"`): dimensões, clipes
+- `vat.json` — descriptor (`format: "vat-bake/2"`): dimensões, clipes
   (nome/modo/range de linhas), fps, basis, normalização aplicada
-  (translate/scale), bounds e decimação (se houve) — tudo que o app precisa
-  em `src/vat/runtime.ts`.
+  (translate/scale), bounds, decimação (se houve) e os dois campos novos:
 
-## Como o app carrega (`?vat=<nome>`)
+  - **`meshHash`** — identidade da malha: SHA-1 (16 hex) das posições de bind
+    dos vértices que entram na textura (pós-decimação) + ordem de desenho.
+    Dois exports com o mesmo hash endereçam OS MESMOS vértices por coluna —
+    é o que autoriza o morph entre texturas no app. O mesmo personagem com
+    reduções diferentes tem hashes diferentes (use o mesmo alvo de redução).
+  - **`rootMotion`** — só para clipes assados "no lugar" que de fato
+    deslocavam: `[{ clip, samples: [[x,y,z], …] }]`, uma amostra por frame
+    (mesma grade das linhas da textura), já na escala do bake. Semântica:
+    o skinning ficou in-place; `samples[f]` é o deslocamento que a raiz teria
+    no frame f. **Multidão simulada: ignore** (o movimento vem da simulação —
+    por isso in-place é o default). **One-shots dirigidos/cinemáticos**: some
+    a amostra (× a escala do app) ao translate do mesh para reproduzir a
+    trajetória original — helper pronto em `src/vat/rootMotion.ts`, demo no
+    toggle "root motion (translate)" do personagem (leva).
+
+## Como o app carrega (`?vat=<nome>` e `?vatB=<nome>`)
 
 `src/main.tsx` chama `initVat()` antes do primeiro render: com `?vat=<nome>`,
 o descriptor ativo passa a ser `public/vat/<nome>/vat.json`; sem o parâmetro
@@ -133,6 +160,21 @@ basis `x_negz_y` + bakeOffset) — o personagem original continua o default.
 Os botões de estado (leva) são gerados do descriptor ativo; a multidão e o
 morph A/B funcionam igual com qualquer asset.
 
+**Morph entre duas VATs** (`?vat=a&vatB=b`): carrega uma segunda VAT **da
+mesma malha** e permite crossfade entre um clipe de A e um clipe de B — sem
+precisar assar todas as animações numa textura só. Como funciona: as linhas
+de B são empilhadas abaixo das de A numa DataTexture combinada e os clipes
+de B ganham índices globais contínuos (`A.clipCount…`); o shader não muda
+(o crossfade já endereça qualquer linha), então nada de bindings extras nem
+custo novo — vale para o personagem E para a multidão. As posições de B são
+re-normalizadas para o espaço de A no load (bakes separados normalizam
+diferente). No leva aparece o dropdown "textura (VAT)" + botões de teste;
+via código, `vatPlayer.play(i, { vat: "b" })`. Restrições (validadas no
+load, recusa com aviso no console e o app segue só com A): mesma contagem
+de vértices, mesmo `framesPerClip`, mesma topologia e basis; `meshHash`
+diferente com contagem igual = aviso (renderiza, mas geometricamente não
+faz sentido). O Studio avisa a morfabilidade ao gerar.
+
 ## Limites conhecidos
 
 - **Largura de textura ≤ 8.192** (limite WebGPU default): indexed = nº de
@@ -140,11 +182,19 @@ morph A/B funcionam igual com qualquer asset.
   redução de malha (Studio ou `--max-verts`).
 - **Frames por clipe fixos** (o mesmo n para todos): clipes curtos ganham
   resolução temporal, longos perdem. O player assume grade regular
-  (paridade com o formato do patch).
+  (paridade com o formato do patch). Clipes combinados são UM clipe — os
+  mesmos n frames cobrem a duração somada (menos resolução temporal por
+  parte; combine poucos clipes ou aumente frames).
+- Um clipe **combinado** marcado como loop só fecha se começar e terminar
+  com o mesmo clipe cíclico (o selftest acusa quando não fecha).
 - FBX direto não é suportado (converter antes); Draco/Meshopt também não.
 - Morph targets (blend shapes) não entram no bake — só skinning.
-- "Andar no lugar" zera só a translação XZ da raiz; animações com root
-  motion complexo (giro) podem precisar de ajuste na origem (Blender).
+- "Andar no lugar" zera só a translação XZ da raiz (a trajetória removida
+  sai em `rootMotion`); animações com root motion complexo (giro) podem
+  precisar de ajuste na origem (Blender).
+- O morph entre VATs (`?vatB=`) exige malha idêntica — personagens
+  diferentes (ou o mesmo com reduções diferentes) não morfam, por
+  construção; o Studio e o console do app avisam.
 - Texturas/materiais do GLB são ignorados no bake: o app renderiza com o
   material neutro próprio (sem UVs no pipeline, como o asset legado). O
   preview do Studio mostra os materiais originais só para conferência.

@@ -10,8 +10,10 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { mergeClips, DEFAULT_MERGE_FADE } from "./merge-clips.mjs";
 
 /** Largura máxima de textura segura no WebGPU com limites default do three. */
 export const MAX_TEXTURE_WIDTH = 8192;
@@ -140,7 +142,7 @@ export function buildModel(gltf, sourceName, warn = console.warn) {
     uniqueCount += count;
   }
 
-  const model = { scene, meshInfos, uniqueCount, drawIndices: null, nodeNames: null, restPose: null, rootBoneNames: null };
+  const model = { scene, meshInfos, uniqueCount, drawIndices: null, nodeNames: null, restPose: null, rootBoneNames: null, rootBone: null };
   rebuildDrawIndices(model);
 
   // Nomes de nós (para casar tracks de animação de outros arquivos).
@@ -165,10 +167,16 @@ export function buildModel(gltf, sourceName, warn = console.warn) {
 
   // Ossos raiz (para in-place): bone cujo pai não é bone.
   const rootBoneNames = new Set();
+  let rootBone = null;
   for (const mesh of meshes)
     for (const b of mesh.skeleton.bones)
-      if (!b.parent?.isBone) rootBoneNames.add(b.name);
+      if (!b.parent?.isBone) {
+        rootBoneNames.add(b.name);
+        if (!rootBone) rootBone = b;
+      }
   model.rootBoneNames = rootBoneNames;
+  // Referência para medir a trajetória da raiz (root motion) durante o bake.
+  model.rootBone = rootBone;
 
   return model;
 }
@@ -195,6 +203,32 @@ export function restorePose(model) {
 
 /** Nº de vértices por mesh sob a seleção corrente (pick da decimação, se houver). */
 const pickCount = (mi) => (mi.pick ? mi.pick.length : mi.mesh.geometry.attributes.position.count);
+
+/**
+ * Identidade da malha para o morph entre VATs: hash das posições de bind dos
+ * vértices que entram na textura (pós-decimação) + ordem de desenho. Dois
+ * bakes do MESMO personagem com a MESMA decimação produzem o mesmo hash —
+ * é isso que autoriza o app a cruzar texturas (?vat=a&vatB=b) com segurança:
+ * a coluna N da VAT A e da VAT B são o mesmo vértice.
+ */
+export function computeMeshHash(model) {
+  const h = createHash("sha1");
+  h.update(`v${model.uniqueCount}`);
+  for (const mi of model.meshInfos) {
+    const attr = mi.mesh.geometry.attributes.position;
+    const n = pickCount(mi);
+    const buf = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const src = mi.pick ? mi.pick[i] : i;
+      buf[i * 3] = attr.getX(src);
+      buf[i * 3 + 1] = attr.getY(src);
+      buf[i * 3 + 2] = attr.getZ(src);
+    }
+    h.update(Buffer.from(buf.buffer));
+  }
+  h.update(Buffer.from(model.drawIndices.buffer));
+  return h.digest("hex").slice(0, 16);
+}
 
 /** Bounding box da bind pose em espaço de mundo (altura "natural" do modelo). */
 export function measureBindPose(model) {
@@ -428,11 +462,15 @@ export function collectClips(files, model, args, warn = console.warn) {
       used.add(name.toLowerCase());
 
       if (!retargetTracks(clip, name, model, normMap, warn)) continue;
-      if (args.inPlace) stripRootTranslation(clip, model.rootBoneNames);
+      let sourceClip = null;
+      if (args.inPlace) {
+        sourceClip = clip.clone();
+        stripRootTranslation(clip, model.rootBoneNames);
+      }
 
       const mode = args.clipModes.get(name.toLowerCase()) ??
         args.clipModes.get((clip.name ?? "").toLowerCase()) ?? "loop";
-      entries.push({ name, mode, clip, source: basename(path) });
+      entries.push({ name, mode, clip, sourceClip, source: basename(path) });
     }
   }
 
@@ -446,30 +484,67 @@ export function collectClips(files, model, args, warn = console.warn) {
 
 /**
  * Seleção explícita (Studio): ordem, nome, modo e in-place vêm da UI.
- * selection = [{ file, clip, name, mode, inPlace }] (índices em files/animations).
+ * selection = [{ file, clip, name, mode, inPlace }] (índices em files/animations)
+ * ou, para clipes combinados (2+ fontes mescladas em um track contínuo):
+ * [{ parts: [{file, clip}, ...], fade, name, mode, inPlace }].
+ *
+ * Os clipes fonte NUNCA são mutados (clone antes de retarget/strip): o mesmo
+ * clipe pode aparecer em um combo E sozinho na mesma seleção.
  */
 export function selectClips(files, model, selection, warn = console.warn) {
   const used = new Set();
   const entries = [];
   const normMap = buildNormMap(model);
 
+  const resolvePart = (ref, label) => {
+    const file = files[ref.file];
+    const clip = file?.gltf.animations?.[ref.clip];
+    if (!clip) err(`seleção inválida: clipe ${ref.clip} do arquivo ${ref.file}${label ? ` (em "${label}")` : ""}`);
+    return { clip: clip.clone(), source: basename(file.path) };
+  };
+
   for (const sel of selection) {
-    const file = files[sel.file];
-    const clip = file?.gltf.animations?.[sel.clip];
-    if (!clip) err(`seleção inválida: clipe ${sel.clip} do arquivo ${sel.file}`);
     const name = String(sel.name ?? "").trim();
     if (!name) err("clipe sem nome na seleção");
     if (used.has(name.toLowerCase())) err(`nome de clipe duplicado: "${name}"`);
     used.add(name.toLowerCase());
 
-    if (!retargetTracks(clip, name, model, normMap, warn)) continue;
-    if (sel.inPlace) stripRootTranslation(clip, model.rootBoneNames);
+    let clip;
+    let source;
+    if (Array.isArray(sel.parts)) {
+      if (sel.parts.length < 2) err(`combinado "${name}" precisa de 2+ clipes`);
+      const parts = sel.parts.map((p) => resolvePart(p, name));
+      const kept = [];
+      for (const p of parts)
+        if (retargetTracks(p.clip, name, model, normMap, warn)) kept.push(p);
+      if (kept.length < 2) {
+        warn(`combinado "${name}" descartado — menos de 2 partes casam com o esqueleto`);
+        continue;
+      }
+      const fade = Number.isFinite(Number(sel.fade)) ? Math.max(0, Number(sel.fade)) : DEFAULT_MERGE_FADE;
+      clip = mergeClips(kept.map((p) => p.clip), { name, fade });
+      source = [...new Set(kept.map((p) => p.source))].join(" + ");
+    } else {
+      const part = resolvePart(sel);
+      if (!retargetTracks(part.clip, name, model, normMap, warn)) continue;
+      clip = part.clip;
+      source = part.source;
+    }
+
+    // In-place: a trajetória sai do skinning, mas fica guardada (sourceClip)
+    // para o bake exportar como rootMotion no descriptor.
+    let sourceClip = null;
+    if (sel.inPlace) {
+      sourceClip = clip.clone();
+      stripRootTranslation(clip, model.rootBoneNames);
+    }
 
     entries.push({
       name,
       mode: sel.mode === "oneshot" ? "oneshot" : "loop",
       clip,
-      source: basename(file.path),
+      sourceClip,
+      source,
     });
   }
 
@@ -552,6 +627,51 @@ export async function bakeClips(model, entries, frames, onProgress) {
 
   restorePose(model);
   return { pos, nrm, rows };
+}
+
+/**
+ * Trajetória removida pelo "andar no lugar": para cada frame, a posição do
+ * osso raiz tocando o clipe ORIGINAL menos a posição tocando o clipe assado
+ * (in-place) — em espaço de mundo pré-normalização (o caller multiplica pela
+ * escala da normalização). Mesma grade temporal do bake: samples[f] casa 1:1
+ * com a linha f do clipe na textura.
+ *
+ * A raiz translada rígido a hierarquia inteira, então este delta é exatamente
+ * o deslocamento que o personagem inteiro perdeu no skinning — a experiência
+ * pode reaplicá-lo como translate do mesh (one-shots dirigidos/cinemáticos).
+ */
+export function sampleRootMotion(model, entry, frames) {
+  if (!entry.sourceClip || !model.rootBone) return null;
+
+  const worldPositions = (clip) => {
+    restorePose(model);
+    const mixer = new THREE.AnimationMixer(model.scene);
+    const action = mixer.clipAction(clip);
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.play();
+    const dur = Math.max(clip.duration, 1e-6);
+    const out = [];
+    const v = new THREE.Vector3();
+    for (let f = 0; f < frames; f++) {
+      const t =
+        entry.mode === "loop"
+          ? (f * dur) / frames
+          : Math.min((f * dur) / (frames - 1), dur * (1 - 1e-6));
+      mixer.setTime(t);
+      model.scene.updateMatrixWorld(true);
+      model.rootBone.getWorldPosition(v);
+      out.push([v.x, v.y, v.z]);
+    }
+    mixer.stopAllAction();
+    mixer.uncacheRoot(model.scene);
+    return out;
+  };
+
+  const src = worldPositions(entry.sourceClip);
+  const baked = worldPositions(entry.clip);
+  restorePose(model);
+  return src.map((p, f) => [p[0] - baked[f][0], p[1] - baked[f][1], p[2] - baked[f][2]]);
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +758,7 @@ export function decideTopology(model, requested = "auto") {
   return { topology, width: topology === "soup" ? soupCount : model.uniqueCount };
 }
 
-/** Escreve bins + vat.json e retorna o descriptor (formato "vat-bake/1"). */
+/** Escreve bins + vat.json e retorna o descriptor (formato "vat-bake/2"). */
 export function writeOutput({
   outDir,
   model,
@@ -654,6 +774,8 @@ export function writeOutput({
   nrmBin,
   sources,
   decimation = null,
+  meshHash = null,
+  rootMotion = null,
 }) {
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "positions_f16.bin"), Buffer.from(posBin.buffer));
@@ -662,7 +784,7 @@ export function writeOutput({
     writeFileSync(join(outDir, "indices_u32.bin"), Buffer.from(model.drawIndices.buffer));
 
   const descriptor = {
-    format: "vat-bake/1",
+    format: "vat-bake/2",
     created: new Date().toISOString(),
     sources: sources.map((p) => basename(p)),
     topology,
@@ -678,6 +800,11 @@ export function writeOutput({
     // Dados já nascem Y-up (three) e centrados: nada do basis x_negz_y do Houdini.
     basis: "identity",
     bakeOffset: [0, 0, 0],
+    // Identidade da malha (bind pose pós-decimação + ordem de desenho):
+    // VATs com o MESMO meshHash endereçam os mesmos vértices por coluna e
+    // podem cruzar crossfade no app (?vat=a&vatB=b). Hash diferente = malha
+    // diferente = morph entre elas não faz sentido geométrico.
+    ...(meshHash ? { meshHash } : {}),
     clips: entries.map((e, i) => ({
       name: e.name,
       mode: e.mode,
@@ -701,6 +828,12 @@ export function writeOutput({
       max: norm.bounds.max.map((v) => +v.toFixed(6)),
     },
     ...(decimation ? { decimation } : {}),
+    // Trajetória da raiz REMOVIDA pelo "andar no lugar", por clipe que a tinha.
+    // samples[f] = deslocamento [x,y,z] no frame f (mesma grade dos frames da
+    // textura), já na escala do bake — some ao translate do mesh para
+    // reproduzir o deslocamento original (one-shots dirigidos). Para a
+    // multidão simulada, ignore: o movimento vem da simulação.
+    ...(rootMotion && rootMotion.length ? { rootMotion } : {}),
   };
   writeFileSync(join(outDir, "vat.json"), JSON.stringify(descriptor, null, 2) + "\n");
   return descriptor;
@@ -742,6 +875,7 @@ export async function bakeToDir(cfg, hooks) {
 
   const entries = hooks.selectEntries(files, model);
   const { topology, width } = decideTopology(model, requestedTopology);
+  const meshHash = computeMeshHash(model);
   info({
     type: "plan",
     topology,
@@ -750,11 +884,13 @@ export async function bakeToDir(cfg, hooks) {
     meshes: model.meshInfos.length,
     uniqueVerts: model.uniqueCount,
     triangles: model.drawIndices.length / 3,
+    meshHash,
     entries: entries.map((e) => ({
       name: e.name,
       mode: e.mode,
       source: e.source,
       duration: +e.clip.duration.toFixed(3),
+      inPlace: Boolean(e.sourceClip),
     })),
   });
 
@@ -766,6 +902,24 @@ export async function bakeToDir(cfg, hooks) {
     scale: +norm.scale.toFixed(4),
     sourceHeight: +norm.sourceHeight.toFixed(4),
   });
+
+  // Root motion dos clipes in-place: delta em espaço de mundo × escala da
+  // normalização = mesma unidade das posições assadas. Porta de ruído: só
+  // exporta se o deslocamento total passar de 1% da altura do personagem
+  // (clipes já autorados no lugar produzem drift numérico desprezível).
+  const bakedHeight = norm.sourceHeight * norm.scale;
+  const rootMotion = [];
+  for (const e of entries) {
+    const samples = sampleRootMotion(model, e, frames);
+    if (!samples) continue;
+    const travel = Math.hypot(...samples[frames - 1]) * norm.scale;
+    if (travel < bakedHeight * 0.01) continue;
+    rootMotion.push({
+      clip: e.name,
+      samples: samples.map((s) => s.map((v) => +(v * norm.scale).toFixed(5))),
+    });
+    info({ type: "rootmotion", clip: e.name, travel: +travel.toFixed(4) });
+  }
 
   const columns = topology === "soup" ? model.drawIndices : null;
   const posBin = packHalf(pos, rows, model.uniqueCount, columns);
@@ -786,6 +940,8 @@ export async function bakeToDir(cfg, hooks) {
     nrmBin,
     sources: inputs,
     decimation,
+    meshHash,
+    rootMotion,
   });
 
   return {
@@ -851,6 +1007,9 @@ export async function analyzeFiles(paths, warn = console.warn) {
     bindHeight: bind.height,
     bindMin: bind.min,
     bindMax: bind.max,
+    // Identidade da malha SEM decimação (a decimação muda o hash — o
+    // /api/estimate devolve o hash pós-redução).
+    meshHash: computeMeshHash(model),
     clips,
   };
 }
@@ -952,7 +1111,21 @@ export function runSelftest(outDir) {
       : bad(`loop "${clip.name}" não fecha: wrap ${wrap.toFixed(4)} > ${limit.toFixed(4)} — fonte não é cíclica? marque one-shot ou use outro clipe`);
   }
 
-  // 6. normais unitárias (amostra)
+  // 6. rootMotion (se exportado): 1 amostra [x,y,z] por frame, clipes existem
+  if (Array.isArray(desc.rootMotion)) {
+    for (const rm of desc.rootMotion) {
+      const clipOk = desc.clips.some((c) => c.name === rm.clip);
+      const samplesOk =
+        Array.isArray(rm.samples) &&
+        rm.samples.length === desc.framesPerClip &&
+        rm.samples.every((s) => Array.isArray(s) && s.length === 3 && s.every(Number.isFinite));
+      clipOk && samplesOk
+        ? ok(`rootMotion "${rm.clip}": ${rm.samples.length} amostras (deslocamento total ${Math.hypot(...rm.samples[rm.samples.length - 1]).toFixed(3)})`)
+        : bad(`rootMotion "${rm.clip}" inválido (clipe existe: ${clipOk}; amostras: ${rm.samples?.length ?? 0}/${desc.framesPerClip})`);
+    }
+  }
+
+  // 7. normais unitárias (amostra)
   let worstLen = 1;
   const step = Math.max(1, Math.floor(nrmBin.length / 3 / 2000));
   for (let i = 0; i < nrmBin.length / 3; i += step) {

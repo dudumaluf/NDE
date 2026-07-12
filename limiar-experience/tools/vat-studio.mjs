@@ -31,6 +31,7 @@ import {
   bakeToDir,
   analyzeFiles,
   buildModel,
+  computeMeshHash,
   decimateModel,
   findCharacterIndex,
   loadGltf,
@@ -223,6 +224,8 @@ async function handleApi(req, res, url) {
         },
         decimation,
         meshes: decimation ? meshes : null,
+        // identidade da malha PÓS-decimação: é este hash que o bake gravará
+        meshHash: computeMeshHash(model),
       });
     } catch (e) {
       if (e instanceof BakeError) return sendJson(res, 422, { error: e.message });
@@ -354,6 +357,9 @@ async function handleApi(req, res, url) {
             width: d.textureWidth,
             height: d.textureHeight,
             created: d.created,
+            meshHash: d.meshHash ?? null,
+            vertexCount: d.vertexCount,
+            rootMotion: (d.rootMotion ?? []).map((r) => r.clip),
           });
         } catch {
           /* vat.json ilegível — ignora */
@@ -376,6 +382,10 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/" || url.pathname === "/index.html")
       return sendFile(res, join(STUDIO_DIR, "index.html"));
     if (url.pathname === "/app.js") return sendFile(res, join(STUDIO_DIR, "app.js"));
+    // módulo compartilhado com o bake: o preview de clipes combinados no
+    // browser usa EXATAMENTE o mesmo merge que o servidor assa
+    if (url.pathname === "/merge-clips.mjs")
+      return sendFile(res, join(TOOLS_DIR, "merge-clips.mjs"));
 
     if (VENDOR[url.pathname]) return sendFile(res, VENDOR[url.pathname]);
     if (url.pathname.startsWith("/vendor/addons/")) {

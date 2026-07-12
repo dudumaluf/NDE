@@ -12,6 +12,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
+// mesmo módulo que o servidor usa no bake — preview e resultado batem
+import { mergeClips, mergedDuration, DEFAULT_MERGE_FADE } from "/merge-clips.mjs";
 
 /* ------------------------------------------------------------------------ */
 /* Constantes de orçamento (espelham vat-core.mjs e os limites web reais)    */
@@ -68,7 +70,17 @@ const state = {
   session: null,
   files: [], // [{name, size, gltf}] — mesma ordem no servidor (índice = file)
   analysis: null, // resposta do /api/analyze (números autoritativos)
-  clips: [], // [{file, clip, name, mode, enabled, inPlace, duration, tracks, rootTravel, source, preview}]
+  // Linhas da lista de clipes. Duas formas:
+  //  simples:   {kind:"simple", key, baseKey, file, clip, name, mode, enabled, inPlace, duration, rootTravel, source, travels}
+  //             (key é única; baseKey = "file:clip" — duplicatas compartilham baseKey)
+  //  combinado: {kind:"combo",  key, parts:[{file,clip}], fade, name, mode, enabled, inPlace, travels}
+  clips: [],
+  deleted: new Set(), // baseKeys sem nenhuma linha restante (não ressuscitar na re-análise)
+  selected: new Set(), // keys marcadas para combinar
+  comboFade: DEFAULT_MERGE_FADE,
+  comboSeq: 0,
+  dupSeq: 0,
+  assets: [], // exports existentes em public/vat/ (com meshHash p/ morfabilidade)
   preset: "multidao",
   frames: 60,
   fps: 18,
@@ -78,6 +90,17 @@ const state = {
   baking: false,
   currentClip: -1,
 };
+
+/** Análise do clipe fonte (duration/rootTravel/source) por referência file:clip. */
+const sourceInfo = (file, clip) =>
+  state.analysis?.clips.find((c) => c.file === file && c.clip === clip) ?? null;
+
+/** Duração exibida de uma linha (combos: soma − overlaps, igual ao bake). */
+function rowDuration(row) {
+  if (row.kind !== "combo") return row.duration;
+  const durs = row.parts.map((p) => sourceInfo(p.file, p.clip)?.duration ?? 0);
+  return mergedDuration(durs, row.fade);
+}
 
 /* ------------------------------------------------------------------------ */
 /* Preview 3D                                                                */
@@ -231,9 +254,9 @@ function rebuildPreview() {
 }
 
 /** Retarget leve no browser (mesma regra do vat-core): tracks → nós do personagem. */
-function buildPreviewClip(clipEntry) {
+function buildPartClip(fileIdx, clipIdx, inPlace, name) {
   const charScene = charFile()?.gltf.scene;
-  const raw = state.files[clipEntry.file]?.gltf.animations?.[clipEntry.clip];
+  const raw = state.files[fileIdx]?.gltf.animations?.[clipIdx];
   if (!charScene || !raw) return null;
 
   const nodeNames = new Set();
@@ -265,7 +288,7 @@ function buildPreviewClip(clipEntry) {
     const t = track.clone();
     t.name = finalName + track.name.slice(dot);
     // preview do "anda no lugar": congela XZ da raiz, como o bake fará
-    if (clipEntry.inPlace && t.name.endsWith(".position") && rootBones.has(finalName)) {
+    if (inPlace && t.name.endsWith(".position") && rootBones.has(finalName)) {
       const v = t.values;
       for (let i = 0; i < v.length; i += 3) {
         v[i] = v[0] ?? 0;
@@ -275,7 +298,45 @@ function buildPreviewClip(clipEntry) {
     kept.push(t);
   }
   if (kept.length === 0) return null;
-  return new THREE.AnimationClip(clipEntry.name, raw.duration, kept);
+  return new THREE.AnimationClip(name, raw.duration, kept);
+}
+
+/** "Anda no lugar" num clipe pronto (combos: depois do merge, como no bake). */
+function stripRootXZ(clip) {
+  const charScene = charFile()?.gltf.scene;
+  if (!charScene) return;
+  const rootBones = new Set();
+  charScene.traverse((o) => {
+    if (o.isBone && !o.parent?.isBone) rootBones.add(o.name);
+  });
+  for (const t of clip.tracks) {
+    const dot = t.name.lastIndexOf(".");
+    if (t.name.slice(dot) !== ".position" || !rootBones.has(t.name.slice(0, dot))) continue;
+    const v = t.values;
+    for (let i = 0; i < v.length; i += 3) {
+      v[i] = v[0] ?? 0;
+      v[i + 2] = v[2] ?? 0;
+    }
+  }
+}
+
+/** Clipe de preview de uma linha: simples direto; combo = mergeClips (mesmo motor do bake). */
+function buildPreviewClip(entry) {
+  if (entry.kind !== "combo")
+    return buildPartClip(entry.file, entry.clip, entry.inPlace, entry.name);
+  const parts = entry.parts
+    .map((p, i) => buildPartClip(p.file, p.clip, false, `${entry.name}_${i}`))
+    .filter(Boolean);
+  let merged = null;
+  if (parts.length >= 2) {
+    try {
+      merged = mergeClips(parts, { name: entry.name, fade: entry.fade });
+    } catch {
+      merged = parts[0];
+    }
+  } else merged = parts[0] ?? null;
+  if (merged && entry.inPlace) stripRootXZ(merged);
+  return merged;
 }
 
 function playClip(idx) {
@@ -340,26 +401,42 @@ async function analyze() {
     alert(`Análise falhou: ${e.message}`);
     return;
   }
-  // reconstrói a lista de clipes preservando edições (nome/modo/ordem) por chave file:clip
-  const prev = new Map(state.clips.map((c) => [`${c.file}:${c.clip}`, c]));
+  // Reconstrói a lista preservando edições (nome/modo/ordem), combos e
+  // deleções — chaves: simples = "file:clip", combo = "combo<N>".
+  const prev = new Map(state.clips.map((c) => [c.key, c]));
   const height = state.analysis.bindHeight || 1;
-  state.clips = state.analysis.clips.map((c) => {
-    const old = prev.get(`${c.file}:${c.clip}`);
-    const travels = c.rootTravel > height * IN_PLACE_TRAVEL_RATIO;
-    return {
-      ...c,
-      name: old?.name ?? c.name,
-      mode: old?.mode ?? "loop",
-      enabled: old?.enabled ?? true,
-      inPlace: old?.inPlace ?? travels,
-      travels,
-      preview: true,
-    };
-  });
-  const order = new Map([...prev.keys()].map((k, i) => [k, i]));
-  state.clips.sort(
-    (a, b) => (order.get(`${a.file}:${a.clip}`) ?? 1e9) - (order.get(`${b.file}:${b.clip}`) ?? 1e9),
+  const fresh = state.analysis.clips
+    .filter((c) => !state.deleted.has(`${c.file}:${c.clip}`))
+    .map((c) => {
+      const key = `${c.file}:${c.clip}`;
+      const old = prev.get(key);
+      const travels = c.rootTravel > height * IN_PLACE_TRAVEL_RATIO;
+      return {
+        ...c,
+        kind: "simple",
+        key,
+        baseKey: key,
+        name: old?.name ?? c.name,
+        mode: old?.mode ?? "loop",
+        enabled: old?.enabled ?? true,
+        inPlace: old?.inPlace ?? travels,
+        travels,
+        preview: true,
+      };
+    });
+  // duplicatas e combos sobrevivem se o(s) clipe(s) fonte ainda existem
+  const clipExists = (p) =>
+    state.analysis.clips.some((a) => a.file === p.file && a.clip === p.clip);
+  const dups = state.clips.filter(
+    (c) => c.kind === "simple" && c.key !== c.baseKey && clipExists(c),
   );
+  const combos = state.clips.filter(
+    (c) => c.kind === "combo" && c.parts.every(clipExists),
+  );
+  state.clips = [...fresh, ...dups, ...combos];
+  const order = new Map([...prev.keys()].map((k, i) => [k, i]));
+  state.clips.sort((a, b) => (order.get(a.key) ?? 1e9) - (order.get(b.key) ?? 1e9));
+  state.selected.clear();
 
   if (!$("assetName").value && charFile())
     $("assetName").value = stripExt(charFile().name)
@@ -375,6 +452,7 @@ async function analyze() {
 
   renderAll();
   rebuildPreview();
+  loadAssets(); // re-render com o badge "morfável" (depende do meshHash da análise)
 }
 
 /* ------------------------------------------------------------------------ */
@@ -408,6 +486,7 @@ async function requestEstimate(maxVerts) {
     estimateBusy = false;
     renderAll();
     rebuildPreview();
+    loadAssets(); // meshHash muda com a decimação — badge "morfável" acompanha
   }
 }
 
@@ -572,17 +651,136 @@ function renderFiles() {
 
 let dragFrom = null;
 
+/** Remove uma linha (fonte é lembrada em deleted quando nenhuma linha sobra). */
+function deleteRow(i) {
+  const row = state.clips[i];
+  if (!row) return;
+  state.selected.delete(row.key);
+  const cur = state.clips[state.currentClip];
+  state.clips.splice(i, 1);
+  if (row.kind === "simple" && !state.clips.some((c) => c.baseKey === row.baseKey))
+    state.deleted.add(row.baseKey);
+  state.currentClip = state.clips.indexOf(cur);
+  if (state.currentClip < 0 && state.clips.length) playClip(0);
+  renderAll();
+}
+
+/** Duplica uma linha simples (ex.: idle 2× para um combo idle+olhar+idle). */
+function duplicateRow(i) {
+  const row = state.clips[i];
+  if (row?.kind !== "simple") return;
+  const usedNames = new Set(state.clips.map((c) => c.name.toLowerCase()));
+  let name = `${row.name}_2`;
+  for (let n = 3; usedNames.has(name.toLowerCase()); n++) name = `${row.name}_${n}`;
+  state.clips.splice(i + 1, 0, {
+    ...row,
+    key: `${row.baseKey}#d${state.dupSeq++}`,
+    name,
+  });
+  renderAll();
+}
+
+/** Combina as linhas selecionadas em UM clipe contínuo (ordem = ordem de marcação). */
+function combineSelected() {
+  const rows = [...state.selected]
+    .map((key) => state.clips.find((c) => c.key === key))
+    .filter(Boolean);
+  if (rows.length < 2) return;
+  const fade = state.comboFade;
+  const parts = rows.flatMap((r) => (r.kind === "combo" ? r.parts : [{ file: r.file, clip: r.clip }]));
+  const first = state.clips.findIndex((c) => state.selected.has(c.key));
+  const usedNames = new Set(state.clips.map((c) => c.name.toLowerCase()));
+  let name = rows.map((r) => r.name).join("+").slice(0, 40);
+  for (let n = 2; usedNames.has(name.toLowerCase()); n++) name = `combo_${n}`;
+  const combo = {
+    kind: "combo",
+    key: `combo${state.comboSeq++}`,
+    parts,
+    fade,
+    name,
+    mode: "loop",
+    enabled: true,
+    inPlace: rows.some((r) => r.travels && r.inPlace),
+    travels: rows.some((r) => r.travels),
+    preview: true,
+  };
+  state.clips = state.clips.filter((c) => !state.selected.has(c.key));
+  state.clips.splice(first, 0, combo);
+  state.selected.clear();
+  renderAll();
+  playClip(state.clips.indexOf(combo));
+}
+
+/** Desfaz um combo: restaura as partes como linhas simples na mesma posição. */
+function splitCombo(i) {
+  const row = state.clips[i];
+  if (row?.kind !== "combo") return;
+  const height = state.analysis?.bindHeight || 1;
+  const taken = new Set(state.clips.map((c) => c.key));
+  const usedNames = new Set(state.clips.map((c) => c.name.toLowerCase()));
+  const restored = [];
+  for (const p of row.parts) {
+    const baseKey = `${p.file}:${p.clip}`;
+    if (taken.has(baseKey)) continue; // a fonte já está na lista — não duplica
+    const src = sourceInfo(p.file, p.clip);
+    const travels = (src?.rootTravel ?? 0) > height * IN_PLACE_TRAVEL_RATIO;
+    let name = src?.name ?? "clipe";
+    for (let n = 2; usedNames.has(name.toLowerCase()); n++) name = `${src?.name ?? "clipe"}_${n}`;
+    usedNames.add(name.toLowerCase());
+    taken.add(baseKey);
+    restored.push({
+      ...(src ?? {}),
+      kind: "simple",
+      key: baseKey,
+      baseKey,
+      name,
+      mode: "loop",
+      enabled: true,
+      inPlace: travels,
+      travels,
+      preview: true,
+    });
+    state.deleted.delete(baseKey);
+  }
+  state.clips.splice(i, 1, ...restored);
+  renderAll();
+}
+
+function renderComboBar() {
+  const bar = $("comboBar");
+  const n = state.selected.size;
+  bar.classList.toggle("hidden", n < 2);
+  if (n < 2) return;
+  bar.innerHTML =
+    `<span><b>${n} clipes</b> marcados — mesclar em um track contínuo, na ordem em que você marcou.
+       Para o loop fechar, comece e termine com o mesmo clipe cíclico (⧉ duplica).</span>` +
+    `<span class="fadefield">crossfade <input type="number" id="comboFade" value="${state.comboFade}" min="0" max="2" step="0.05" /> s</span>` +
+    `<button id="comboGo">combinar</button>`;
+  $("comboFade").addEventListener("change", (e) => {
+    state.comboFade = Math.min(2, Math.max(0, +e.target.value || 0));
+    e.target.value = state.comboFade;
+  });
+  $("comboGo").addEventListener("click", combineSelected);
+}
+
 function renderClips() {
   const el = $("clips");
   $("clipsEmpty").classList.toggle("hidden", state.clips.length > 0);
+  renderComboBar();
   el.innerHTML = state.clips
     .map((c, i) => {
       const playing = i === state.currentClip;
+      const isCombo = c.kind === "combo";
+      const dur = rowDuration(c);
+      const partNames = isCombo
+        ? c.parts.map((p) => sourceInfo(p.file, p.clip)?.name ?? "?").join(" → ")
+        : null;
       return `<div class="clip ${c.enabled ? "" : "off"}" draggable="true" data-i="${i}">
         <div class="row1">
           <span class="grip" title="arraste para reordenar">⋮⋮</span>
           <input type="checkbox" data-k="enabled" data-i="${i}" ${c.enabled ? "checked" : ""} title="incluir no bake" />
           <input class="name" data-k="name" data-i="${i}" value="${esc(c.name)}" spellcheck="false" />
+          ${isCombo ? `<span class="combadge" title="${esc(partNames)}">combinado ×${c.parts.length}</span>` : ""}
           <span class="mode">
             <button data-k="mode" data-v="loop" data-i="${i}" class="${c.mode === "loop" ? "on" : ""}"
               title="anda em círculo contínuo (idle, walk…)">loop</button>
@@ -590,15 +788,27 @@ function renderClips() {
               title="toca uma vez e congela no último frame (morrer, levantar…)">única</button>
           </span>
           <button class="playbtn ${playing ? "on" : ""}" data-k="play" data-i="${i}">${playing ? "▶ tocando" : "▶"}</button>
+          ${isCombo ? "" : `<button class="delbtn" data-k="dup" data-i="${i}" title="duplicar a linha — para usar o mesmo clipe 2× num combinado (ex.: idle+olhar+idle)">⧉</button>`}
+          <button class="delbtn" data-k="del" data-i="${i}" title="${isCombo ? "remover o combinado da lista" : "remover este clipe da lista (o arquivo fonte não é alterado)"}">×</button>
         </div>
         <div class="meta">
-          <span>${c.duration.toFixed(1)}s na fonte</span><span>${esc(c.source)}</span>
+          <span>${dur.toFixed(1)}s ${isCombo ? "combinado" : "na fonte"}</span>
+          ${isCombo ? `<span title="${esc(partNames)}">${esc(partNames)}</span>` : `<span>${esc(c.source)}</span>`}
+          ${
+            isCombo
+              ? `<span class="fadefield" title="crossfade entre as partes">fade
+                   <input type="number" data-k="fade" data-i="${i}" value="${c.fade}" min="0" max="2" step="0.05" /> s</span>
+                 <button class="playbtn" data-k="split" data-i="${i}" title="desfazer: volta a ser clipes separados">separar</button>`
+              : ""
+          }
           ${
             c.travels
-              ? `<label class="toggle" title="o clipe desloca a raiz no XZ — para multidão, o passo deve vir da simulação">
+              ? `<label class="toggle" title="o clipe desloca a raiz no XZ — o skinning fica no lugar e a trajetória vai para rootMotion no vat.json (a experiência decide aplicá-la)">
                    <input type="checkbox" data-k="inplace" data-i="${i}" ${c.inPlace ? "checked" : ""} /> andar no lugar</label>`
               : ""
           }
+          <label class="toggle" title="marcar para combinar com outros clipes">
+            <input type="checkbox" data-k="sel" data-i="${i}" ${state.selected.has(c.key) ? "checked" : ""} /> comb.</label>
         </div>
       </div>`;
     })
@@ -630,10 +840,36 @@ function renderClips() {
   el.querySelectorAll("[data-k=play]").forEach((x) =>
     x.addEventListener("click", () => playClip(+x.dataset.i)),
   );
+  el.querySelectorAll("[data-k=del]").forEach((x) =>
+    x.addEventListener("click", () => deleteRow(+x.dataset.i)),
+  );
+  el.querySelectorAll("[data-k=dup]").forEach((x) =>
+    x.addEventListener("click", () => duplicateRow(+x.dataset.i)),
+  );
+  el.querySelectorAll("[data-k=split]").forEach((x) =>
+    x.addEventListener("click", () => splitCombo(+x.dataset.i)),
+  );
+  el.querySelectorAll("[data-k=fade]").forEach((x) =>
+    x.addEventListener("change", () => {
+      const c = state.clips[+x.dataset.i];
+      c.fade = Math.min(2, Math.max(0, +x.value || 0));
+      x.value = c.fade;
+      if (+x.dataset.i === state.currentClip) playClip(+x.dataset.i);
+      renderBudget();
+    }),
+  );
   el.querySelectorAll("[data-k=inplace]").forEach((x) =>
     x.addEventListener("change", () => {
       state.clips[+x.dataset.i].inPlace = x.checked;
       if (+x.dataset.i === state.currentClip) playClip(+x.dataset.i);
+    }),
+  );
+  el.querySelectorAll("[data-k=sel]").forEach((x) =>
+    x.addEventListener("change", () => {
+      const key = state.clips[+x.dataset.i].key;
+      if (x.checked) state.selected.add(key);
+      else state.selected.delete(key);
+      renderComboBar();
     }),
   );
   el.querySelectorAll(".clip[draggable]").forEach((row) => {
@@ -688,7 +924,11 @@ async function bake() {
   }
   const selection = state.clips
     .filter((c) => c.enabled)
-    .map((c) => ({ file: c.file, clip: c.clip, name: c.name, mode: c.mode, inPlace: c.inPlace }));
+    .map((c) =>
+      c.kind === "combo"
+        ? { parts: c.parts, fade: c.fade, name: c.name, mode: c.mode, inPlace: c.inPlace }
+        : { file: c.file, clip: c.clip, name: c.name, mode: c.mode, inPlace: c.inPlace },
+    );
   if (selection.length === 0) return;
   const dupes = selection.map((s) => s.name.toLowerCase());
   if (new Set(dupes).size !== dupes.length) {
@@ -770,6 +1010,30 @@ function showResult(ev) {
   const d = ev.descriptor;
   const total = ev.bytes.positions + ev.bytes.normals + (ev.bytes.indices || 0);
   const okAll = ev.selftest.ok;
+
+  // Morfabilidade entre VATs: exports com o MESMO meshHash endereçam os
+  // mesmos vértices — o app pode cruzar crossfade (?vat=a&vatB=b).
+  const twins = state.assets.filter((a) => a.meshHash && a.meshHash === d.meshHash && a.name !== ev.name);
+  const morphNote = d.meshHash
+    ? twins.length
+      ? `<div style="font-size:12px;color:var(--pos);margin-top:8px">⇄ Morfável com ${twins
+          .map((t) => `<b>${esc(t.name)}</b>`)
+          .join(", ")} — mesma malha (meshHash <code style="font-size:10px">${esc(d.meshHash)}</code>): o app pode
+          cruzar crossfade entre clipes das duas texturas.</div>`
+      : `<div style="font-size:12px;color:var(--dim);margin-top:8px">⇄ Não-morfável com os exports existentes
+          (malha diferente — esperado entre personagens diferentes). Outra VAT gerada deste MESMO personagem,
+          com a MESMA redução de malha, sai morfável (meshHash <code style="font-size:10px">${esc(d.meshHash)}</code>).</div>`
+    : "";
+  const rmClips = (d.rootMotion ?? []).map((r) => r.clip);
+  const rmNote = rmClips.length
+    ? `<div style="font-size:12px;color:var(--dim);margin-top:4px">⇢ Root motion exportado no vat.json
+        (${rmClips.map(esc).join(", ")}): o skinning ficou no lugar; a trajetória vai em <b>rootMotion</b>
+        para a experiência aplicar como translate quando fizer sentido (one-shots dirigidos).</div>`
+    : "";
+  const morphUrl = twins.length
+    ? `${ev.appUrl}&vatB=${encodeURIComponent(twins[0].name)}`
+    : null;
+
   const el = $("result");
   el.classList.remove("hidden");
   el.classList.toggle("fail", !okAll);
@@ -779,14 +1043,17 @@ function showResult(ev) {
       ${esc(ev.out)}/ · ${fmtN(d.textureWidth)}×${fmtN(d.textureHeight)} px (${esc(d.topology)}) · ${fmtMB(total)} ·
       clipes: ${d.clips.map((c) => `${esc(c.name)}${c.mode === "oneshot" ? " (única)" : ""}`).join(" · ")}
     </div>
+    ${morphNote}${rmNote}
     <ul>${ev.selftest.checks.map((c) => `<li class="${c.ok ? "ok" : "bad"}">${esc(c.label)}</li>`).join("")}</ul>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
       <button class="primary" data-open="${esc(ev.appUrl)}">testar na experiência ↗</button>
       <button class="ghost" data-open="${esc(ev.appUrl.replace("&scene=personagem", ""))}">ver na multidão ↗</button>
+      ${morphUrl ? `<button class="ghost" data-open="${esc(morphUrl)}">testar morph com ${esc(twins[0].name)} ↗</button>` : ""}
     </div>
     <div style="font-size:11.5px;color:var(--faint);margin-top:10px">
       Como usar: com o app rodando (npm run dev), adicione <b>?vat=${esc(ev.name)}</b> à URL —
       os botões de estado mostram estes clipes. Sem o parâmetro, o app segue com o personagem original do patch.
+      ${twins.length ? `Para o morph entre texturas: <b>?vat=${esc(ev.name)}&vatB=${esc(twins[0].name)}</b>.` : ""}
     </div>`;
   el.querySelectorAll("[data-open]").forEach((b) =>
     b.addEventListener("click", () => window.open(b.dataset.open, "_blank")),
@@ -799,12 +1066,17 @@ function showResult(ev) {
 async function loadAssets() {
   try {
     const { assets } = await api("/api/assets");
+    state.assets = assets;
+    const hash = currentMeshHash();
     $("assets").innerHTML = assets.length
       ? assets
           .map(
             (a) =>
               `<div class="a"><b>${esc(a.name)}</b>` +
               `<span>${fmtN(a.width)}×${fmtN(a.height)} · ${a.clips.map(esc).join(", ")}</span>` +
+              (hash && a.meshHash === hash
+                ? `<span class="combadge" title="mesma malha (meshHash ${esc(a.meshHash)}) — o app pode cruzar crossfade entre esta VAT e a que você vai gerar">morfável</span>`
+                : "") +
               `<span class="sp"></span>` +
               `<a href="http://localhost:5199/?vat=${encodeURIComponent(a.name)}&scene=personagem" target="_blank">abrir ↗</a></div>`,
           )
@@ -813,6 +1085,18 @@ async function loadAssets() {
   } catch {
     $("assets").innerHTML = `<span class="empty">não deu para listar</span>`;
   }
+}
+
+/** meshHash que o bake atual gravaria (decimação muda o hash). */
+function currentMeshHash() {
+  return state.estimate?.meshHash ?? (state.maxVerts > 0 ? null : state.analysis?.meshHash) ?? null;
+}
+
+/** Exports existentes que compartilham a malha do bake atual (morfáveis). */
+function morphableAssets(excludeName = null) {
+  const hash = currentMeshHash();
+  if (!hash) return [];
+  return state.assets.filter((a) => a.meshHash === hash && a.name !== excludeName);
 }
 
 async function pollDev() {

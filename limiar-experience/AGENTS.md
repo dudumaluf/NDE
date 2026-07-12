@@ -74,6 +74,21 @@ Leia antes de qualquer tarefa, nesta ordem:
   `indexed` por padrão (index buffer + textura por vértice único — download
   menor); limite duro: 8192 colunas de textura. E2E do Studio:
   `node tools/studio/e2e.mjs`.
+- **VAT Studio v2** (formato `vat-bake/2`): na lista de clipes dá para
+  **remover** (×), **duplicar** (⧉) e **combinar 2+ clipes num track só**
+  (`tools/merge-clips.mjs` — concatenação com crossfade, compartilhado
+  Node/browser: preview = bake). "Andar no lugar" agora **exporta a
+  trajetória removida** no descriptor (`rootMotion: [{clip, samples}]`, 1
+  amostra/frame na escala do bake) — multidão ignora (movimento vem da sim);
+  one-shots dirigidos podem aplicá-la como translate (`src/vat/rootMotion.ts`,
+  toggle no leva do personagem). `meshHash` (bind pose pós-decimação) grava a
+  identidade da malha; **`?vat=a&vatB=b` carrega DUAS VATs da mesma malha**
+  e o crossfade cruza texturas: linhas de B empilhadas abaixo das de A na
+  DataTexture combinada, clipes com índice global contínuo, posições de B
+  re-normalizadas para o espaço de A no load — shader inalterado, zero
+  binding extra (não toca no limite de 8 vertex buffers). Validação recusa
+  (com aviso claro) contagem de vértices/framesPerClip/topologia/basis
+  diferentes; player: `vatPlayer.play(i, { vat: "nome" })`.
 - **Cuidado nesta máquina (iCloud)**: `~/Documents` sincroniza no iCloud e
   arquivos "dataless" (evictados) fazem git/tsc TRAVAREM em leitura. Sintoma:
   processo dorme para sempre em `read`. Cura: `brctl download <caminho>` (ou
