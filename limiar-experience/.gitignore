@@ -8,3 +8,5 @@ shots/
 public/vat/*/
 # cópia do acervo/export (npm run sync-content) — nunca versionar
 public/content/
+.vercel
+.env*

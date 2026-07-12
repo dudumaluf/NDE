@@ -12,7 +12,8 @@
     "prebuild": "node scripts/sync-content.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "sync-content": "node scripts/sync-content.mjs"
+    "sync-content": "node scripts/sync-content.mjs",
+    "deploy": "npx vercel build --prod --yes && npx vercel deploy --prebuilt --prod --yes"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

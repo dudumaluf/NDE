@@ -16,6 +16,32 @@ WebGPU é usado quando disponível; caso contrário o `WebGPURenderer` cai
 automaticamente para WebGL2 (mesmos nodes TSL). O backend ativo aparece no
 canto inferior esquerdo.
 
+## Deploy (protótipo online)
+
+O protótipo está no ar em **https://limiar-prototipo.vercel.app** (Vercel,
+plano Hobby — custo zero; projeto `limiar-prototipo`, sem domínio próprio).
+URL discreta de propósito: `noindex` no HTML e `X-Robots-Tag` via
+`vercel.json` — material sensível de pessoas reais, divulgação ampla só com
+parceria do canal (doc 00 §4).
+
+Para re-deployar quando o corpus ou o app evoluir:
+
+```bash
+npm run deploy       # = vercel build (roda npm run build local) + deploy do dist pronto
+```
+
+Detalhes que importam:
+
+- O deploy é **prebuilt**: o build roda NESTA máquina (onde `acervo/export/`
+  existe e o `sync-content` copia os JSONs frescos) e só o `dist/` (~31 MB)
+  sobe. Deploy por git/CI não funcionaria hoje: `public/content/` e
+  `public/vat/*/` são gitignorados e não existem no servidor.
+- **O áudio (2,7 GB) fica fora por ora** — o app online mostra a multidão,
+  núcleos, lentes e fios com os dados reais, mas sem os cortes de voz
+  (decisão do M4: streaming direto vs cópia parcial).
+- O link com o projeto Vercel vive em `.vercel/` (gitignorado). Em máquina
+  nova: `npx vercel link --yes --project limiar-prototipo` uma vez.
+
 ## Estado atual — M0 ✔ · morph seamless ✔ · M1 (multidão) ✔ · M2 (simulação) ✔
 
 - EXRs do patch original em `public/vat/` (posições + normais, 1590×360:
