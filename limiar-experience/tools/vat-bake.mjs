@@ -9,10 +9,14 @@
  * com a interface visual, tools/vat-studio.mjs — `npm run studio`).
  *
  * Uso:
- *   node tools/vat-bake.mjs char.glb [anim2.glb ...] --out public/vat/<nome> \
+ *   node tools/vat-bake.mjs char.{glb|fbx} [anims ...] --out public/vat/<nome> \
  *     [--fps 18] [--frames 60] [--clip Nome:loop|oneshot ...] [--skip Nome ...] \
  *     [--height 0.7] [--max-verts N] [--topology auto|soup|indexed] \
  *     [--in-place] [--selftest]
+ *
+ * FBX binário do Mixamo entra direto (sem Blender): escala cm→m, ossos
+ * "mixamorig:" e o clipe "mixamo.com" (vira o nome do arquivo) são
+ * normalizados em tools/fbx-normalize.mjs. FBX ASCII/6.x: converter antes.
  *
  * - O personagem/esqueleto vem do PRIMEIRO arquivo; os seguintes podem conter
  *   só animações (mesmo esqueleto — padrão Mixamo, um arquivo por clipe).
@@ -40,9 +44,13 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`vat-bake — GLB/GLTF (skinned + animações) → texturas VAT (.bin f16 + vat.json)
+  console.log(`vat-bake — GLB/GLTF/FBX (skinned + animações) → texturas VAT (.bin f16 + vat.json)
 
-uso: node tools/vat-bake.mjs <char.glb> [anims.glb ...] --out <dir> [opções]
+uso: node tools/vat-bake.mjs <char.glb|fbx> [anims ...] --out <dir> [opções]
+
+FBX: binário 7.x (padrão do Mixamo atual) entra direto — escala em cm,
+ossos "mixamorig:" e clipe "mixamo.com" são normalizados. ASCII/6.x não
+(converta para GLB — tools/README.md).
 
 opções:
   --out <dir>          diretório de saída (ex.: public/vat/soldier) [obrigatório]

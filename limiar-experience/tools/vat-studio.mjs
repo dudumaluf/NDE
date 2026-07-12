@@ -28,13 +28,14 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import {
   BakeError,
+  SUPPORTED_EXTENSIONS,
   bakeToDir,
   analyzeFiles,
   buildModel,
   computeMeshHash,
   decimateModel,
   findCharacterIndex,
-  loadGltf,
+  loadModelFile,
   selectClips,
   runSelftest,
 } from "./vat-core.mjs";
@@ -148,8 +149,8 @@ async function handleApi(req, res, url) {
   if (req.method === "PUT" && url.pathname === "/api/upload") {
     if (!session) return sendJson(res, 400, { error: "sessão inválida (recarregue a página)" });
     const name = cleanFileName(q.get("name"));
-    if (![".glb", ".gltf"].includes(extname(name).toLowerCase()))
-      return sendJson(res, 400, { error: `só GLB/GLTF (recebi "${name}") — FBX do Mixamo: converta antes (guia no rodapé)` });
+    if (!SUPPORTED_EXTENSIONS.includes(extname(name).toLowerCase()))
+      return sendJson(res, 400, { error: `formato não aceito ("${name}") — use GLB/GLTF ou FBX binário do Mixamo` });
     const body = await readBody(req);
     if (body.length < 20) return sendJson(res, 400, { error: "arquivo vazio" });
     // subdiretório por índice: o basename fica limpo (ele vira nome de clipe
@@ -201,7 +202,7 @@ async function handleApi(req, res, url) {
       // recarrega o arquivo do personagem (o 1º com SkinnedMesh) do zero:
       // decimateModel muta o modelo, e cada estimativa parte do original
       const files = [];
-      for (const f of session.files) files.push({ path: f.path, gltf: await loadGltf(f.path) });
+      for (const f of session.files) files.push({ path: f.path, gltf: await loadModelFile(f.path, () => {}) });
       const charIdx = findCharacterIndex(files);
       if (charIdx < 0) return sendJson(res, 422, { error: "nenhum arquivo tem SkinnedMesh" });
       const model = buildModel(files[charIdx].gltf, files[charIdx].path, () => {});
@@ -382,10 +383,12 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/" || url.pathname === "/index.html")
       return sendFile(res, join(STUDIO_DIR, "index.html"));
     if (url.pathname === "/app.js") return sendFile(res, join(STUDIO_DIR, "app.js"));
-    // módulo compartilhado com o bake: o preview de clipes combinados no
-    // browser usa EXATAMENTE o mesmo merge que o servidor assa
+    // módulos compartilhados com o bake: o preview no browser usa EXATAMENTE
+    // o mesmo merge de clipes e a mesma normalização de FBX que o servidor
     if (url.pathname === "/merge-clips.mjs")
       return sendFile(res, join(TOOLS_DIR, "merge-clips.mjs"));
+    if (url.pathname === "/fbx-normalize.mjs")
+      return sendFile(res, join(TOOLS_DIR, "fbx-normalize.mjs"));
 
     if (VENDOR[url.pathname]) return sendFile(res, VENDOR[url.pathname]);
     if (url.pathname.startsWith("/vendor/addons/")) {

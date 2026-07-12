@@ -11,9 +11,16 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-// mesmo módulo que o servidor usa no bake — preview e resultado batem
+// mesmos módulos que o servidor usa no bake — preview e resultado batem
 import { mergeClips, mergedDuration, DEFAULT_MERGE_FADE } from "/merge-clips.mjs";
+import {
+  isFbxBinary,
+  normalizeFbxResult,
+  neutralizeFbxMaterials,
+  translateFbxError,
+} from "/fbx-normalize.mjs";
 
 /* ------------------------------------------------------------------------ */
 /* Constantes de orçamento (espelham vat-core.mjs e os limites web reais)    */
@@ -359,31 +366,69 @@ function playClip(idx) {
 /* Upload + análise                                                          */
 
 const loader = new GLTFLoader();
+const fbxLoader = new FBXLoader();
+// materiais/texturas não entram no bake — nenhum handler tenta baixar
+// texturas referenciadas pelo FBX (arquivos que não existem aqui)
+fbxLoader.manager.addHandler(/.*/i, {
+  path: "",
+  setPath() {
+    return this;
+  },
+  load: () => new THREE.Texture(),
+});
+
+/** Parse de um arquivo para o preview (mesma normalização do bake no servidor). */
+async function parsePreviewFile(name, buf) {
+  if (/\.fbx$/i.test(name)) {
+    if (!isFbxBinary(buf))
+      console.warn(`${name}: não é FBX binário — tentando como ASCII (só FBX 7.x ASCII funciona)`);
+    let group;
+    try {
+      group = fbxLoader.parse(buf, "");
+    } catch (e) {
+      throw new Error(
+        isFbxBinary(buf)
+          ? translateFbxError(e, name)
+          : `${name}: FBX ASCII não suportado — re-exporte como FBX binário (padrão do Mixamo atual) ou converta para GLB`,
+      );
+    }
+    const norm = normalizeFbxResult(group, (m) => console.warn(`${name}: ${m}`));
+    neutralizeFbxMaterials(norm.scene);
+    return { scene: norm.scene, animations: norm.animations };
+  }
+  return new Promise((res, rej) => loader.parse(buf.slice(0), "", res, rej));
+}
 
 async function addFiles(fileList) {
-  const files = [...fileList].filter((f) => /\.(glb|gltf)$/i.test(f.name));
-  const rejected = [...fileList].filter((f) => !/\.(glb|gltf)$/i.test(f.name));
+  const files = [...fileList].filter((f) => /\.(glb|gltf|fbx)$/i.test(f.name));
+  const rejected = [...fileList].filter((f) => !/\.(glb|gltf|fbx)$/i.test(f.name));
   if (rejected.length)
     alert(
       `Ignorado(s): ${rejected.map((f) => f.name).join(", ")}\n` +
-        `Só GLB/GLTF — FBX do Mixamo precisa ser convertido antes (guia no rodapé da página).`,
+        `Formatos aceitos: GLB/GLTF e FBX binário (Mixamo direto — guia no rodapé da página).`,
     );
   if (files.length === 0) return;
 
   for (const f of files) {
     try {
       const buf = await f.arrayBuffer();
-      // parse local (preview) + upload (bake) em paralelo
-      const [gltf] = await Promise.all([
-        new Promise((res, rej) => loader.parse(buf.slice(0), "", res, rej)),
-        api(`/api/upload?session=${state.session}&name=${encodeURIComponent(f.name)}`, {
-          method: "PUT",
-          body: buf,
-        }),
-      ]);
+      // parse local PRIMEIRO: arquivo que o preview rejeita não sobe para a
+      // sessão (um upload inválido envenenaria o /api/analyze de todos)
+      const gltf = await parsePreviewFile(f.name, buf);
+      await api(`/api/upload?session=${state.session}&name=${encodeURIComponent(f.name)}`, {
+        method: "PUT",
+        body: buf,
+      });
       state.files.push({ name: f.name, size: f.size, gltf });
     } catch (e) {
-      alert(`${f.name}: ${e.message}\n(dica: re-exporte sem compressão Draco/Meshopt)`);
+      const msg = String(e.message ?? e);
+      alert(
+        (msg.startsWith(f.name) ? msg : `${f.name}: ${msg}`) +
+          "\n" +
+          (/\.fbx$/i.test(f.name)
+            ? "(FBX: o Mixamo atual exporta binário 7.x, suportado; ASCII/6.x não)"
+            : "(dica: re-exporte sem compressão Draco/Meshopt)"),
+      );
     }
   }
   if (state.files.length === 0) return;
@@ -418,7 +463,8 @@ async function analyze() {
         baseKey: key,
         name: old?.name ?? c.name,
         mode: old?.mode ?? "loop",
-        enabled: old?.enabled ?? true,
+        // esqueleto incompatível (0 tracks casam) nasce desmarcado
+        enabled: old?.enabled ?? c.matchedTracks > 0,
         inPlace: old?.inPlace ?? travels,
         travels,
         preview: true,
@@ -794,6 +840,13 @@ function renderClips() {
         <div class="meta">
           <span>${dur.toFixed(1)}s ${isCombo ? "combinado" : "na fonte"}</span>
           ${isCombo ? `<span title="${esc(partNames)}">${esc(partNames)}</span>` : `<span>${esc(c.source)}</span>`}
+          ${
+            !isCombo && c.matchedTracks === 0
+              ? `<span style="color:var(--bad)" title="nenhuma track deste clipe casa com os ossos do personagem carregado — foi exportado para outro esqueleto?">✗ esqueleto incompatível</span>`
+              : !isCombo && c.matchedTracks < c.tracks
+                ? `<span style="color:var(--warn)" title="parte das tracks não casa com os ossos do personagem (nós extras da fonte são ignorados)">${c.matchedTracks}/${c.tracks} tracks casam</span>`
+                : ""
+          }
           ${
             isCombo
               ? `<span class="fadefield" title="crossfade entre as partes">fade

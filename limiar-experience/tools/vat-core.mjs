@@ -13,7 +13,9 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { mergeClips, DEFAULT_MERGE_FADE } from "./merge-clips.mjs";
+import { isFbxBinary, normalizeFbxResult, translateFbxError } from "./fbx-normalize.mjs";
 
 /** Largura máxima de textura segura no WebGPU com limites default do three. */
 export const MAX_TEXTURE_WIDTH = 8192;
@@ -65,10 +67,8 @@ function sanitizeGlb(buf) {
   return out.buffer;
 }
 
-export async function loadGltf(path) {
+async function loadGltf(path) {
   const ext = extname(path).toLowerCase();
-  if (![".glb", ".gltf"].includes(ext))
-    err(`formato não suportado: ${basename(path)} (use .glb/.gltf — Mixamo FBX: converta antes, ver tools/README.md)`);
   let payload;
   if (ext === ".glb") {
     payload = sanitizeGlb(readFileSync(path));
@@ -96,7 +96,91 @@ export async function loadGltf(path) {
 }
 
 // ---------------------------------------------------------------------------
+// FBX (fluxo Mixamo direto, sem Blender). O FBXLoader roda em Node com dois
+// cuidados: (1) `window.URL` para texturas EMBUTIDAS (createObjectURL) e
+// (2) um handler de textura inerte no LoadingManager — sem ele o
+// TextureLoader tentaria criar <img> (não há DOM). Materiais/texturas são
+// irrelevantes para o bake (no GLB eles são removidos do JSON; aqui são
+// neutralizados no load).
+
+function withDomShims(fn) {
+  const hadWindow = Object.prototype.hasOwnProperty.call(globalThis, "window");
+  const prev = globalThis.window;
+  // câmeras FBX leem window.innerWidth/Height; embutidos usam window.URL
+  globalThis.window = { URL: globalThis.URL, innerWidth: 1024, innerHeight: 768 };
+  try {
+    return fn();
+  } finally {
+    if (hadWindow) globalThis.window = prev;
+    else delete globalThis.window;
+  }
+}
+
+function loadFbx(path, warn) {
+  const buf = readFileSync(path);
+  const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  const name = basename(path);
+  // O parse até trata ASCII moderno (7.x), mas o caso dominante de ASCII na
+  // prática é o 6.x antigo, que o loader recusa — detectamos binário para
+  // dar a mensagem certa no erro; se passar, deixamos o loader decidir.
+  const wasBinary = isFbxBinary(arrayBuffer);
+  if (!wasBinary)
+    warn(`${name}: não é FBX binário — tentando como ASCII (só FBX 7.x ASCII funciona)`);
+  const loader = new FBXLoader();
+  loader.manager.addHandler(/.*/i, {
+    path: "",
+    setPath() {
+      return this;
+    },
+    load: () => new THREE.Texture(),
+  });
+  let group;
+  try {
+    group = withDomShims(() => loader.parse(arrayBuffer, ""));
+  } catch (e) {
+    if (!wasBinary)
+      err(
+        `${name}: FBX ASCII não suportado (${String(e?.message ?? e).slice(0, 80)}) — ` +
+          `re-exporte como FBX binário (padrão do Mixamo atual) ou converta para GLB`,
+      );
+    err(translateFbxError(e, name));
+  }
+  const norm = normalizeFbxResult(group, (m) => warn(`${name}: ${m}`));
+  // shape compatível com o retorno do GLTFLoader ({ scene, animations })
+  return { scene: norm.scene, animations: norm.animations };
+}
+
+/** Extensões aceitas pelo pipeline (CLI, Studio e uploads). */
+export const SUPPORTED_EXTENSIONS = [".glb", ".gltf", ".fbx"];
+
+/** Carrega GLB/GLTF/FBX e devolve `{ scene, animations }` (forma do GLTFLoader). */
+export async function loadModelFile(path, warn = console.warn) {
+  const ext = extname(path).toLowerCase();
+  if (!SUPPORTED_EXTENSIONS.includes(ext))
+    err(
+      `formato não suportado: ${basename(path)} (aceitos: GLB/GLTF/FBX binário — ver tools/README.md)`,
+    );
+  if (ext === ".fbx") return loadFbx(path, warn);
+  return loadGltf(path);
+}
+
+// ---------------------------------------------------------------------------
 // Modelo: skinned meshes + pool de vértices únicos + soup (ordem de desenho)
+
+/** Avisa sobre arquivos que não contribuem nada (sem skin E sem animação). */
+function warnUselessFiles(files, warn) {
+  for (const f of files) {
+    let hasSkin = false;
+    f.gltf.scene.traverse((o) => {
+      if (o.isSkinnedMesh) hasSkin = true;
+    });
+    if (!hasSkin && (f.gltf.animations ?? []).length === 0)
+      warn(
+        `${basename(f.path)}: sem skinned mesh e sem animação — não contribui para o bake ` +
+          `(Mixamo: personagem = 'With Skin'; animações = 'Without Skin')`,
+      );
+  }
+}
 
 /** Índice do primeiro arquivo que contém um SkinnedMesh (o "personagem"). */
 export function findCharacterIndex(files) {
@@ -860,8 +944,9 @@ export async function bakeToDir(cfg, hooks) {
   const files = [];
   for (const p of inputs) {
     if (!existsSync(p)) err(`arquivo não existe: ${p}`);
-    files.push({ path: p, gltf: await loadGltf(p) });
+    files.push({ path: p, gltf: await loadModelFile(p, warn) });
   }
+  warnUselessFiles(files, warn);
   const charIdx = findCharacterIndex(files);
   if (charIdx < 0)
     err("nenhum dos arquivos tem SkinnedMesh — baixe o personagem do Mixamo com 'Skin: With Skin'");
@@ -966,13 +1051,27 @@ export async function analyzeFiles(paths, warn = console.warn) {
   const files = [];
   for (const p of paths) {
     if (!existsSync(p)) err(`arquivo não existe: ${p}`);
-    files.push({ path: p, gltf: await loadGltf(p) });
+    files.push({ path: p, gltf: await loadModelFile(p, warn) });
   }
+  warnUselessFiles(files, warn);
   const charIndex = findCharacterIndex(files);
   if (charIndex < 0)
     err("nenhum dos arquivos tem SkinnedMesh — baixe o personagem do Mixamo com 'Skin: With Skin'");
   const model = buildModel(files[charIndex].gltf, files[charIndex].path, warn);
   const bind = measureBindPose(model);
+
+  // Compatibilidade de esqueleto por clipe: quantas tracks casam com nós do
+  // personagem (com a tolerância de nomenclatura do retarget). 0 = esqueleto
+  // incompatível — a UI avisa antes de qualquer bake.
+  const normMap = buildNormMap(model);
+  const countMatched = (clip) => {
+    let n = 0;
+    for (const track of clip.tracks) {
+      const { nodeName } = THREE.PropertyBinding.parseTrackName(track.name);
+      if (!nodeName || model.nodeNames.has(nodeName) || normMap.get(normalizeName(nodeName))) n += 1;
+    }
+    return n;
+  };
 
   const clips = [];
   const used = new Set();
@@ -987,6 +1086,7 @@ export async function analyzeFiles(paths, warn = console.warn) {
         name,
         duration: +clip.duration.toFixed(3),
         tracks: clip.tracks.length,
+        matchedTracks: countMatched(clip),
         rootTravel: +measureRootTravel(clip, model.rootBoneNames).toFixed(4),
         source: basename(f.path),
       });
@@ -1083,6 +1183,33 @@ export function runSelftest(outDir) {
   Math.abs(mn[1]) <= 0.01
     ? ok(`pé no chão (ymin=${mn[1].toFixed(4)})`)
     : bad(`ymin=${mn[1].toFixed(4)} — esperava ≈0 (pés no y=0)`);
+
+  // 4b. escala coerente ENTRE clipes: diagonal do frame 0 de cada clipe vs a
+  // do 1º clipe — pega fontes com unidades mistas (ex.: um FBX em cm no meio
+  // de arquivos em metros, que sairia 100× maior).
+  const clipDiag = (clip) => {
+    const rowBase = clip.rowStart * w * 3;
+    const cmin = [Infinity, Infinity, Infinity];
+    const cmax = [-Infinity, -Infinity, -Infinity];
+    for (let cIdx = 0; cIdx < w; cIdx++)
+      for (let ch = 0; ch < 3; ch++) {
+        const val = posF[rowBase + cIdx * 3 + ch];
+        if (val < cmin[ch]) cmin[ch] = val;
+        if (val > cmax[ch]) cmax[ch] = val;
+      }
+    return Math.hypot(cmax[0] - cmin[0], cmax[1] - cmin[1], cmax[2] - cmin[2]);
+  };
+  const diag0 = clipDiag(desc.clips[0]);
+  for (const clip of desc.clips.slice(1)) {
+    const d = clipDiag(clip);
+    const ratio = d / Math.max(diag0, 1e-6);
+    ratio > 0.2 && ratio < 5
+      ? ok(`escala do clipe "${clip.name}" coerente (diagonal ${d.toFixed(3)} vs ${diag0.toFixed(3)} do 1º)`)
+      : bad(
+          `clipe "${clip.name}" com escala ${ratio > 1 ? ratio.toFixed(1) + "× maior" : (1 / ratio).toFixed(1) + "× menor"} ` +
+            `que o 1º clipe — fontes com unidades diferentes (cm vs m)? re-exporte ou converta para GLB`,
+        );
+  }
 
   // 5. continuidade de loop: wrap (último→primeiro frame) comparável ao passo interframe
   const rowDelta = (rowA, rowB) => {

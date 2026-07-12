@@ -1,9 +1,10 @@
 # tools — VAT sem Houdini (Studio + CLI)
 
 Gera as texturas de animação (VAT) que o app consome a partir de arquivos
-GLB/GLTF com skinned mesh + animações — fluxo típico: **Mixamo**. Saída no
-formato do doc 03 §3: **`.bin` float16 raw + `vat.json`** em
-`public/vat/<nome>/`, carregada no app com `?vat=<nome>` na URL.
+**GLB/GLTF ou FBX binário** com skinned mesh + animações — fluxo típico:
+**Mixamo, arrastando os FBX direto** (sem Blender). Saída no formato do
+doc 03 §3: **`.bin` float16 raw + `vat.json`** em `public/vat/<nome>/`,
+carregada no app com `?vat=<nome>` na URL.
 
 Duas portas de entrada para o mesmo motor (`tools/vat-core.mjs`):
 
@@ -22,9 +23,10 @@ npm run dev             # (opcional, noutra aba) app na 5199 para testar o resul
 
 Fluxo na página:
 
-1. **Arraste os GLB** (o arquivo com skin vira o personagem; os demais podem
-   ser só animações do mesmo esqueleto). FBX não é aceito — converta antes
-   (guia abaixo).
+1. **Arraste os arquivos** — GLB/GLTF ou **FBX binário do Mixamo direto**
+   (o arquivo com skin vira o personagem; os demais podem ser só animações
+   do mesmo esqueleto). FBX ASCII/antigo não é aceito — a UI explica e o
+   plano B é converter para GLB (guia abaixo).
 2. **Preview 3D** com órbita; cada clipe tem botão ▶ para conferir.
 3. **Clipes**: reordene arrastando (a ordem vira a ordem na textura e nos
    botões do app), renomeie clicando no nome, e escolha **loop** (idle,
@@ -69,12 +71,18 @@ Limites que o semáforo usa (por que existem):
 node tools/vat-bake.mjs <personagem.glb> [anim2.glb ...] --out public/vat/<nome> [opções]
 ```
 
-### Exemplo validado (Soldier do three.js)
+### Exemplos validados
 
 ```bash
+# GLB (Soldier do three.js)
 node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \
   --skip TPose --selftest
 # → http://localhost:5199/?vat=soldier&scene=personagem  (e &forceWebGL=1)
+
+# FBX Mixamo direto (personagem com skin + animação sem skin)
+node tools/vat-bake.mjs tools/fixtures/samba.fbx tools/fixtures/samba-anim.fbx \
+  --out public/vat/samba --max-verts 2500 --selftest
+# → http://localhost:5199/?vat=samba&scene=personagem
 ```
 
 ### Opções
@@ -95,17 +103,35 @@ node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \
 `--selftest` sozinho (sem inputs) revalida um diretório já assado:
 `node tools/vat-bake.mjs --out public/vat/soldier --selftest`.
 
-## Fluxo Mixamo (o caso típico)
+## Fluxo Mixamo (o caso típico) — FBX direto, sem Blender
 
-1. No [Mixamo](https://www.mixamo.com), escolha o personagem e baixe **uma vez
-   com skin** (Format: FBX Binary, Skin: With Skin) — esse é o arquivo do
-   personagem. Baixe cada animação adicional **sem skin** (Skin: Without Skin,
-   30 fps, sem keyframe reduction) — animações Mixamo já são cíclicas, os
-   loops fecham.
-2. Converta FBX → GLB (a ferramenta lê GLB/GLTF; FBX direto não é suportado):
+1. No [Mixamo](https://www.mixamo.com), escolha o personagem e baixe **uma
+   vez com skin** (Format: **FBX Binary**, Skin: **With Skin**) — esse é o
+   arquivo do personagem. Baixe cada animação adicional **sem skin** (Skin:
+   **Without Skin**, 30 fps, sem keyframe reduction) — animações Mixamo já
+   são cíclicas, os loops fecham.
+2. **Arraste os FBX no Studio** (ou passe na CLI). O que é normalizado
+   automaticamente (`tools/fbx-normalize.mjs`, compartilhado com o preview):
+   - **escala**: FBX do Mixamo vem em centímetros (`UnitScaleFactor` 1) —
+     convertido para metros (fator 0,01) assado na geometria, ossos, bind
+     matrices e tracks; arquivos sem `UnitScaleFactor` legível usam
+     heurística pela pose de descanso (humano de ~175 "unidades" = cm);
+   - **ossos** `mixamorig:Hips` → `mixamorigHips` (o próprio loader remove o
+     `:`, mesma convenção do GLB do Blender — dá para misturar FBX e GLB do
+     mesmo esqueleto que o retarget casa por nome);
+   - **clipes** com nome genérico (`mixamo.com`, `Take 001`, `Armature|…`)
+     são renomeados para o nome do arquivo (`samba.fbx` vira o clipe
+     `samba`); takes vazios do Mixamo são descartados;
+   - animação **sem malha** ("Without Skin"): funciona como GLB de animação
+     avulsa — as tracks retargetam para o personagem carregado; a lista de
+     clipes mostra `N/M tracks casam` e acusa **✗ esqueleto incompatível**
+     (clipe já desmarcado) quando nada casa.
+3. **O que ainda pede conversão** (o Studio/CLI recusam com a mensagem
+   certa): FBX **ASCII** ou **6.x antigo** (o Mixamo atual exporta binário
+   7.x, suportado). Nesses casos, converta para GLB:
    - **Blender** (GUI): `File → Import → FBX`, depois
      `File → Export → glTF 2.0 (.glb)` — sem compressão Draco/Meshopt.
-   - **Blender CLI** (testado com Blender 4.x):
+   - **Blender CLI** (testado com Blender 4.x/5.x):
 
      ```bash
      blender -b -P - <<'EOF'
@@ -118,10 +144,9 @@ node tools/vat-bake.mjs tools/fixtures/Soldier.glb --out public/vat/soldier \
 
    - ou [FBX2glTF](https://github.com/facebookincubator/FBX2glTF):
      `FBX2glTF -b personagem.fbx -o personagem.glb`
-3. Arraste os GLB no Studio (ou rode a CLI) — o personagem/esqueleto vem do
-   arquivo **com skin**; os demais podem conter só animação. Clipes com nome
-   genérico (`mixamo.com`, `Take 001`…) são renomeados para o nome do arquivo
-   — `morrer.glb` vira o clipe `morrer`.
+
+   Texturas/materiais do FBX são **irrelevantes** aqui (o bake ignora, como
+   no GLB): não precisa se preocupar com texturas embutidas ou ausentes.
 
 ## O que sai (`public/vat/<nome>/`)
 
@@ -187,7 +212,10 @@ faz sentido). O Studio avisa a morfabilidade ao gerar.
   parte; combine poucos clipes ou aumente frames).
 - Um clipe **combinado** marcado como loop só fecha se começar e terminar
   com o mesmo clipe cíclico (o selftest acusa quando não fecha).
-- FBX direto não é suportado (converter antes); Draco/Meshopt também não.
+- **FBX**: só binário 7.x (padrão do Mixamo atual). ASCII e 6.x antigos são
+  recusados com mensagem clara — converter para GLB. GLB com Draco/Meshopt
+  também não é lido (re-exporte sem compressão). O selftest ainda vigia
+  unidades mistas entre fontes (clipe 100× maior/menor que o 1º = cm vs m).
 - Morph targets (blend shapes) não entram no bake — só skinning.
 - "Andar no lugar" zera só a translação XZ da raiz (a trajetória removida
   sai em `rootMotion`); animações com root motion complexo (giro) podem
@@ -207,5 +235,11 @@ faz sentido). O Studio avisa a morfabilidade ao gerar.
 Com o Studio (5198) e o app (5199) no ar:
 
 ```bash
-node tools/studio/e2e.mjs   # sobe o Soldier, decima, assa e valida — grava shots/studio-*.png
+node tools/studio/e2e.mjs   # GLB: Soldier (deleta clipe, combina, assa) + FBX: samba (Mixamo direto) — grava shots/studio-*.png
 ```
+
+Fixtures em `tools/fixtures/`: `Soldier.glb` (three.js), `samba.fbx`
+("Samba Dancing" do Mixamo, via repo do three.js — personagem X Bot com
+skin, FBX binário 7.4 em cm, clipe "mixamo.com"), `samba-anim.fbx` (a mesma
+animação SEM malha, derivada no Blender — caso "Without Skin") e
+`old-ascii.fbx` (FBX 6.1 ASCII mínimo para o caso de erro).

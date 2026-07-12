@@ -186,11 +186,11 @@
   </header>
 
   <div id="drop" class="drop">
-    <b>Arraste os GLB aqui</b>
-    o primeiro arquivo é o personagem (com skin); os demais podem ser só animações do mesmo esqueleto
-    <div class="hint">fluxo típico: Mixamo → FBX → GLB (guia no rodapé) · ou clique para escolher</div>
+    <b>Arraste os arquivos do Mixamo aqui (FBX ou GLB)</b>
+    o personagem é o arquivo com skin ("With Skin"); os demais podem ser só animações do mesmo esqueleto ("Without Skin")
+    <div class="hint">FBX binário do Mixamo entra direto, sem Blender · ou clique para escolher</div>
   </div>
-  <input type="file" id="filepick" accept=".glb,.gltf" multiple class="hidden" />
+  <input type="file" id="filepick" accept=".glb,.gltf,.fbx" multiple class="hidden" />
 
   <div id="work" class="cols hidden">
     <div class="stack">
@@ -279,12 +279,12 @@
   <footer>
     LIMIAR · VAT Studio — assa no servidor local com o mesmo motor do <code>tools/vat-bake.mjs</code>.
     <details>
-      <summary>Como exportar do Mixamo (FBX → GLB)</summary>
+      <summary>Como baixar do Mixamo (FBX direto, sem Blender)</summary>
       <ol>
-        <li>No <a href="https://www.mixamo.com" target="_blank">Mixamo</a>, escolha o personagem e baixe <b>uma vez</b> com <i>Format: FBX Binary</i>, <i>Skin: With Skin</i> — este é o 1º arquivo.</li>
-        <li>Cada animação extra: baixe <i>Without Skin</i>, 30 fps, sem keyframe reduction (loops do Mixamo já fecham).</li>
-        <li>Converta FBX → GLB no Blender: <code>File → Import → FBX</code>, depois <code>File → Export → glTF 2.0 (.glb)</code> — sem compressão Draco/Meshopt. (CLI no tools/README.md.)</li>
-        <li>Arraste os GLB aqui em cima (personagem primeiro).</li>
+        <li>No <a href="https://www.mixamo.com" target="_blank">Mixamo</a>, escolha o personagem e baixe <b>uma vez</b> com <i>Format: FBX Binary</i>, <i>Skin: With Skin</i> — este é o personagem.</li>
+        <li>Cada animação extra: baixe <i>Format: FBX Binary</i>, <i>Skin: Without Skin</i>, 30 fps, sem keyframe reduction (loops do Mixamo já fecham).</li>
+        <li>Arraste os FBX aqui em cima — escala (cm), nomes de osso <code>mixamorig:</code> e o clipe "mixamo.com" são normalizados automaticamente (o clipe herda o nome do arquivo).</li>
+        <li>Só se precisar (FBX ASCII/antigo, Draco): converta para GLB no Blender — <code>File → Import → FBX</code>, <code>File → Export → glTF 2.0 (.glb)</code> (CLI no tools/README.md).</li>
       </ol>
     </details>
   </footer>

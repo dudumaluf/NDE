@@ -125,6 +125,71 @@ if (resultText.includes("Morfável com")) {
 }
 await page.screenshot({ path: "shots/studio-4-resultado.png" });
 
+// ---------------------------------------------------------------------------
+// Parte 2 — FBX do Mixamo direto (sem Blender): personagem "With Skin"
+// (samba.fbx, do repo do three.js), animação "Without Skin" (samba-anim.fbx,
+// derivada via Blender) e o erro claro para FBX ASCII antigo.
+
+console.log("--- parte 2: FBX Mixamo direto ---");
+const page2 = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page2.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
+const dialogs = [];
+page2.on("dialog", (d) => {
+  dialogs.push(d.message());
+  d.accept();
+});
+await page2.goto("http://localhost:5198/", { waitUntil: "domcontentloaded" });
+
+// 9. FBX ASCII antigo → alerta claro, nada é adicionado
+await page2.setInputFiles("#filepick", resolve("tools/fixtures/old-ascii.fbx"));
+await page2.waitForFunction(() => true, null, { timeout: 1000 }).catch(() => {});
+await page2.waitForTimeout(800);
+check(
+  dialogs.some((m) => /FBX ASCII não suportado/.test(m)),
+  `FBX ASCII recusado com mensagem clara: "${(dialogs[0] ?? "").slice(0, 90)}…"`,
+);
+
+// 10. personagem FBX (com skin) + animação FBX (sem skin)
+await page2.setInputFiles("#filepick", [
+  resolve("tools/fixtures/samba.fbx"),
+  resolve("tools/fixtures/samba-anim.fbx"),
+]);
+await page2.waitForFunction(() => document.querySelectorAll("#clips .clip").length >= 2, null, { timeout: 60000 });
+const fbxClips = await page2.$$eval("#clips .clip input.name", (els) => els.map((e) => e.value));
+const meshinfo = (await page2.textContent("#meshinfo")).trim();
+console.log("clipes FBX:", fbxClips.join(" | "), "·", meshinfo);
+check(
+  fbxClips.includes("samba") && fbxClips.includes("samba-anim"),
+  `clipes do FBX renomeados ("mixamo.com" → nome do arquivo): ${fbxClips.join(", ")}`,
+);
+check(/altura 1\.[78]/.test(meshinfo), `escala cm→m aplicada (${meshinfo.match(/altura [\d.]+/)?.[0]})`);
+await page2.screenshot({ path: "shots/studio-5-fbx-analise.png" });
+
+// 11. malha densa do FBX → correção de 1 clique (reduzir) e bake
+await page2.waitForSelector("#lights button[data-action=decimate]", { timeout: 5000 });
+await page2.click("#lights button[data-action=decimate]");
+await page2.waitForFunction(
+  () => document.querySelector("#lights")?.textContent.includes("Redução aplicada"),
+  null,
+  { timeout: 120000 },
+);
+await page2.fill("#assetName", "samba-e2e");
+await page2.click("#bakeBtn");
+await page2.waitForFunction(
+  () => {
+    const r = document.getElementById("result");
+    const log = document.getElementById("log")?.textContent ?? "";
+    return (r && !r.classList.contains("hidden")) || log.includes("FALHOU");
+  },
+  null,
+  { timeout: 180000 },
+);
+const fbxResult = (await page2.textContent("#result")).trim().replace(/\s+/g, " ");
+console.log("resultado FBX:", fbxResult.slice(0, 240));
+check(!fbxResult.includes("✗") && !fbxResult.includes("FALHOU"), "bake do FBX validado (selftest)");
+check(/samba(?!-e2e)/.test(fbxResult) && fbxResult.includes("samba-anim"), "os 2 clipes FBX (com e sem skin) assados");
+await page2.screenshot({ path: "shots/studio-6-fbx-resultado.png" });
+
 console.log(failed ? "E2E: FALHOU" : "E2E: OK");
 if (logs.some((l) => l.startsWith("[pageerror]"))) console.log(logs.filter((l) => l.startsWith("[pageerror]")).join("\n"));
 
