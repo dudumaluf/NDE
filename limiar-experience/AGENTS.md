@@ -71,6 +71,29 @@ Leia antes de qualquer tarefa, nesta ordem:
   contra public/content/). `?simT` pré-rola até 60 s (3600 steps).
 - O pre-roll do `?simT` espera o 2º frame (leva entrega valores reais após
   o 1º commit — no 1º frame rodaria com defaults).
+- **Leitura visual (M3.5)**: fios com fade por distância + peso→cor/alpha
+  (`?wiresNear/wiresFar/wiresGamma`) e modo "só núcleos formados"
+  (`?wiresFormed=1`, coesão por endpoint contra os alvos, que entram como
+  ATRIBUTOS re-preenchidos a cada computeTargets — sem 2º PBO no WebGL2);
+  palavras 3D (`ClusterLabels.tsx`, `?labels=0` desliga, `?formRaio=`
+  threshold de formação) com formação por readback GPU amostrado (~0,6 s);
+  Legenda real fora do leva (`src/ui/Legend.tsx` + `legendStore`) com
+  frase_visitante no bottom; ênfase de cor (`colorEmphasis.ts`) re-escreve
+  o iColorScale (lente dessatura não-pertencentes; clique na legenda
+  destaca por 2 s).
+- **Aprendizados de GPU que custaram caro (não re-derivar)**:
+  (a) num LineSegments, TODO nó que dependa de attribute de índice
+  (aAgent/aOther) tem de ser avaliado no VERTEX e passado por `varying()` —
+  no fragment o attribute chega interpolado ao longo da linha e `int()`
+  dele indexa agentes intermediários (fios "esfarelam", feedback do Dudu);
+  (b) `getArrayBufferAsync(storage vec3)` devolve o buffer FÍSICO: no
+  WebGPU o stride é 4 floats (alinhamento 16 B), no WebGL2/TF é packed
+  (3) — detectar por `length >= maxCount*4`;
+  (c) `THREE.Sprite`+`SpriteNodeMaterial` desenha no WebGPU mas NÃO no
+  fallback WebGL2 do r185 (silencioso) — billboard = Mesh(plane) +
+  quaternion da câmera copiado por frame;
+  (d) troika/drei `<Text>` injeta GLSL via onBeforeCompile → não roda no
+  WebGPURenderer (nem no fallback); texto 3D = canvas→CanvasTexture.
 - Spawn permuta o índice (`i×197 mod count`) para as pessoas reais não
   nascerem enfileiradas no canto do grid.
 - Fase do passo por agente integra a velocidade (`phasePerUnit` frames por

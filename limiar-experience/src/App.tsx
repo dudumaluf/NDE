@@ -6,58 +6,11 @@ import { Scene, initialSceneMode } from "./scene/Scene";
 import { PostFX } from "./render/post/PostFX";
 import { qpBool, qpStr } from "./lib/urlParams";
 import { useContent } from "./data/contentStore";
-import { useDemoLens } from "./data/demoLensStore";
-import { DEMO_LENS_LABELS } from "./data/demoLens";
-import { cssColor } from "./data/palette";
+import { Legend } from "./ui/Legend";
 
-/** Legenda da lente demográfica ativa: categoria → contagem, com a cor viva. */
-function DemoLensLegend() {
-  const cls = useDemoLens((s) => s.cls);
-  if (!cls) return null;
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: "50%",
-        bottom: 10,
-        transform: "translateX(-50%)",
-        display: "flex",
-        alignItems: "center",
-        flexWrap: "wrap",
-        justifyContent: "center",
-        gap: "4px 14px",
-        maxWidth: "70vw",
-        padding: "6px 14px",
-        borderRadius: 6,
-        background: "rgba(0,0,0,0.45)",
-        color: "#ddd",
-        fontSize: 12,
-        pointerEvents: "none",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      <span style={{ color: "#a8a49d" }}>{DEMO_LENS_LABELS[cls.lens]}</span>
-      {cls.categories
-        .filter((cat) => cat.count > 0)
-        .map((cat) => (
-          <span key={cat.key} style={{ whiteSpace: "nowrap" }}>
-            <span
-              style={{
-                display: "inline-block",
-                width: 9,
-                height: 9,
-                borderRadius: "50%",
-                background: cssColor(cat.color),
-                marginRight: 5,
-                verticalAlign: "baseline",
-              }}
-            />
-            {cat.label} {cat.count}
-          </span>
-        ))}
-    </div>
-  );
-}
+// A legenda do que está em cena (núcleos/lentes, chips clicáveis, frase do
+// bottom) vive em src/ui/Legend.tsx — UI real da experiência, fora do leva.
+// A faixa central antiga das lentes demográficas foi absorvida por ela.
 
 /** Sinaliza prontidão (2 frames), detecta o backend e mede FPS médio. */
 function Probe({
@@ -161,7 +114,7 @@ export default function App() {
         {backend ? `render: ${backend}` : "inicializando renderer…"}
         {fps !== null ? ` · ${fps.toFixed(0)} fps` : ""}
       </div>
-      <DemoLensLegend />
+      <Legend />
       {content && (
         <div
           style={{

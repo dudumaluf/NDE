@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
 import { useFrame, useThree } from "@react-three/fiber";
 import { button, useControls } from "leva";
@@ -10,6 +10,7 @@ import { CrowdSim } from "../sim/CrowdSim";
 import { mouseTarget, type MouseMode } from "../sim/mouseTarget";
 import { buildCrowdMaterial } from "./crowdMaterial";
 import { fillContentAttributes, fillStaticAttributes } from "./spawn";
+import { applyColorEmphasis } from "./colorEmphasis";
 import { qpBool, qpNum, qpStr } from "../lib/urlParams";
 import { useContent } from "../data/contentStore";
 import { computeTargets } from "../data/agentMapping";
@@ -22,6 +23,8 @@ import {
 } from "../data/demoLens";
 import { useDemoLens } from "../data/demoLensStore";
 import { CrowdWires } from "../render/CrowdWires";
+import { ClusterLabels } from "../render/ClusterLabels";
+import { setElementLens, useLegend } from "../ui/legendStore";
 
 const NO_LENS = "nenhuma";
 
@@ -130,6 +133,36 @@ export function CrowdMesh() {
         label: "fios alpha",
       },
       fiosAltura: { value: 1.05, min: 0, max: 2, label: "fios altura" },
+      // --- leitura visual (M3.5) ---
+      fiosFadePerto: {
+        value: qpNum("wiresNear", 6),
+        min: 0.5,
+        max: 25,
+        label: "fios fade: perto",
+      },
+      fiosFadeLonge: {
+        value: qpNum("wiresFar", 14),
+        min: 2,
+        max: 45,
+        label: "fios fade: longe",
+      },
+      fiosPeso: {
+        value: qpNum("wiresGamma", 1.6),
+        min: 0.4,
+        max: 4,
+        label: "fios peso (gama)",
+      },
+      fiosSoNucleos: {
+        value: qpBool("wiresFormed", false),
+        label: "fios só núcleos formados",
+      },
+      palavras: { value: qpBool("labels", true), label: "palavras (núcleos)" },
+      formRaio: {
+        value: qpNum("formRaio", 2.4),
+        min: 0.8,
+        max: 8,
+        label: "formação raio (coesão)",
+      },
     }),
     [lensOptions],
   );
@@ -181,6 +214,14 @@ export function CrowdMesh() {
     return () => useDemoLens.setState({ cls: null });
   }, [demoCls]);
 
+  // Publica a lente de ELEMENTO para a Legenda (src/ui/Legend.tsx) e escuta
+  // o destaque temporário disparado por clique num chip dela.
+  useEffect(() => {
+    setElementLens(content && d.lente !== NO_LENS ? d.lente : null);
+    return () => setElementLens(null);
+  }, [content, d.lente]);
+  const legendFlash = useLegend((s) => s.flash);
+
   const resetRef = useRef(true);
   const initTimeRef = useRef(qpNum("simT", 0));
   const frameCount = useRef(0);
@@ -197,11 +238,18 @@ export function CrowdMesh() {
   // Cores por instância: núcleo (padrão) ou categoria da lente demográfica
   // ativa — mesma via iColorScale; trocar lente NÃO reseta posições (as
   // pessoas caminham para o novo arranjo) e o rng por seed mantém as escalas.
+  // Por cima da cor-base, a ênfase (M3.5): lente de elemento dessatura os
+  // não-pertencentes; clique na Legenda dessatura tudo fora do grupo por ~2 s.
   useEffect(() => {
     const count = c.grid * c.grid;
-    if (content) fillContentAttributes(attrs, count, c.seed, content, demoCls);
-    else fillStaticAttributes(attrs, count, c.seed);
-  }, [attrs, content, demoCls, c.grid, c.seed]);
+    if (content) {
+      fillContentAttributes(attrs, count, c.seed, content, demoCls);
+      applyColorEmphasis(attrs, count, content, demoCls, {
+        elementLens: d.lente === NO_LENS ? null : d.lente,
+        flash: legendFlash,
+      });
+    } else fillStaticAttributes(attrs, count, c.seed);
+  }, [attrs, content, demoCls, c.grid, c.seed, d.lente, legendFlash]);
 
   // Parâmetros de spawn mudaram → uniforms da sim e agenda reset GPU.
   useEffect(() => {
@@ -217,7 +265,9 @@ export function CrowdMesh() {
 
   // Alvos dos dados (gravidade/lentes) — 46 escritas por mudança, nada por
   // frame. Lente demográfica ativa vence a lente de elemento (exclusão mútua
-  // no efeito acima garante que só uma esteja ligada).
+  // no efeito acima garante que só uma esteja ligada). targetsVersion avisa
+  // os fios (modo "só núcleos formados" lê os alvos como atributo).
+  const [targetsVersion, setTargetsVersion] = useState(0);
   useEffect(() => {
     if (!content) return;
     if (demoCls) {
@@ -233,6 +283,7 @@ export function CrowdMesh() {
       });
     }
     sim.commitTargets();
+    setTargetsVersion((v) => v + 1);
   }, [content, sim, demoCls, d.mapScale, d.lente, s.contRaio]);
 
   useFrame((_, delta) => {
@@ -266,7 +317,14 @@ export function CrowdMesh() {
       };
       w.__limiarReadPositions = async (n: number) => {
         const buf = await gl.getArrayBufferAsync(sim.positions.value);
-        return Array.from(new Float32Array(buf).slice(0, n * 3));
+        const raw = new Float32Array(buf);
+        // WebGPU aloca storage vec3 com padding de vec4 (16 B); WebGL2 packed.
+        const stride = raw.length >= sim.maxCount * 4 ? 4 : 3;
+        const out: number[] = [];
+        for (let i = 0; i < n; i++) {
+          out.push(raw[i * stride], raw[i * stride + 1], raw[i * stride + 2]);
+        }
+        return out;
       };
     }
 
@@ -314,8 +372,27 @@ export function CrowdMesh() {
           sim={sim}
           content={content}
           visible={d.fios}
-          alpha={d.fiosAlpha}
+          // No modo "só núcleos formados" sobram poucos fios acesos — o ganho
+          // compensa para a estrutura interna dos núcleos continuar legível.
+          alpha={d.fiosSoNucleos ? Math.min(d.fiosAlpha * 1.9, 1) : d.fiosAlpha}
           lift={d.fiosAltura}
+          fadeNear={d.fiosFadePerto}
+          fadeFar={d.fiosFadeLonge}
+          weightGamma={d.fiosPeso}
+          onlyFormed={d.fiosSoNucleos}
+          // 2× o raio de formação: o fio começa a acender ANTES do rótulo
+          // aparecer — a chegada se anuncia, a palavra confirma.
+          cohesionRadius={d.formRaio * 2}
+          targetsVersion={targetsVersion}
+        />
+      )}
+      {content && d.palavras && (
+        <ClusterLabels
+          sim={sim}
+          content={content}
+          active={d.gravidade && d.lente === NO_LENS && !demoCls}
+          mapScale={d.mapScale}
+          formRadius={d.formRaio}
         />
       )}
       <mesh ref={markerRef}>

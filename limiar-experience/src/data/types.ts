@@ -71,6 +71,16 @@ export interface TaxonomyElement {
   label: string;
   dominio: string;
   nota?: string;
+  /** Frase curta para o visitante (a "frase do bottom" quando a lente ativa). */
+  frase_visitante?: string;
+}
+
+/** Metadados das lentes demográficas no taxonomy.json (export ≥ 8016c499). */
+export interface DemoLensMeta {
+  key: string;
+  label: string;
+  campo?: string;
+  frase_visitante?: string;
 }
 
 export interface Taxonomy {
@@ -78,6 +88,7 @@ export interface Taxonomy {
   dominios: Record<string, string>;
   elementos: TaxonomyElement[];
   adjacentes: string[];
+  lentes_demograficas?: DemoLensMeta[];
 }
 
 /** Tudo que o data layer entrega pronto para a cena. */

@@ -67,3 +67,36 @@ export function cssColor([r, g, b]: [number, number, number]): string {
   const c = (v: number) => Math.round(v * 255);
   return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
 }
+
+// --- Leitura visual (M3.5) ---------------------------------------------------
+
+/**
+ * Puxa a cor em direção à sua luminância (k=1 → cinza) e escurece por `dim`.
+ * É a via barata de "coesão visual": não-pertencentes dessaturam durante uma
+ * lente/destaque via re-preenchimento do iColorScale (CPU, 46 escritas).
+ */
+export function desaturate(
+  c: [number, number, number],
+  k: number,
+  dim = 1,
+): [number, number, number] {
+  const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  return [
+    (c[0] + (l - c[0]) * k) * dim,
+    (c[1] + (l - c[1]) * k) * dim,
+    (c[2] + (l - c[2]) * k) * dim,
+  ];
+}
+
+/**
+ * Cor do RÓTULO 3D de um núcleo: a cor do núcleo dessaturada (~45%) e
+ * clareada — legível sobre o cinza do Campo sem virar mais um "dado" colorido.
+ */
+export function clusterLabelColor(clusterId: number): [number, number, number] {
+  const d = desaturate(clusterColor(clusterId), 0.45);
+  return [
+    Math.min(1, d[0] * 1.16 + 0.08),
+    Math.min(1, d[1] * 1.16 + 0.08),
+    Math.min(1, d[2] * 1.16 + 0.08),
+  ];
+}

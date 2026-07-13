@@ -1,12 +1,16 @@
 /**
  * Screenshot headless da cena para verificação (usa o Chrome instalado).
- * Uso: node scripts/screenshot.mjs [url] [saida.png] [timeoutMs]
+ * Uso: node scripts/screenshot.mjs [url] [saida.png] [timeoutMs] [settleMs]
+ * settleMs: espera extra após a cena ficar pronta (default 700). Efeitos
+ * que dependem de readback GPU assíncrono (ex.: palavras dos núcleos)
+ * precisam de ~2500 em máquina lenta.
  */
 import { chromium } from "playwright-core";
 
 const url = process.argv[2] ?? "http://localhost:5199/?leva=0";
 const out = process.argv[3] ?? "shot.png";
 const timeoutMs = Number(process.argv[4] ?? 15000);
+const settleMs = Number(process.argv[5] ?? 700);
 
 const browser = await chromium.launch({
   channel: "chrome",
@@ -27,7 +31,7 @@ try {
 } catch {
   logs.push("[warn] timeout esperando __limiarReady — capturando mesmo assim");
 }
-await page.waitForTimeout(700);
+await page.waitForTimeout(settleMs);
 await page.screenshot({ path: out });
 
 const backend = await page.evaluate("window.__limiarBackend ?? null");
