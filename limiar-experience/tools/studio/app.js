@@ -678,6 +678,15 @@ function renderBudget() {
         { label: "desfazer redução", action: "undo" },
       ),
     );
+    for (const w of state.estimate.warnings ?? [])
+      lights.push(
+        light(
+          "y",
+          `Redução: <b>${esc(w.split(":")[0])}</b>`,
+          w.includes(":") ? w.slice(w.indexOf(":") + 1).trim() : w,
+          null,
+        ),
+      );
   }
   lightsEl.innerHTML = lights.join("");
   lightsEl.querySelectorAll("button[data-action]").forEach((b) =>
@@ -721,13 +730,24 @@ function light(g, title, desc, fix) {
 
 function renderFiles() {
   const ci = state.analysis?.charIndex ?? 0;
+  const diagOf = (i) => state.analysis?.fileDiags?.find((d) => d.file === i);
   $("files").innerHTML =
     state.files
-      .map(
-        (f, i) =>
+      .map((f, i) => {
+        const rest = diagOf(i)?.restPose;
+        const restWarn = rest?.mismatch
+          ? `<div class="file" style="padding-left:12px"><span class="s" style="color:var(--warn)">⚠ pose de descanso difere do personagem
+               (até ${rest.maxDeg.toFixed(0)}° em ${esc(rest.worst[0]?.region ?? "?")} · ${rest.worst
+                 .map((w) => esc(w.bone))
+                 .join(", ")}) — T-pose vs A-pose? braços/pernas podem cruzar ou inverter.
+               Recomendação: faça o retarget no Mixamo — suba o SEU personagem lá e baixe a animação já aplicada a ele.</span></div>`
+          : "";
+        return (
           `<div class="file"><span class="tag">${i === ci ? "personagem" : "animação"}</span>` +
-          `<span class="n">${esc(f.name)}</span><span class="s">${fmtMB(f.size)}</span></div>`,
-      )
+          `<span class="n">${esc(f.name)}</span><span class="s">${fmtMB(f.size)}</span></div>` +
+          restWarn
+        );
+      })
       .join("") || `<span class="empty">nenhum arquivo</span>`;
   const warns = state.analysis?.warnings ?? [];
   if (warns.length)
@@ -892,6 +912,15 @@ function renderClips() {
               : !isCombo && c.matchedTracks < c.tracks
                 ? `<span style="color:var(--warn)" title="parte das tracks não casa com os ossos do personagem (nós extras da fonte são ignorados)">${c.matchedTracks}/${c.tracks} tracks casam</span>`
                 : ""
+          }
+          ${
+            !isCombo && c.frozen && Object.keys(c.frozen).length
+              ? `<span style="color:var(--warn)" title="estes ossos do personagem não recebem movimento neste clipe (sem track de rotação, ou track constante) — o membro fica congelado/manco no bake. Fonte exportada sem esses ossos? Refaça o download no Mixamo sem 'keyframe reduction', ou re-exporte com o esqueleto completo.">⚠ sem movimento: ${esc(
+                  Object.entries(c.frozen)
+                    .map(([reg, bones]) => `${reg} (${bones.slice(0, 3).join(", ")}${bones.length > 3 ? "…" : ""})`)
+                    .join(" · "),
+                )}</span>`
+              : ""
           }
           ${
             isCombo

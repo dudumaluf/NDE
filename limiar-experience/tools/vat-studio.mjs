@@ -207,9 +207,10 @@ async function handleApi(req, res, url) {
       if (charIdx < 0) return sendJson(res, 422, { error: "nenhum arquivo tem SkinnedMesh" });
       const model = buildModel(files[charIdx].gltf, files[charIdx].path, () => {});
       const before = { uniqueVerts: model.uniqueCount, soupVerts: model.drawIndices.length };
+      const decimWarnings = [];
       const decimation =
         maxVerts > 0 && maxVerts < model.uniqueCount
-          ? await decimateModel(model, maxVerts, () => {})
+          ? await decimateModel(model, maxVerts, (m) => decimWarnings.push(String(m)))
           : null;
       // índice local → original: pick[local]; sem decimação, indexArray já é original
       const meshes = model.meshInfos.map((mi, i) => ({
@@ -225,6 +226,8 @@ async function handleApi(req, res, url) {
         },
         decimation,
         meshes: decimation ? meshes : null,
+        // avisos da redução (ex.: região desproporcional — "perna sumiu")
+        warnings: decimWarnings,
         // identidade da malha PÓS-decimação: é este hash que o bake gravará
         meshHash: computeMeshHash(model),
       });

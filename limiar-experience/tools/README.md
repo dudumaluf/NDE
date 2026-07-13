@@ -138,7 +138,21 @@ node tools/vat-bake.mjs tools/fixtures/samba.fbx tools/fixtures/samba-anim.fbx \
      O campo **Y** ao lado de loop/única é o ajuste MANUAL por clipe
      (unidades da fonte; vazio = só o automático) — vale no preview e no
      bake, e sai documentado como `clips[].yOffset` quando usado.
-3. **O que ainda pede conversão** (o Studio/CLI recusam com a mensagem
+3. **Personagem PRÓPRIO (o fluxo canônico)**: suba o SEU personagem no
+   Mixamo (Upload Character → auto-rig) e baixe cada animação **já aplicada
+   a ele** — o retarget entre esqueletos/poses diferentes é trabalho do
+   Mixamo, não desta ferramenta. O Studio diagnostica quando você pula essa
+   etapa:
+   - **pose de descanso difere** (T-pose vs A-pose, até N° nos ombros) no
+     painel de arquivos → braços podem cruzar/inverter; refaça no Mixamo;
+   - **sem movimento: perna esq. (LeftUpLeg…)** na lista de clipes → a
+     fonte não anima esses ossos ("perna manca"); o bake avisa, grava
+     `clips[].frozenRegions` no vat.json e o selftest acusa;
+   - **redução desproporcional em <região>** no orçamento → a decimação
+     comeu um membro além do resto; reduza menos. (A solda da decimação
+     respeita o osso dominante: vértices encostados de membros opostos —
+     pernas juntas na bind — nunca se fundem.)
+4. **O que ainda pede conversão** (o Studio/CLI recusam com a mensagem
    certa): FBX **ASCII** ou **6.x antigo** (o Mixamo atual exporta binário
    7.x, suportado). Nesses casos, converta para GLB:
    - **Blender** (GUI): `File → Import → FBX`, depois

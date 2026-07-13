@@ -1,10 +1,13 @@
 /**
  * E2E do VAT Studio: sobe a página, envia o Soldier e exercita o fluxo v2 —
  * deletar clipe, combinar clipes em um track, decimar, renomear, assar e
- * validar (selftest + aviso de morfabilidade entre VATs).
+ * validar (selftest + aviso de morfabilidade entre VATs) — e os diagnósticos
+ * de artefato (pose de descanso, membro congelado).
  */
 import { chromium } from "playwright-core";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -221,7 +224,15 @@ check(
   minY !== null && minY > -0.15 && minY < 0.4,
   `preview do clipe FBX com pés no chão (min Y skinado = ${minY?.toFixed(3)}; antes do fix ≈ −0,9)`,
 );
+// diagnóstico de pose de descanso: o rest da anim (1º frame da dança, via
+// Blender) difere do bind do personagem → aviso com recomendação Mixamo
+const filesPanel = (await page3.textContent("#files")).replace(/\s+/g, " ");
+check(
+  /pose de descanso difere/.test(filesPanel) && /retarget no Mixamo/.test(filesPanel),
+  "aviso de pose de descanso + recomendação de retarget no Mixamo visíveis no painel de arquivos",
+);
 await page3.screenshot({ path: "shots/bug-depois-fix.png" });
+await page3.screenshot({ path: "shots/studio-7-restpose.png" });
 
 // offset Y manual por clipe: +0.3 sobe o personagem no preview
 await page3.fill(`#clips .clip[data-i="${idxFbx}"] [data-k=yoff]`, "0.3");
@@ -258,6 +269,60 @@ check(
   !mixResult.includes("✗") && !mixResult.includes("FALHOU"),
   "bake GLB+FBX validado (selftest com pé no chão POR CLIPE)",
 );
+
+// ---------------------------------------------------------------------------
+// Parte 4 — diagnóstico de MEMBRO CONGELADO ("perna manca"): um clipe de
+// locomoção cuja fonte não anima a perna esquerda deve ser acusado na lista
+// de clipes ANTES do bake. A fixture é gerada aqui (Walk do Soldier sem as
+// tracks da perna esquerda).
+
+console.log("--- parte 4: membro congelado (perna manca) ---");
+globalThis.FileReader = class {
+  readAsArrayBuffer(blob) {
+    blob.arrayBuffer().then((ab) => {
+      this.result = ab;
+      this.onloadend?.();
+    });
+  }
+  readAsDataURL(blob) {
+    blob.arrayBuffer().then((ab) => {
+      this.result = "data:application/octet-stream;base64," + Buffer.from(ab).toString("base64");
+      this.onloadend?.();
+    });
+  }
+};
+const { loadModelFile } = await import("../vat-core.mjs");
+const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
+const soldierG = await loadModelFile(resolve("tools/fixtures/Soldier.glb"), () => {});
+const walkClip = soldierG.animations.find((a) => a.name === "Walk").clone();
+walkClip.name = "walk-semperna";
+walkClip.tracks = walkClip.tracks.filter((t) => !/Left(UpLeg|Leg|Foot|Toe)/i.test(t.name));
+const frozenGlbPath = join(tmpdir(), "walk-semperna.glb");
+writeFileSync(
+  frozenGlbPath,
+  Buffer.from(
+    await new Promise((res, rej) =>
+      new GLTFExporter().parse(soldierG.scene, res, rej, { binary: true, animations: [walkClip] }),
+    ),
+  ),
+);
+
+const page4 = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page4.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
+page4.on("dialog", (d) => d.accept());
+await page4.goto("http://localhost:5198/", { waitUntil: "domcontentloaded" });
+await page4.setInputFiles("#filepick", [resolve("tools/fixtures/Soldier.glb"), frozenGlbPath]);
+await page4.waitForFunction(() => document.querySelectorAll("#clips .clip").length >= 5, null, { timeout: 60000 });
+const clipsPanel = (await page4.textContent("#clips")).replace(/\s+/g, " ");
+check(
+  /sem movimento: perna esq\./.test(clipsPanel) && /LeftUpLeg/.test(clipsPanel),
+  `aviso "sem movimento: perna esq. (LeftUpLeg…)" visível no clipe de locomoção`,
+);
+check(
+  !/Walk[^-].*sem movimento|sem movimento.*"Walk"/.test(clipsPanel.replace(/walk-semperna/g, "")),
+  "clipes saudáveis (Walk/Run/Idle) sem falso positivo",
+);
+await page4.screenshot({ path: "shots/studio-8-perna.png" });
 
 console.log(failed ? "E2E: FALHOU" : "E2E: OK");
 if (logs.some((l) => l.startsWith("[pageerror]"))) console.log(logs.filter((l) => l.startsWith("[pageerror]")).join("\n"));

@@ -367,6 +367,47 @@ export function measureBindPose(model) {
 
 const DECIMATE_FLAG_SETS = [[], ["Permissive"], ["Permissive", "Prune"]];
 
+/** Osso de maior peso de um vértice (índice no skeleton). −1 = sem skin. */
+function dominantBone(geometry, i) {
+  const si = geometry.attributes.skinIndex;
+  const sw = geometry.attributes.skinWeight;
+  if (!si || !sw) return -1;
+  let best = -Infinity;
+  let bone = -1;
+  for (let c = 0; c < 4; c++) {
+    const w = c === 0 ? sw.getX(i) : c === 1 ? sw.getY(i) : c === 2 ? sw.getZ(i) : sw.getW(i);
+    if (w > best) {
+      best = w;
+      bone = c === 0 ? si.getX(i) : c === 1 ? si.getY(i) : c === 2 ? si.getZ(i) : si.getW(i);
+    }
+  }
+  return bone;
+}
+
+/**
+ * Solda por posição RESPEITANDO o osso dominante: vértices coincidentes de
+ * ossos diferentes (pernas encostadas na bind pose, espelhos no x=0) NÃO se
+ * fundem — sem isso o simplificador pode colapsar através de membros e a
+ * animação "puxa" a perna/braço errado. Mesma semântica de igualdade exata
+ * do generatePositionRemap do meshopt, com o osso no critério.
+ */
+function weldByPositionAndBone(positions, geometry, count) {
+  const bits = new Uint32Array(positions.buffer, positions.byteOffset, count * 3);
+  const first = new Map();
+  const remap = new Uint32Array(count);
+  for (let i = 0; i < count; i++) {
+    const key = `${bits[i * 3]},${bits[i * 3 + 1]},${bits[i * 3 + 2]},${dominantBone(geometry, i)}`;
+    const seen = first.get(key);
+    if (seen === undefined) {
+      first.set(key, i);
+      remap[i] = i;
+    } else {
+      remap[i] = seen;
+    }
+  }
+  return remap;
+}
+
 export async function decimateModel(model, maxVerts, warn = console.warn) {
   if (!Number.isFinite(maxVerts) || maxVerts < 24)
     err(`alvo de decimação inválido: ${maxVerts} (mínimo 24 vértices)`);
@@ -379,6 +420,10 @@ export async function decimateModel(model, maxVerts, warn = console.warn) {
   const fromTris = model.drawIndices.length / 3;
   let worstError = 0;
   let base = 0;
+  // contagem de vértices por região ANTES/DEPOIS (região = osso dominante):
+  // detecta redução desproporcional num membro ("a perna sumiu")
+  const regionBefore = new Map();
+  const regionAfter = new Map();
 
   for (const mi of model.meshInfos) {
     if (mi.pick) err("decimação dupla não suportada (recarregue o modelo)");
@@ -390,8 +435,18 @@ export async function decimateModel(model, maxVerts, warn = console.warn) {
       positions[i * 3 + 1] = posAttr.getY(i);
       positions[i * 3 + 2] = posAttr.getZ(i);
     }
+    const bones = mi.mesh.skeleton?.bones ?? [];
+    const regionOf = (i) => {
+      const b = dominantBone(mi.mesh.geometry, i);
+      return b >= 0 ? boneRegion(bones[b]?.name ?? "") : null;
+    };
+    for (let i = 0; i < count; i++) {
+      const r = regionOf(i);
+      if (r) regionBefore.set(r, (regionBefore.get(r) ?? 0) + 1);
+    }
+
     const srcIdx = mi.indexArray;
-    const remap = MeshoptSimplifier.generatePositionRemap(positions, 3);
+    const remap = weldByPositionAndBone(positions, mi.mesh.geometry, count);
     const welded = new Uint32Array(srcIdx.length);
     for (let i = 0; i < srcIdx.length; i++) welded[i] = remap[srcIdx[i]];
 
@@ -438,6 +493,10 @@ export async function decimateModel(model, maxVerts, warn = console.warn) {
     const localOf = new Map(usedSorted.map((orig, i) => [orig, i]));
     const newLocal = new Uint32Array(indices.length);
     for (let i = 0; i < indices.length; i++) newLocal[i] = localOf.get(indices[i]);
+    for (const orig of usedSorted) {
+      const r = regionOf(orig);
+      if (r) regionAfter.set(r, (regionAfter.get(r) ?? 0) + 1);
+    }
     mi.pick = Uint32Array.from(usedSorted);
     mi.indexArray = newLocal;
     mi.base = base;
@@ -448,12 +507,31 @@ export async function decimateModel(model, maxVerts, warn = console.warn) {
   rebuildDrawIndices(model);
   if (model.uniqueCount > maxVerts)
     warn(`decimação parou em ${model.uniqueCount} vértices (alvo ${maxVerts}) — topologia não permitiu mais colapsos`);
+
+  // Sobrevivência por região vs geral: um membro reduzido muito além do
+  // resto perde silhueta/skinning ("perna manca" pós-redução) — aviso.
+  const overall = model.uniqueCount / fromVerts;
+  const regionWarnings = [];
+  for (const [region, before] of regionBefore) {
+    if (before < 60) continue; // região minúscula — estatística sem valor
+    const after = regionAfter.get(region) ?? 0;
+    const ratio = after / before;
+    if (ratio < overall * 0.45)
+      regionWarnings.push(
+        `redução desproporcional em ${region}: sobraram ${after} de ${before} vértices ` +
+          `(${(ratio * 100).toFixed(1)}% vs ${(overall * 100).toFixed(1)}% no geral) — ` +
+          `considere reduzir menos ou re-exportar com malha mais uniforme`,
+      );
+  }
+  for (const w of regionWarnings) warn(w);
+
   return {
     from: fromVerts,
     to: model.uniqueCount,
     fromTriangles: fromTris,
     triangles: model.drawIndices.length / 3,
     error: +worstError.toFixed(4),
+    ...(regionWarnings.length ? { regionWarnings } : {}),
   };
 }
 
@@ -1001,6 +1079,9 @@ export function writeOutput({
       // ajuste MANUAL na UI/CLI (já incluído nas posições assadas).
       groundOffset: norm.perClip?.[i]?.groundOffset ?? 0,
       ...(norm.perClip?.[i]?.yOffsetBaked ? { yOffset: norm.perClip[i].yOffsetBaked } : {}),
+      // regiões sem movimento detectadas no bake (aviso persistido — o
+      // selftest confere e o app pode decidir não usar o clipe)
+      ...(e.frozenRegions ? { frozenRegions: e.frozenRegions } : {}),
     })),
     files: {
       positions: "positions_f16.bin",
@@ -1065,6 +1146,22 @@ export async function bakeToDir(cfg, hooks) {
   }
 
   const entries = hooks.selectEntries(files, model);
+
+  // Juntas congeladas por clipe (osso core sem track/constante num clipe de
+  // movimento — "perna manca"): detectado AQUI (com esqueleto em mãos),
+  // gravado no descriptor e cobrado pelo selftest.
+  const normMapFrozen = buildNormMap(model);
+  for (const e of entries) {
+    const frozen = frozenBonesByRegion(e.clip, model, normMapFrozen);
+    if (Object.keys(frozen).length === 0) continue;
+    e.frozenRegions = frozen;
+    warn(
+      `clipe "${e.name}": sem movimento em ${Object.entries(frozen)
+        .map(([r, b]) => `${r} (${b.join(", ")})`)
+        .join(" · ")} — membro congelado no bake (fonte sem esses ossos?)`,
+    );
+  }
+
   const { topology, width } = decideTopology(model, requestedTopology);
   const meshHash = computeMeshHash(model);
   info({
@@ -1162,6 +1259,135 @@ export async function bakeToDir(cfg, hooks) {
 }
 
 // ---------------------------------------------------------------------------
+// Regiões do corpo (nomenclatura Mixamo e afins) — para os diagnósticos
+// falarem "perna esquerda" em vez de listar 12 nomes de osso.
+
+const REGION_PATTERNS = [
+  ["mão esq.", /left.*(hand(?!.*(thumb|index|middle|ring|pinky))|thumb|index|middle|ring|pinky)/i],
+  ["mão dir.", /right.*(hand(?!.*(thumb|index|middle|ring|pinky))|thumb|index|middle|ring|pinky)/i],
+  ["braço esq.", /left.*(shoulder|arm|clavicle|elbow)/i],
+  ["braço dir.", /right.*(shoulder|arm|clavicle|elbow)/i],
+  ["perna esq.", /left.*(upleg|leg|knee|foot|toe|ankle)/i],
+  ["perna dir.", /right.*(upleg|leg|knee|foot|toe|ankle)/i],
+  ["cabeça", /head|neck|eye|jaw/i],
+  ["coluna", /spine|chest|hips|pelvis|root/i],
+];
+
+/** Região do corpo de um osso (pelo nome). null = não classificado. */
+export function boneRegion(name) {
+  const n = String(name);
+  for (const [region, re] of REGION_PATTERNS) if (re.test(n)) return region;
+  return null;
+}
+
+/** Regiões "core" para avisos de animação (dedos/olhos são ruído). */
+const CORE_REGIONS = new Set(["braço esq.", "braço dir.", "perna esq.", "perna dir.", "coluna", "cabeça"]);
+const isCoreBone = (name) => {
+  const r = boneRegion(name);
+  return r !== null && CORE_REGIONS.has(r) && !/eye|jaw|_end$|end\d*$/i.test(name);
+};
+
+/** Nome curto (sem prefixo mixamorig/armature) para exibição. */
+const shortBoneName = (name) => String(name).replace(/^(mixamorig:?|armature[|_]?)/i, "");
+
+/**
+ * Compara a POSE DE DESCANSO de dois rigs pelas DIREÇÕES dos ossos
+ * (junta → filho homônimo, em mundo) — invariante à convenção de frames
+ * (que difere entre exports) e sensível ao que importa: T-pose vs A-pose,
+ * braços em outra posição etc. Um descanso diferente distorce o retarget
+ * (o rebase mapeia descanso→descanso): braços cruzam/invertem.
+ * Retorna { checked, pairs, worst: [{bone, region, deg}] } ou null.
+ */
+export function compareRestPose(srcScene, dstScene, resolveDstName) {
+  const dirsOf = (scene) => {
+    scene.updateMatrixWorld(true);
+    const out = new Map();
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    scene.traverse((o) => {
+      if (!o.isBone) return;
+      for (const c of o.children) {
+        if (!c.isBone) continue;
+        o.getWorldPosition(a);
+        c.getWorldPosition(b);
+        const d = b.sub(a);
+        if (d.length() > 1e-6) out.set(`${o.name}→${c.name}`, d.normalize().clone());
+      }
+    });
+    return out;
+  };
+  const src = dirsOf(srcScene);
+  const dst = dirsOf(dstScene);
+  const deltas = [];
+  for (const [key, vSrc] of src) {
+    const [pName, cName] = key.split("→");
+    if (!isCoreBone(pName)) continue;
+    const dp = resolveDstName(pName);
+    const dc = resolveDstName(cName);
+    if (!dp || !dc) continue;
+    const vDst = dst.get(`${dp}→${dc}`);
+    if (!vDst) continue;
+    const deg = (Math.acos(Math.min(1, Math.max(-1, vSrc.dot(vDst)))) * 180) / Math.PI;
+    deltas.push({ bone: shortBoneName(pName), region: boneRegion(pName), deg: +deg.toFixed(1) });
+  }
+  if (deltas.length < 4) return null;
+  deltas.sort((x, y) => y.deg - x.deg);
+  return { checked: true, pairs: deltas.length, worst: deltas.slice(0, 6) };
+}
+
+/** Limiar: acima disso a pose de descanso é "outra" (T vs A ≈ 30–60°). */
+export const REST_POSE_WARN_DEG = 25;
+
+/**
+ * Ossos CORE do rig destino sem movimento num clipe DE MOVIMENTO: sem track
+ * de rotação, ou com track ~constante enquanto a mediana dos outros ossos se
+ * mexe bastante (juntas congeladas = "perna manca" visível antes do bake).
+ * Clipes calmos (idle sutil, poses) não disparam — o corte é relativo à
+ * mediana de movimento do próprio clipe. Retorna
+ * { 'perna esq.': ['LeftLeg', …], … } (nomes curtos) ou {}.
+ */
+export function frozenBonesByRegion(clip, model, normMap) {
+  // amplitude de rotação (graus vs 1º keyframe) por osso do DESTINO
+  const motionDeg = new Map();
+  for (const track of clip.tracks) {
+    const parsed = THREE.PropertyBinding.parseTrackName(track.name);
+    if (parsed.propertyName !== "quaternion") continue;
+    let dstName = null;
+    if (model.boneNames.has(parsed.nodeName)) dstName = parsed.nodeName;
+    else {
+      const remap = normMap.get(normalizeName(parsed.nodeName));
+      if (remap && model.boneNames.has(remap)) dstName = remap;
+    }
+    if (!dstName || !isCoreBone(dstName)) continue;
+    const v = track.values;
+    let minDot = 1;
+    for (let i = 4; i < v.length; i += 4) {
+      const dot = Math.abs(v[0] * v[i] + v[1] * v[i + 1] + v[2] * v[i + 2] + v[3] * v[i + 3]);
+      if (dot < minDot) minDot = dot;
+    }
+    const deg = (2 * Math.acos(Math.min(1, minDot)) * 180) / Math.PI;
+    motionDeg.set(dstName, Math.max(motionDeg.get(dstName) ?? 0, deg));
+  }
+  if (motionDeg.size === 0) return {};
+
+  // O clipe "se move"? Usa o percentil 75 (não a mediana): remover uma perna
+  // inteira derruba a mediana e esconderia exatamente o caso que procuramos.
+  const degs = [...motionDeg.values()].sort((a, b) => a - b);
+  const p75 = degs[Math.floor((degs.length - 1) * 0.75)];
+  if (p75 < 12) return {}; // clipe calmo (idle/pose) — nada a acusar
+
+  const thresh = Math.max(2, p75 * 0.06);
+  const frozen = {};
+  for (const name of model.boneNames) {
+    if (!isCoreBone(name)) continue;
+    if ((motionDeg.get(name) ?? 0) >= thresh) continue;
+    const region = boneRegion(name);
+    (frozen[region] ??= []).push(shortBoneName(name));
+  }
+  return frozen;
+}
+
+// ---------------------------------------------------------------------------
 // Análise (Studio): o que o modelo e os clipes são, ANTES de qualquer bake.
 
 export async function analyzeFiles(paths, warn = console.warn) {
@@ -1197,7 +1423,11 @@ export async function analyzeFiles(paths, warn = console.warn) {
     return n;
   };
 
+  const resolveDstName = (srcName) =>
+    model.nodeNames.has(srcName) ? srcName : normMap.get(normalizeName(srcName)) ?? null;
+
   const clips = [];
+  const fileDiags = [];
   const used = new Set();
   const unitsCache = new Map();
   files.forEach((f, fi) => {
@@ -1205,6 +1435,24 @@ export async function analyzeFiles(paths, warn = console.warn) {
     // rootTravel medido nas tracks para metros — o limiar do "andar no
     // lugar" compara com a altura (metros) e vale para qualquer fonte
     const worldScale = worldScaleOf(restMapsFor(f.gltf.scene, unitsCache));
+
+    // pose de descanso da fonte vs a do personagem (braços cruzados/invertidos
+    // vêm daqui: T-pose vs A-pose → o rebase descanso→descanso distorce)
+    let restPose = null;
+    if (f.gltf.scene !== model.scene) {
+      const cmp = compareRestPose(f.gltf.scene, model.scene, resolveDstName);
+      if (cmp) {
+        const offenders = cmp.worst.filter((w) => w.deg > REST_POSE_WARN_DEG);
+        restPose = {
+          pairs: cmp.pairs,
+          maxDeg: cmp.worst[0]?.deg ?? 0,
+          mismatch: offenders.length > 0,
+          worst: offenders.slice(0, 4),
+        };
+      }
+    }
+    fileDiags.push({ file: fi, source: basename(f.path), restPose });
+
     (f.gltf.animations ?? []).forEach((clip, ci) => {
       const name = suggestClipName(clip, f.path, used, clips.length);
       used.add(name.toLowerCase());
@@ -1217,6 +1465,9 @@ export async function analyzeFiles(paths, warn = console.warn) {
         tracks: clip.tracks.length,
         matchedTracks: countMatched(clip, f.gltf.scene !== model.scene),
         rootTravel: +(measureRootTravel(clip, model.rootBoneNames) * worldScale).toFixed(4),
+        // ossos core do DESTINO sem movimento neste clipe ("perna manca"
+        // detectável antes do bake), agrupados por região
+        frozen: frozenBonesByRegion(clip, model, normMap),
         source: basename(f.path),
       });
     });
@@ -1240,6 +1491,8 @@ export async function analyzeFiles(paths, warn = console.warn) {
     // /api/estimate devolve o hash pós-redução).
     meshHash: computeMeshHash(model),
     clips,
+    // diagnósticos por arquivo (restPose: null quando não comparável)
+    fileDiags,
   };
 }
 
@@ -1386,6 +1639,21 @@ export function runSelftest(outDir) {
     wrap <= limit
       ? ok(`loop "${clip.name}": wrap ${wrap.toFixed(4)} ≤ ${limit.toFixed(4)} (passo máx interframe ${ref.toFixed(4)})`)
       : bad(`loop "${clip.name}" não fecha: wrap ${wrap.toFixed(4)} > ${limit.toFixed(4)} — fonte não é cíclica? marque one-shot ou use outro clipe`);
+  }
+
+  // 5b. juntas congeladas: detecção autoritativa acontece no BAKE (variância
+  // ~0 na track de um osso core em clipe de movimento — frozenBonesByRegion)
+  // e fica persistida em clips[].frozenRegions; aqui o selftest cobra.
+  for (const clip of desc.clips) {
+    if (!clip.frozenRegions || Object.keys(clip.frozenRegions).length === 0) {
+      ok(`sem juntas congeladas em "${clip.name}"`);
+      continue;
+    }
+    bad(
+      `"${clip.name}" assado com membro congelado: ${Object.entries(clip.frozenRegions)
+        .map(([r, b]) => `${r} (${b.join(", ")})`)
+        .join(" · ")} — a fonte não anima esses ossos ("perna manca"); refaça o download/export com o esqueleto completo`,
+    );
   }
 
   // 6. rootMotion (se exportado): 1 amostra [x,y,z] por frame, clipes existem
