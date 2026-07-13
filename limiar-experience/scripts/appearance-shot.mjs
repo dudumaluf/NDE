@@ -8,6 +8,8 @@ import { chromium } from "playwright-core";
 
 const url = process.argv[2] ?? "http://localhost:5199/?leva=0";
 const out = process.argv[3] ?? "shots/appearance.png";
+// Paths ANTIGOS (pré-tradução) de propósito: provam a migração de grupos
+// do prefs.ts (Aparência.* → Appearance.*) junto com o override visual.
 const values = process.argv[4]
   ? JSON.parse(process.argv[4])
   : {

@@ -30,7 +30,7 @@ function collectLevaValues(): Record<string, unknown> {
   const data = levaStore.getData();
   const out: Record<string, unknown> = {};
   for (const [path, item] of Object.entries(data)) {
-    if (path.startsWith("Preferências.")) continue;
+    if (path.startsWith("Preferences.")) continue;
     if ("value" in item) out[path] = (item as { value: unknown }).value;
   }
   return out;
@@ -57,43 +57,43 @@ function download(name: string, text: string): void {
 
 export function PrefsControls() {
   const [, set] = useControls(
-    "Preferências",
+    "Preferences",
     () => ({
-      "salvar como padrão": button(() => {
+      "save as default": button(() => {
         const values = collectLevaValues();
         const blob = savePrefs(values);
         set({
           status: blob
-            ? `salvo ✓ ${Object.keys(values).length} valores — grudam no reload`
-            : "falhou (localStorage cheio/bloqueado)",
+            ? `saved ✓ ${Object.keys(values).length} values — stick across reloads`
+            : "failed (localStorage full/blocked)",
         });
       }),
-      "restaurar fábrica": button(() => {
+      "restore factory": button(() => {
         clearPrefs();
         location.reload();
       }),
-      "exportar (clipboard + arquivo)": button(() => {
+      "export (clipboard + file)": button(() => {
         const blob = savePrefs(collectLevaValues());
         if (!blob) {
-          set({ status: "falhou (localStorage cheio/bloqueado)" });
+          set({ status: "failed (localStorage full/blocked)" });
           return;
         }
         const text = blobToText(blob);
         download("tuning.json", text);
         navigator.clipboard
           ?.writeText(text)
-          .then(() => set({ status: "exportado ✓ clipboard + tuning.json" }))
-          .catch(() => set({ status: "exportado ✓ tuning.json (clipboard negado)" }));
+          .then(() => set({ status: "exported ✓ clipboard + tuning.json" }))
+          .catch(() => set({ status: "exported ✓ tuning.json (clipboard denied)" }));
       }),
       colar: {
         value: "",
-        label: "importar: colar JSON",
+        label: "import: paste JSON",
         rows: 3,
       },
-      importar: button((get) => {
-        const text = String(get("Preferências.colar") ?? "").trim();
+      import: button((get) => {
+        const text = String(get("Preferences.colar") ?? "").trim();
         if (!text) {
-          set({ status: "cole o JSON exportado na caixa acima" });
+          set({ status: "paste the exported JSON in the box above" });
           return;
         }
         try {
@@ -103,11 +103,11 @@ export function PrefsControls() {
           // (try/catch por chave dentro do set) — merge tolerante.
           levaStore.set(blob.values, false);
           set({
-            status: `importado ✓ ${Object.keys(blob.values).length} valores (já é o padrão)`,
+            status: `imported ✓ ${Object.keys(blob.values).length} values (now the default)`,
             colar: "",
           });
         } catch (e) {
-          set({ status: `inválido: ${(e as Error).message}` });
+          set({ status: `invalid: ${(e as Error).message}` });
         }
       }),
       status: { value: "—", label: "status", editable: false },

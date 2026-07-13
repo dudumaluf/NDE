@@ -21,6 +21,36 @@ import { qpBool, qpHas, qpNum, qpStr } from "./urlParams";
 export const PREFS_VERSION = 1;
 const STORAGE_KEY = "limiar.tuning";
 
+/**
+ * Migração de paths (2026-07-13): o painel foi traduzido para inglês e os
+ * GRUPOS do leva mudaram de nome — o path salvo é "Grupo.key", então blobs
+ * antigos precisam do prefixo re-escrito na leitura (as keys internas não
+ * mudaram). Vale para o localStorage E para tuning.json importado.
+ */
+const GROUP_RENAMES: readonly [string, string][] = [
+  ["Multidão.", "Crowd."],
+  ["Simulação.", "Simulation."],
+  ["Estados (por agente).", "States (per agent)."],
+  ["Estados (morph seamless).", "States (seamless morph)."],
+  ["Dados (M3).", "Data (M3)."],
+  ["Lente demográfica.", "Demographic lens."],
+  ["Cena.", "Scene."],
+  ["Personagem.", "Character."],
+  ["Aparência.", "Appearance."],
+  ["Preferências.", "Preferences."],
+];
+
+function migrateValues(values: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [path, v] of Object.entries(values)) {
+    const hit = GROUP_RENAMES.find(([old]) => path.startsWith(old));
+    // Path novo já presente vence o migrado (`?? =` não sobrescreve).
+    const key = hit ? hit[1] + path.slice(hit[0].length) : path;
+    if (!(key in out) || key === path) out[key] = v;
+  }
+  return out;
+}
+
 export interface PrefsBlob {
   app: "limiar-tuning";
   version: number;
@@ -50,7 +80,7 @@ export function savedBlob(): PrefsBlob | null {
       const t = localStorage.getItem(STORAGE_KEY);
       if (t) {
         const j: unknown = JSON.parse(t);
-        if (isBlob(j)) cache = j;
+        if (isBlob(j)) cache = { ...j, values: migrateValues(j.values) };
         else console.warn("[prefs] blob salvo inválido — usando fábrica");
       }
     } catch {
@@ -147,5 +177,5 @@ export function parseBlobText(text: string): PrefsBlob {
       `[prefs] blob de versão ${j.version} > ${PREFS_VERSION} — importando por chave, tolerante`,
     );
   }
-  return j;
+  return { ...j, values: migrateValues(j.values) };
 }

@@ -15,8 +15,8 @@ export const SCENE_MODES = ["multidao", "personagem"] as const;
 export type SceneMode = (typeof SCENE_MODES)[number];
 
 export function initialSceneMode(): SceneMode {
-  // qp `scene` > padrão salvo (grupo Preferências) > fábrica.
-  const saved = pref<SceneMode>("Cena.modo", "multidao", SCENE_MODES);
+  // qp `scene` > padrão salvo (grupo Preferences) > fábrica.
+  const saved = pref<SceneMode>("Scene.modo", "multidao", SCENE_MODES);
   return qpStr<SceneMode>("scene", saved, SCENE_MODES);
 }
 
@@ -31,8 +31,16 @@ export function initialSceneMode(): SceneMode {
  * desliga de verdade; aqui não se declara mais `<fog>`.
  */
 export function Scene() {
-  const { modo } = useControls("Cena", {
-    modo: { value: initialSceneMode(), options: [...SCENE_MODES] },
+  const { modo } = useControls("Scene", {
+    modo: {
+      value: initialSceneMode(),
+      // Valores internos (e ?scene=) seguem PT; rótulos EN só no painel.
+      options: { crowd: "multidao", character: "personagem" } as Record<
+        string,
+        SceneMode
+      >,
+      label: "mode",
+    },
   });
 
   const fundo = useAppearance((s) => s.fundo);

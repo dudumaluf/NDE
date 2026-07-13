@@ -57,250 +57,262 @@ export function CrowdMesh() {
   );
 
   // Defaults dos controles passam por pref(): padrão salvo (grupo
-  // Preferências) sobrescreve a fábrica; query param na URL vence os dois.
-  const c = useControls("Multidão", {
+  // Preferences) sobrescreve a fábrica; query param na URL vence os dois.
+  // Painel em INGLÊS (pedido do Dudu, 2026-07-13); valores/keys internos e
+  // query params ficam como eram — só o que se LÊ muda (ver Docs/06).
+  const c = useControls("Crowd", {
     grid: {
-      value: Math.min(prefNum("grid", "Multidão.grid", 32), MAX_GRID),
+      value: Math.min(prefNum("grid", "Crowd.grid", 32), MAX_GRID),
       min: 4,
       max: MAX_GRID,
       step: 4,
-      label: "grade (N×N)",
+      label: "grid (N×N)",
     },
     area: {
-      value: prefNum("area", "Multidão.area", 40),
+      value: prefNum("area", "Crowd.area", 40),
       min: 10,
       max: 80,
-      label: "área spawn",
+      label: "spawn area",
     },
-    ruido: { value: pref("Multidão.ruido", 0.6), min: 0, max: 2, label: "ruído de spawn" },
-    seed: { value: pref("Multidão.seed", 3), min: 1, max: 9999, step: 1 },
-    escala: { value: pref("Multidão.escala", 2.5), min: 0.5, max: 5, label: "escala pessoa" },
-    paleta: { value: pref("Multidão.paleta", true), label: "cores (vs. dormentes)" },
+    ruido: { value: pref("Crowd.ruido", 0.6), min: 0, max: 2, label: "spawn noise" },
+    seed: { value: pref("Crowd.seed", 3), min: 1, max: 9999, step: 1, label: "seed" },
+    escala: { value: pref("Crowd.escala", 2.5), min: 0.5, max: 5, label: "person scale" },
+    paleta: { value: pref("Crowd.paleta", true), label: "palette (vs. dormant)" },
     soHistorias: {
-      value: prefBool("onlyPeople", "Multidão.soHistorias", false),
-      label: "só quem tem história",
-      hint: "esconde os dormentes: desenha só os primeiros 46 slots (as pessoas reais do manifest) — a sim continua inteira, os fios e labels seguem válidos",
+      value: prefBool("onlyPeople", "Crowd.soHistorias", false),
+      label: "only people with stories",
+      hint: "hides the dormant agents: draws only the first slots (the real people in the manifest) — the sim keeps running for everyone, wires and labels stay valid",
     },
     reset: button(() => {
       resetRef.current = true;
     }),
   });
 
-  const s = useControls("Simulação", {
+  const s = useControls("Simulation", {
     maxSpeed: {
-      value: prefNum("speed2", "Simulação.maxSpeed", 0.8),
+      value: prefNum("speed2", "Simulation.maxSpeed", 0.8),
       min: 0,
       max: 3,
-      label: "velocidade máx",
+      label: "max speed",
     },
-    wander: { value: pref("Simulação.wander", 1), min: 0, max: 3, label: "wander (peso)" },
+    wander: { value: pref("Simulation.wander", 1), min: 0, max: 3, label: "wander (weight)" },
     wanderScale: {
-      value: pref("Simulação.wanderScale", 0.12),
+      value: pref("Simulation.wanderScale", 0.12),
       min: 0.005,
       max: 0.4,
-      label: "wander escala",
+      label: "wander scale",
     },
     wanderEvolve: {
-      value: pref("Simulação.wanderEvolve", 0.12),
+      value: pref("Simulation.wanderEvolve", 0.12),
       min: 0,
       max: 0.5,
-      label: "wander evolução",
+      label: "wander evolution",
     },
     separacao: {
-      value: prefNum("sep", "Simulação.separacao", 1.6),
+      value: prefNum("sep", "Simulation.separacao", 1.6),
       min: 0,
       max: 4,
-      label: "separação (peso)",
+      label: "separation (weight)",
     },
-    sepRaio: { value: pref("Simulação.sepRaio", 0.7), min: 0.1, max: 2.5, label: "separação raio" },
+    sepRaio: { value: pref("Simulation.sepRaio", 0.7), min: 0.1, max: 2.5, label: "separation radius" },
     contRaio: {
-      value: prefNum("contain", "Simulação.contRaio", 21),
+      value: prefNum("contain", "Simulation.contRaio", 21),
       min: 5,
       max: 45,
-      label: "contenção raio",
+      label: "containment radius",
     },
     mouseModo: {
-      value: prefStr<MouseMode>("mouse", "Simulação.mouseModo", "atrair", [
+      value: prefStr<MouseMode>("mouse", "Simulation.mouseModo", "atrair", [
         "off",
         "atrair",
         "repelir",
       ]),
-      options: ["off", "atrair", "repelir"] as MouseMode[],
+      // Valores internos (e da URL ?mouse=) seguem PT; só o rótulo é EN.
+      options: { off: "off", attract: "atrair", repel: "repelir" } as Record<
+        string,
+        MouseMode
+      >,
       label: "mouse",
     },
     mouseRaio: {
-      value: prefNum("mouseR", "Simulação.mouseRaio", 7),
+      value: prefNum("mouseR", "Simulation.mouseRaio", 7),
       min: 1,
       max: 30,
-      label: "mouse raio",
+      label: "mouse radius",
     },
-    mouseForca: { value: pref("Simulação.mouseForca", 1.2), min: 0, max: 4, label: "mouse força" },
-    giro: { value: pref("Simulação.giro", 6), min: 0.5, max: 20, label: "giro (suavidade)" },
-    passo: { value: pref("Simulação.passo", 34), min: 5, max: 90, label: "passo/unidade" },
+    mouseForca: { value: pref("Simulation.mouseForca", 1.2), min: 0, max: 4, label: "mouse force" },
+    giro: { value: pref("Simulation.giro", 6), min: 0.5, max: 20, label: "turn smoothing" },
+    passo: { value: pref("Simulation.passo", 34), min: 5, max: 90, label: "stride/unit" },
     faceFlip: {
-      value: prefBool("faceflip", "Simulação.faceFlip", false),
-      label: "inverter facing",
+      value: prefBool("faceflip", "Simulation.faceFlip", false),
+      label: "flip facing",
     },
     debug: {
       value: prefStr<"off" | "velocidade" | "direção" | "alvo" | "estado">(
         "debug",
-        "Simulação.debug",
+        "Simulation.debug",
         "off",
         ["off", "velocidade", "direção", "alvo", "estado"],
       ),
-      options: ["off", "velocidade", "direção", "alvo", "estado"],
-      label: "debug cor",
+      options: {
+        off: "off",
+        speed: "velocidade",
+        direction: "direção",
+        target: "alvo",
+        state: "estado",
+      },
+      label: "debug color",
     },
   });
 
   // --- Estados por agente (doc 04 §5.5): a animação lê a física ---
   // Transições parado⇄andando⇄correndo pela velocidade REAL (histerese);
   // chegada assenta em idle/rezar; onda de chegada; dormentes contemplativos.
-  // Master off = modo global antigo (botões "Estados (morph seamless)").
-  const e = useControls("Estados (por agente)", {
+  // Master off = modo global antigo (botões "States (seamless morph)").
+  // Guia de uso dos parâmetros: Docs/06-guia-estados-animacao.md.
+  const e = useControls("States (per agent)", {
     auto: {
-      value: prefBool("estados", "Estados (por agente).auto", true),
-      label: "estados automáticos",
+      value: prefBool("estados", "States (per agent).auto", true),
+      label: "automatic states",
     },
     v0: {
-      value: prefNum("v0", "Estados (por agente).v0", 0.12),
+      value: prefNum("v0", "States (per agent).v0", 0.12),
       min: 0.01,
       max: 0.6,
-      label: "v0 parado⇄andar",
+      label: "v0 idle⇄walk",
     },
     v1: {
-      value: prefNum("v1", "Estados (por agente).v1", 1.15),
+      value: prefNum("v1", "States (per agent).v1", 1.15),
       min: 0.2,
       max: 3,
-      label: "v1 andar⇄correr",
+      label: "v1 walk⇄run",
     },
     histerese: {
-      value: pref("Estados (por agente).histerese", 0.12),
+      value: pref("States (per agent).histerese", 0.12),
       min: 0,
       max: 0.3,
-      label: "histerese (±)",
+      label: "hysteresis (±)",
     },
     fadeEstado: {
-      value: pref("Estados (por agente).fadeEstado", 0.3),
+      value: pref("States (per agent).fadeEstado", 0.3),
       min: 0.1,
       max: 1,
       label: "crossfade (s)",
     },
     pesoIdle: {
-      value: pref("Estados (por agente).pesoIdle", 1),
+      value: pref("States (per agent).pesoIdle", 1),
       min: 0,
       max: 4,
-      label: "assentar: peso idle",
+      label: "settle: idle weight",
     },
     pesoRezar: {
-      value: pref("Estados (por agente).pesoRezar", 0.6),
+      value: pref("States (per agent).pesoRezar", 0.6),
       min: 0,
       max: 4,
-      label: "assentar: peso rezar",
+      label: "settle: pray weight",
     },
     onda: {
-      value: prefNum("onda", "Estados (por agente).onda", 0.9),
+      value: prefNum("onda", "States (per agent).onda", 0.9),
       min: 0,
       max: 3,
-      label: "onda de chegada",
+      label: "arrival wave",
     },
     pausas: {
-      value: prefNum("pausas", "Estados (por agente).pausas", 0.45),
+      value: prefNum("pausas", "States (per agent).pausas", 0.45),
       min: 0,
       max: 1,
-      label: "pausas de wander",
+      label: "wander pauses",
     },
     dormVel: {
-      value: pref("Estados (por agente).dormVel", 0.7),
+      value: pref("States (per agent).dormVel", 0.7),
       min: 0.2,
       max: 1.5,
-      label: "dormentes: velocidade ×",
+      label: "dormant: speed ×",
     },
     dormWander: {
-      value: pref("Estados (por agente).dormWander", 0.8),
+      value: pref("States (per agent).dormWander", 0.8),
       min: 0.2,
       max: 1.5,
-      label: "dormentes: wander ×",
+      label: "dormant: wander ×",
     },
   });
 
   // --- M3: o Campo dirigido pelos dados reais (só aparece com content/) ---
-  const lensOptions = useMemo(
-    () =>
-      content
-        ? [NO_LENS, ...content.taxonomy.elementos.map((e) => e.key)]
-        : [NO_LENS],
-    [content],
-  );
+  // Rótulo "none" para NO_LENS; as keys dos elementos são dados (ficam PT).
+  const lensOptions = useMemo(() => {
+    const opts: Record<string, string> = { none: NO_LENS };
+    if (content) for (const el of content.taxonomy.elementos) opts[el.key] = el.key;
+    return opts;
+  }, [content]);
   const [d, setD] = useControls(
-    "Dados (M3)",
+    "Data (M3)",
     () => ({
       gravidade: {
-        value: prefBool("gravity", "Dados (M3).gravidade", false),
-        label: "gravidade (UMAP)",
+        value: prefBool("gravity", "Data (M3).gravidade", false),
+        label: "gravity (UMAP)",
       },
       mapScale: {
-        value: prefNum("mapScale", "Dados (M3).mapScale", 14),
+        value: prefNum("mapScale", "Data (M3).mapScale", 14),
         min: 4,
         max: 30,
-        label: "escala do mapa",
+        label: "map scale",
       },
       gravForca: {
-        value: prefNum("gravForca", "Dados (M3).gravForca", 2.2),
+        value: prefNum("gravForca", "Data (M3).gravForca", 2.2),
         min: 0.3,
         max: 6,
-        label: "gravidade força",
+        label: "gravity force",
       },
       lente: {
-        value: prefStr("lens", "Dados (M3).lente", NO_LENS),
+        value: prefStr("lens", "Data (M3).lente", NO_LENS),
         options: lensOptions,
-        label: "lente (elemento)",
+        label: "lens (element)",
       },
-      fios: { value: prefBool("wires", "Dados (M3).fios", true), label: "fios (grafo)" },
+      fios: { value: prefBool("wires", "Data (M3).fios", true), label: "wires (graph)" },
       fiosAlpha: {
-        value: prefNum("wiresAlpha", "Dados (M3).fiosAlpha", 0.22),
+        value: prefNum("wiresAlpha", "Data (M3).fiosAlpha", 0.22),
         min: 0,
         max: 0.5,
-        label: "fios alpha",
+        label: "wires alpha",
       },
       fiosAltura: {
-        value: pref("Dados (M3).fiosAltura", 1.05),
+        value: pref("Data (M3).fiosAltura", 1.05),
         min: 0,
         max: 2,
-        label: "fios altura",
+        label: "wires height",
       },
       // --- leitura visual (M3.5) ---
       fiosFadePerto: {
-        value: prefNum("wiresNear", "Dados (M3).fiosFadePerto", 6),
+        value: prefNum("wiresNear", "Data (M3).fiosFadePerto", 6),
         min: 0.5,
         max: 25,
-        label: "fios fade: perto",
+        label: "wires fade: near",
       },
       fiosFadeLonge: {
-        value: prefNum("wiresFar", "Dados (M3).fiosFadeLonge", 14),
+        value: prefNum("wiresFar", "Data (M3).fiosFadeLonge", 14),
         min: 2,
         max: 45,
-        label: "fios fade: longe",
+        label: "wires fade: far",
       },
       fiosPeso: {
-        value: prefNum("wiresGamma", "Dados (M3).fiosPeso", 1.6),
+        value: prefNum("wiresGamma", "Data (M3).fiosPeso", 1.6),
         min: 0.4,
         max: 4,
-        label: "fios peso (gama)",
+        label: "wires weight (gamma)",
       },
       fiosSoNucleos: {
-        value: prefBool("wiresFormed", "Dados (M3).fiosSoNucleos", false),
-        label: "fios só núcleos formados",
+        value: prefBool("wiresFormed", "Data (M3).fiosSoNucleos", false),
+        label: "wires only formed clusters",
       },
       palavras: {
-        value: prefBool("labels", "Dados (M3).palavras", true),
-        label: "palavras (núcleos)",
+        value: prefBool("labels", "Data (M3).palavras", true),
+        label: "words (clusters)",
       },
       formRaio: {
-        value: prefNum("formRaio", "Dados (M3).formRaio", 2.4),
+        value: prefNum("formRaio", "Data (M3).formRaio", 2.4),
         min: 0.8,
         max: 8,
-        label: "formação raio (coesão)",
+        label: "formation radius (cohesion)",
       },
     }),
     [lensOptions],
@@ -308,20 +320,20 @@ export function CrowdMesh() {
 
   // --- Lentes demográficas: eixos não-fenomenológicos (sexo, década, …) ---
   const dlensOptions = useMemo(() => {
-    const opts: Record<string, string> = { nenhuma: NO_LENS };
+    const opts: Record<string, string> = { none: NO_LENS };
     for (const k of DEMO_LENS_KEYS) opts[DEMO_LENS_LABELS[k]] = k;
     return opts;
   }, []);
   const [dl, setDl] = useControls(
-    "Lente demográfica",
+    "Demographic lens",
     () => ({
       dlente: {
-        value: prefStr("dlens", "Lente demográfica.dlente", NO_LENS, [
+        value: prefStr("dlens", "Demographic lens.dlente", NO_LENS, [
           NO_LENS,
           ...DEMO_LENS_KEYS,
         ]),
         options: dlensOptions,
-        label: "lente",
+        label: "lens",
       },
     }),
     [dlensOptions],

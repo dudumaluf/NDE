@@ -125,73 +125,73 @@ export function PostFX() {
         value: pref("Effects.bloomForca", 0.35),
         min: 0,
         max: 1.5,
-        label: "bloom força",
+        label: "bloom strength",
       },
       bloomLimiar: {
         value: pref("Effects.bloomLimiar", 0.72),
         min: 0,
         max: 1,
-        label: "bloom limiar",
+        label: "bloom threshold",
       },
       bloomRaio: {
         value: pref("Effects.bloomRaio", 0.35),
         min: 0,
         max: 1,
-        label: "bloom raio",
+        label: "bloom radius",
       },
       ao: {
         value: flagDefault("ao"),
-        label: `AO meia-res${fmtCost(meter.costs.ao)}`,
+        label: `AO half-res${fmtCost(meter.costs.ao)}`,
       },
       aoRaio: {
         value: pref("Effects.aoRaio", 0.5),
         min: 0.1,
         max: 2,
-        label: "AO raio",
+        label: "AO radius",
       },
       vinheta: {
         value: flagDefault("vinheta"),
-        label: `vinheta${fmtCost(meter.costs.vinheta)}`,
+        label: `vignette${fmtCost(meter.costs.vinheta)}`,
       },
       vinhetaForca: {
         value: pref("Effects.vinhetaForca", 0.55),
         min: 0,
         max: 1,
-        label: "vinheta força",
+        label: "vignette strength",
       },
       // Master da névoa: OFF = zero névoa (nem a de altura, nem a linear
       // clássica que existia desde o M0 — "hoje sempre on" resolvido).
       nevoaMaster: {
         value: prefBool("fog", "Effects.nevoaMaster", true),
-        label: "névoa (master)",
+        label: "fog (master)",
       },
       nevoa: {
         value: flagDefault("nevoa"),
-        label: `névoa altura${fmtCost(meter.costs.nevoa)}`,
+        label: `height fog${fmtCost(meter.costs.nevoa)}`,
       },
       nevoaDensidade: {
         value: pref("Effects.nevoaDensidade", 0.55),
         min: 0,
         max: 2,
-        label: "névoa densidade",
+        label: "fog density",
       },
       nevoaAltura: {
         value: pref("Effects.nevoaAltura", 2.2),
         min: 0.2,
         max: 8,
-        label: "névoa altura (m)",
+        label: "fog height (m)",
       },
       nevoaNuvens: {
         value: pref("Effects.nevoaNuvens", 0.65),
         min: 0,
         max: 1,
-        label: "névoa nuvens",
+        label: "fog clouds",
       },
       nevoaDeriva: {
         value: pref("Effects.nevoaDeriva", 1),
         min: 0,
         max: 4,
-        label: "névoa deriva",
+        label: "fog drift",
       },
       // Recuo por altura da câmera (god view limpo, chão enevoado): acima
       // desta altura a névoa de distância desvanece e o banco vira camada.
@@ -199,8 +199,8 @@ export function PostFX() {
         value: prefNum("fogRecuo", "Effects.nevoaRecuo", 16),
         min: 3,
         max: 80,
-        label: "névoa: altura de recuo",
-        hint: "altura da câmera (m) a partir da qual a névoa recua — suba além dela e o Campo se revela; 80 ≈ nunca recua",
+        label: "fog: recede height",
+        hint: "camera height (m) above which the fog recedes — rise past it and the Field reveals itself; 80 ≈ never recedes",
       },
     }),
     { collapsed: false },
@@ -305,7 +305,7 @@ export function PostFX() {
         };
         const cand = PRESET_ORDER[auto.current.candidate];
         console.log(`[fx-auto] ligado — provando "${cand}" por 5s…`);
-        setAutoLabel(` — provando ${cand}…`);
+        setAutoLabel(` — probing ${cand}…`);
         applyPreset(cand);
         prevPreset.current = cand;
       } else {
@@ -327,7 +327,7 @@ export function PostFX() {
             );
             a.candidate -= 1;
             a.phaseStart = now;
-            setAutoLabel(` — provando ${next}…`);
+            setAutoLabel(` — probing ${next}…`);
             applyPreset(next);
             prevPreset.current = next;
           }
@@ -342,7 +342,7 @@ export function PostFX() {
               console.log(
                 `[fx-auto] fps < ${AUTO_TARGET_FPS} por 10s — degradando "${from}" → "${to}"`,
               );
-              setAutoLabel(` — ${to} (degradado)`);
+              setAutoLabel(` — ${to} (degraded)`);
               applyPreset(to);
               prevPreset.current = to;
             }

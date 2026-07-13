@@ -50,6 +50,7 @@ Estes princípios resolvem discussões futuras. Quando houver dúvida de design,
 | 03 | Briefing — Experiência 3D | Especificação para construir o mundo em R3F + WebGPU | Claude Code / Cursor (repo 2) |
 | 04 | Experiência de Consumo (UX) | Decisões de UX e mecânicas de escuta (Sintonia, Coro, Lentes); estende o 01 e resolve suas perguntas abertas | Design + informa os docs 02/03 |
 | 05 | Dossiê para Curadoria | Apresentação externa do conceito (galerias, festivais, patrocínio) | Curadores/parceiros |
+| 06 | Guia dos Estados de Animação | Manual do painel de animação da multidão: o que cada parâmetro faz, receitas, convenção de nomes de clipes | Dudu (operação) + quem calibra a cena |
 
 **Como usar com Claude Code / Cursor:**
 1. Crie dois repositórios: `acervo/` (pipeline) e `limiar-experience/` (experiência).

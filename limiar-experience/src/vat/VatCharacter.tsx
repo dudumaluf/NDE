@@ -24,13 +24,13 @@ export function VatCharacter() {
   );
 
   const withRootMotion = useMemo(hasRootMotion, []);
-  const c = useControls("Personagem", {
-    escala: { value: pref("Personagem.escala", 2.5), min: 0.1, max: 5 },
+  const c = useControls("Character", {
+    escala: { value: pref("Character.escala", 2.5), min: 0.1, max: 5, label: "scale" },
     rootMotion: {
       // ?rootMotion=0 desliga (screenshots determinísticos do antes/depois)
-      value: prefBool("rootMotion", "Personagem.rootMotion", true),
+      value: prefBool("rootMotion", "Character.rootMotion", true),
       label: "root motion (translate)",
-      hint: "aplica a trajetória exportada pelo bake in-place como translate do mesh — para one-shots dirigidos; a multidão ignora (movimento vem da simulação)",
+      hint: "applies the trajectory exported by the in-place bake as a mesh translate — for driven one-shots; the crowd ignores it (movement comes from the simulation)",
       render: () => withRootMotion,
     },
   });

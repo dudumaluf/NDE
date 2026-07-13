@@ -23,14 +23,15 @@ export const DEMO_LENS_KEYS: readonly DemoLensKey[] = [
   "tempo",
 ];
 
-/** Rótulo do dropdown → key interna (a URL ?dlens= usa a key). */
+/** Rótulo do dropdown (EN — painel de debug) → key interna (?dlens= usa a key).
+ *  A UI REAL (Legend) usa o label PT do taxonomy.json — este aqui é só leva. */
 export const DEMO_LENS_LABELS: Record<DemoLensKey, string> = {
-  sexo: "sexo",
-  decada: "década do evento",
-  causa: "causa",
-  geo: "geografia",
-  religiao: "trajetória religiosa",
-  tempo: "tempo (clínico × subjetivo)",
+  sexo: "sex",
+  decada: "decade of event",
+  causa: "cause",
+  geo: "geography",
+  religiao: "religious trajectory",
+  tempo: "time (clinical × subjective)",
 };
 
 export const ND_KEY = "não declarado";

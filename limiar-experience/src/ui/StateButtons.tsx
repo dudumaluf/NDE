@@ -29,14 +29,14 @@ export function StateButtons() {
   );
 
   useControls(
-    "Estados (morph seamless)",
+    "States (seamless morph)",
     {
       ...(b
         ? {
             textura: {
               value: texSel,
               options: vatNames,
-              label: "textura (VAT)",
+              label: "texture (VAT)",
               onChange: (v: string) => setTexSel(v),
             },
           }
@@ -52,14 +52,14 @@ export function StateButtons() {
           }
         : {}),
       ...(vat().clipCount >= 6
-        ? { "arco da história": button(() => playStoryArc(vatPlayer)) }
+        ? { "story arc": button(() => playStoryArc(vatPlayer)) }
         : {}),
-      parar: button(() => {
+      stop: button(() => {
         cancelStoryArc();
         vatPlayer.play(0);
       }),
       fade: {
-        value: pref("Estados (morph seamless).fade", 0.35),
+        value: pref("States (seamless morph).fade", 0.35),
         min: 0,
         max: 1.5,
         label: "fade (s)",
@@ -68,9 +68,10 @@ export function StateButtons() {
         },
       },
       velocidade: {
-        value: pref("Estados (morph seamless).velocidade", 1),
+        value: pref("States (seamless morph).velocidade", 1),
         min: 0,
         max: 3,
+        label: "speed",
         onChange: (v: number) => {
           vatPlayer.speed = v;
         },
