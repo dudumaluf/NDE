@@ -7,6 +7,8 @@ import { PostFX } from "./render/post/PostFX";
 import { qpBool, qpStr } from "./lib/urlParams";
 import { useContent } from "./data/contentStore";
 import { Legend } from "./ui/Legend";
+import { AppearanceControls } from "./ui/AppearanceControls";
+import { PrefsControls } from "./ui/PrefsControls";
 
 // A legenda do que está em cena (núcleos/lentes, chips clicáveis, frase do
 // bottom) vive em src/ui/Legend.tsx — UI real da experiência, fora do leva.
@@ -76,6 +78,10 @@ export default function App() {
         titleBar={{ title: "LIMIAR — debug" }}
         theme={{ sizes: { rootWidth: "380px", controlWidth: "170px" } }}
       />
+      {/* Grupos do leva que vivem fora do Canvas: cores do mundo + HSB das
+          pessoas (Aparência) e o preset persistente (Preferências). */}
+      <AppearanceControls />
+      <PrefsControls />
       <Canvas
         camera={{ position: initialCamera(), fov: 45, near: 0.05, far: 300 }}
         gl={async (props) => {

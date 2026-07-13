@@ -14,7 +14,9 @@ import {
   type FxFlags,
   type FxPreset,
 } from "./presets";
-import { qpBool, qpNum, qpStr } from "../../lib/urlParams";
+import { qpHas, qpNum } from "../../lib/urlParams";
+import { pref, prefBool, prefNum, prefStr } from "../../lib/prefs";
+import { useAppearance } from "../../ui/appearanceStore";
 
 const AUTO_TARGET_FPS = 50;
 const AUTO_PROBE_MS = 5000;
@@ -30,7 +32,7 @@ interface AutoState {
 }
 
 function initialPreset(): FxPreset {
-  const v = qpStr("fx", "leve");
+  const v = prefStr("fx", "Effects.preset", "leve");
   return isPreset(v) ? v : "leve";
 }
 
@@ -66,6 +68,19 @@ export function PostFX() {
     h.setRange(qpNum("fogNear", 14), qpNum("fogFar", 55));
     return h;
   }, []);
+  // Névoa linear clássica — o fallback quando o master está ON mas o efeito
+  // de altura está OFF (paridade com o <fog> que morava no Scene.tsx).
+  const classicFog = useMemo(
+    () =>
+      new THREE.Fog("#6d6d6d", qpNum("fogNear", 14), qpNum("fogFar", 55)),
+    [],
+  );
+  // Cor da névoa do grupo Aparência (segue o fundo por default).
+  const nevoaCor = useAppearance((s) => s.nevoaCor);
+  useEffect(() => {
+    fogHandle.setColor(nevoaCor);
+    classicFog.color.set(nevoaCor);
+  }, [fogHandle, classicFog, nevoaCor]);
   const meter = useMemo(() => new FxMeter(), []);
 
   // Custos medidos → labels do leva (rebuild do schema via deps).
@@ -84,6 +99,11 @@ export function PostFX() {
 
   const p0 = useMemo(initialPreset, []);
   const f0 = PRESETS[p0];
+  // Com ?fx= explícito na URL os flags nascem DO PRESET (screenshot
+  // reproduzível ignora o salvo); sem ele, cada flag boota do padrão salvo.
+  const fxFromQp = qpHas("fx");
+  const flagDefault = (key: keyof FxFlags): boolean =>
+    fxFromQp ? f0[key] : pref(`Effects.${key}`, f0[key]);
 
   const [c, setC] = useControls(
     "Effects",
@@ -94,28 +114,94 @@ export function PostFX() {
         label: "preset",
       },
       auto: {
-        value: qpBool("fxauto", false),
+        value: prefBool("fxauto", "Effects.auto", false),
         label: `auto (≥${AUTO_TARGET_FPS}fps)${autoLabel}`,
       },
-      bloom: { value: f0.bloom, label: `bloom${fmtCost(meter.costs.bloom)}` },
-      bloomForca: { value: 0.35, min: 0, max: 1.5, label: "bloom força" },
-      bloomLimiar: { value: 0.72, min: 0, max: 1, label: "bloom limiar" },
-      bloomRaio: { value: 0.35, min: 0, max: 1, label: "bloom raio" },
-      ao: { value: f0.ao, label: `AO meia-res${fmtCost(meter.costs.ao)}` },
-      aoRaio: { value: 0.5, min: 0.1, max: 2, label: "AO raio" },
+      bloom: {
+        value: flagDefault("bloom"),
+        label: `bloom${fmtCost(meter.costs.bloom)}`,
+      },
+      bloomForca: {
+        value: pref("Effects.bloomForca", 0.35),
+        min: 0,
+        max: 1.5,
+        label: "bloom força",
+      },
+      bloomLimiar: {
+        value: pref("Effects.bloomLimiar", 0.72),
+        min: 0,
+        max: 1,
+        label: "bloom limiar",
+      },
+      bloomRaio: {
+        value: pref("Effects.bloomRaio", 0.35),
+        min: 0,
+        max: 1,
+        label: "bloom raio",
+      },
+      ao: {
+        value: flagDefault("ao"),
+        label: `AO meia-res${fmtCost(meter.costs.ao)}`,
+      },
+      aoRaio: {
+        value: pref("Effects.aoRaio", 0.5),
+        min: 0.1,
+        max: 2,
+        label: "AO raio",
+      },
       vinheta: {
-        value: f0.vinheta,
+        value: flagDefault("vinheta"),
         label: `vinheta${fmtCost(meter.costs.vinheta)}`,
       },
-      vinhetaForca: { value: 0.55, min: 0, max: 1, label: "vinheta força" },
+      vinhetaForca: {
+        value: pref("Effects.vinhetaForca", 0.55),
+        min: 0,
+        max: 1,
+        label: "vinheta força",
+      },
+      // Master da névoa: OFF = zero névoa (nem a de altura, nem a linear
+      // clássica que existia desde o M0 — "hoje sempre on" resolvido).
+      nevoaMaster: {
+        value: prefBool("fog", "Effects.nevoaMaster", true),
+        label: "névoa (master)",
+      },
       nevoa: {
-        value: f0.nevoa,
+        value: flagDefault("nevoa"),
         label: `névoa altura${fmtCost(meter.costs.nevoa)}`,
       },
-      nevoaDensidade: { value: 0.55, min: 0, max: 2, label: "névoa densidade" },
-      nevoaAltura: { value: 2.2, min: 0.2, max: 8, label: "névoa altura (m)" },
-      nevoaNuvens: { value: 0.65, min: 0, max: 1, label: "névoa nuvens" },
-      nevoaDeriva: { value: 1, min: 0, max: 4, label: "névoa deriva" },
+      nevoaDensidade: {
+        value: pref("Effects.nevoaDensidade", 0.55),
+        min: 0,
+        max: 2,
+        label: "névoa densidade",
+      },
+      nevoaAltura: {
+        value: pref("Effects.nevoaAltura", 2.2),
+        min: 0.2,
+        max: 8,
+        label: "névoa altura (m)",
+      },
+      nevoaNuvens: {
+        value: pref("Effects.nevoaNuvens", 0.65),
+        min: 0,
+        max: 1,
+        label: "névoa nuvens",
+      },
+      nevoaDeriva: {
+        value: pref("Effects.nevoaDeriva", 1),
+        min: 0,
+        max: 4,
+        label: "névoa deriva",
+      },
+      // Recuo por altura da câmera (god view limpo, chão enevoado): acima
+      // desta altura a névoa de distância desvanece e o banco vira camada.
+      nevoaRecuo: {
+        value: prefNum("fogRecuo", "Effects.nevoaRecuo", 16),
+        min: 3,
+        max: 80,
+        label: "névoa: altura de recuo",
+        hint: "altura da câmera (m) a partir da qual a névoa recua — suba além dela e o Campo se revela; 80 ≈ nunca recua",
+      },
     }),
     { collapsed: false },
     [costsTick, autoLabel],
@@ -132,7 +218,7 @@ export function PostFX() {
   const auto = useRef<AutoState | null>(null);
   const lastGpu = useRef<number | null>(null);
   const resolving = useRef(false);
-  const fogOn = useRef<boolean | null>(null);
+  const fogMode = useRef<"node" | "classic" | "none" | null>(null);
 
   // Timestamps GPU só no WebGPU: no fallback (ANGLE/Metal) o
   // EXT_disjoint_timer_query devolve durações não confiáveis.
@@ -157,13 +243,17 @@ export function PostFX() {
     } as any);
   };
 
-  // Névoa: troca o fogNode da cena (rebuild de shaders só no toggle).
-  const applyFog = (on: boolean) => {
-    if (fogOn.current === on) return;
-    fogOn.current = on;
+  // Névoa: o PostFX é o dono ÚNICO (Scene.tsx não declara mais <fog>).
+  // master OFF → nenhuma névoa; master ON + efeito de altura ON → fogNode
+  // TSL; master ON + altura OFF → THREE.Fog linear clássico (paridade com o
+  // comportamento pré-2026-07-12). Troca só no toggle (rebuild de shaders).
+  const applyFog = (master: boolean, height: boolean) => {
+    const mode = !master ? "none" : height ? "node" : "classic";
+    if (fogMode.current === mode) return;
+    fogMode.current = mode;
     const s = scene as any;
-    if (on) s.fogNode = fogHandle.node;
-    else s.fogNode = null;
+    s.fogNode = mode === "node" ? fogHandle.node : null;
+    s.fog = mode === "classic" ? classicFog : null;
   };
 
   useEffect(() => () => pipeline.dispose(), [pipeline]);
@@ -287,11 +377,14 @@ export function PostFX() {
     prevFlags.current = flags;
 
     // --- 5. aplica estado aos módulos ---
-    applyFog(flags.nevoa);
+    applyFog(v.nevoaMaster, flags.nevoa);
     fogHandle.setDensity(v.nevoaDensidade);
     fogHandle.setHeight(v.nevoaAltura);
     fogHandle.setNoiseAmount(v.nevoaNuvens);
     fogHandle.setDrift(v.nevoaDeriva);
+    fogHandle.setRecede(v.nevoaRecuo);
+    // Recuo por altura: a câmera alimenta o uniform (CPU, custo zero).
+    fogHandle.setCamHeight(camera.position.y);
 
     pipeline.setFlags({ bloom: flags.bloom, ao: flags.ao, vinheta: flags.vinheta });
     pipeline.setBloomStrength(v.bloomForca);

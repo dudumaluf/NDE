@@ -374,6 +374,33 @@ Decisões:
 - **Custo:** baixo (DOM/HTML sobre o canvas, como o HUD do M3 — que ela
   substitui e eleva).
 - **Entra em:** M4+ como evolução do HUD debug; versão premium no M6/M7.
+- **✔ Destaque forte (2026-07-12, pedido do Dudu):** o clique no chip
+  ganhou contraste máximo — os selecionados mantêm a cor PLENA e todo o
+  resto **colapsa para um cinza uniforme** (mesmo tom para todos, não uma
+  dessaturação sutil), segurando pelo tempo configurado e voltando com
+  fade-out suave. Intensidade e duração viraram sliders ("destaque:
+  intensidade/duração", grupo Aparência) — o "os demais recuam sutilmente"
+  de cima passa a ser o piso, não o teto.
+
+### 6.2 A cena é do criador — aparência e preset persistente (2026-07-12)
+
+Pedido direto do Dudu: as escolhas dele têm de "grudar" entre reloads.
+
+- **Grupo "Aparência"** (leva): cores do mundo — fundo/céu, névoa (segue o
+  fundo por default; dá para soltar), chão, grid (cor+alpha) — e o ajuste
+  GLOBAL de matiz/saturação/brilho das PESSOAS (paleta de núcleos e
+  dormentes juntos). O Campo continua "cinzas quentes, cor como dado"
+  (doc 01 §9) por default — mas agora o criador pode temperar o mundo sem
+  tocar em código.
+- **Névoa dominável**: toggle master (off = céu limpo de verdade) e **recuo
+  por altura da câmera** — subiu além da "altura de recuo", a névoa de
+  distância abre e o god view enxerga o Campo inteiro (o chão continua
+  enevoado: a névoa segue personagem, doc 01, mas deixa de engolir a
+  leitura de cima).
+- **Grupo "Preferências"**: salvar como padrão / restaurar fábrica /
+  exportar / importar — o painel INTEIRO vira preset (o `tuning.json` do
+  doc 03 §4.6). Query params continuam vencendo (screenshots e links de
+  verificação não mudam de comportamento).
 
 ## 7. Regras de linguagem por escala
 

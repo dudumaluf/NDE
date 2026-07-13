@@ -11,9 +11,11 @@ import { mouseTarget, type MouseMode } from "../sim/mouseTarget";
 import { buildCrowdMaterial } from "./crowdMaterial";
 import { fillContentAttributes, fillStaticAttributes } from "./spawn";
 import { applyColorEmphasis } from "./colorEmphasis";
-import { qpBool, qpNum, qpStr } from "../lib/urlParams";
+import { qpNum } from "../lib/urlParams";
+import { pref, prefBool, prefNum, prefStr } from "../lib/prefs";
 import { useContent } from "../data/contentStore";
-import { computeTargets } from "../data/agentMapping";
+import { computeAgentMeta, computeTargets } from "../data/agentMapping";
+import { applyHsbToColorScale } from "../data/palette";
 import {
   DEMO_LENS_KEYS,
   DEMO_LENS_LABELS,
@@ -24,7 +26,8 @@ import {
 import { useDemoLens } from "../data/demoLensStore";
 import { CrowdWires } from "../render/CrowdWires";
 import { ClusterLabels } from "../render/ClusterLabels";
-import { setElementLens, useLegend } from "../ui/legendStore";
+import { legendFlashK, setElementLens, useLegend } from "../ui/legendStore";
+import { isHsbIdentity, useAppearance } from "../ui/appearanceStore";
 
 const NO_LENS = "nenhuma";
 
@@ -53,51 +56,171 @@ export function CrowdMesh() {
     [posTex, nrmTex, attrs, sim],
   );
 
+  // Defaults dos controles passam por pref(): padrão salvo (grupo
+  // Preferências) sobrescreve a fábrica; query param na URL vence os dois.
   const c = useControls("Multidão", {
     grid: {
-      value: Math.min(qpNum("grid", 32), MAX_GRID),
+      value: Math.min(prefNum("grid", "Multidão.grid", 32), MAX_GRID),
       min: 4,
       max: MAX_GRID,
       step: 4,
       label: "grade (N×N)",
     },
-    area: { value: qpNum("area", 40), min: 10, max: 80, label: "área spawn" },
-    ruido: { value: 0.6, min: 0, max: 2, label: "ruído de spawn" },
-    seed: { value: 3, min: 1, max: 9999, step: 1 },
-    escala: { value: 2.5, min: 0.5, max: 5, label: "escala pessoa" },
-    paleta: { value: true, label: "cores (vs. dormentes)" },
+    area: {
+      value: prefNum("area", "Multidão.area", 40),
+      min: 10,
+      max: 80,
+      label: "área spawn",
+    },
+    ruido: { value: pref("Multidão.ruido", 0.6), min: 0, max: 2, label: "ruído de spawn" },
+    seed: { value: pref("Multidão.seed", 3), min: 1, max: 9999, step: 1 },
+    escala: { value: pref("Multidão.escala", 2.5), min: 0.5, max: 5, label: "escala pessoa" },
+    paleta: { value: pref("Multidão.paleta", true), label: "cores (vs. dormentes)" },
+    soHistorias: {
+      value: prefBool("onlyPeople", "Multidão.soHistorias", false),
+      label: "só quem tem história",
+      hint: "esconde os dormentes: desenha só os primeiros 46 slots (as pessoas reais do manifest) — a sim continua inteira, os fios e labels seguem válidos",
+    },
     reset: button(() => {
       resetRef.current = true;
     }),
   });
 
   const s = useControls("Simulação", {
-    maxSpeed: { value: qpNum("speed2", 0.8), min: 0, max: 3, label: "velocidade máx" },
-    wander: { value: 1, min: 0, max: 3, label: "wander (peso)" },
-    wanderScale: { value: 0.12, min: 0.005, max: 0.4, label: "wander escala" },
-    wanderEvolve: { value: 0.12, min: 0, max: 0.5, label: "wander evolução" },
-    separacao: { value: qpNum("sep", 1.6), min: 0, max: 4, label: "separação (peso)" },
-    sepRaio: { value: 0.7, min: 0.1, max: 2.5, label: "separação raio" },
-    contRaio: { value: qpNum("contain", 21), min: 5, max: 45, label: "contenção raio" },
+    maxSpeed: {
+      value: prefNum("speed2", "Simulação.maxSpeed", 0.8),
+      min: 0,
+      max: 3,
+      label: "velocidade máx",
+    },
+    wander: { value: pref("Simulação.wander", 1), min: 0, max: 3, label: "wander (peso)" },
+    wanderScale: {
+      value: pref("Simulação.wanderScale", 0.12),
+      min: 0.005,
+      max: 0.4,
+      label: "wander escala",
+    },
+    wanderEvolve: {
+      value: pref("Simulação.wanderEvolve", 0.12),
+      min: 0,
+      max: 0.5,
+      label: "wander evolução",
+    },
+    separacao: {
+      value: prefNum("sep", "Simulação.separacao", 1.6),
+      min: 0,
+      max: 4,
+      label: "separação (peso)",
+    },
+    sepRaio: { value: pref("Simulação.sepRaio", 0.7), min: 0.1, max: 2.5, label: "separação raio" },
+    contRaio: {
+      value: prefNum("contain", "Simulação.contRaio", 21),
+      min: 5,
+      max: 45,
+      label: "contenção raio",
+    },
     mouseModo: {
-      value: qpStr<MouseMode>("mouse", "atrair", ["off", "atrair", "repelir"]),
+      value: prefStr<MouseMode>("mouse", "Simulação.mouseModo", "atrair", [
+        "off",
+        "atrair",
+        "repelir",
+      ]),
       options: ["off", "atrair", "repelir"] as MouseMode[],
       label: "mouse",
     },
-    mouseRaio: { value: qpNum("mouseR", 7), min: 1, max: 30, label: "mouse raio" },
-    mouseForca: { value: 1.2, min: 0, max: 4, label: "mouse força" },
-    giro: { value: 6, min: 0.5, max: 20, label: "giro (suavidade)" },
-    passo: { value: 34, min: 5, max: 90, label: "passo/unidade" },
-    faceFlip: { value: qpBool("faceflip", false), label: "inverter facing" },
+    mouseRaio: {
+      value: prefNum("mouseR", "Simulação.mouseRaio", 7),
+      min: 1,
+      max: 30,
+      label: "mouse raio",
+    },
+    mouseForca: { value: pref("Simulação.mouseForca", 1.2), min: 0, max: 4, label: "mouse força" },
+    giro: { value: pref("Simulação.giro", 6), min: 0.5, max: 20, label: "giro (suavidade)" },
+    passo: { value: pref("Simulação.passo", 34), min: 5, max: 90, label: "passo/unidade" },
+    faceFlip: {
+      value: prefBool("faceflip", "Simulação.faceFlip", false),
+      label: "inverter facing",
+    },
     debug: {
-      value: qpStr<"off" | "velocidade" | "direção" | "alvo">("debug", "off", [
+      value: prefStr<"off" | "velocidade" | "direção" | "alvo" | "estado">(
+        "debug",
+        "Simulação.debug",
         "off",
-        "velocidade",
-        "direção",
-        "alvo",
-      ]),
-      options: ["off", "velocidade", "direção", "alvo"],
+        ["off", "velocidade", "direção", "alvo", "estado"],
+      ),
+      options: ["off", "velocidade", "direção", "alvo", "estado"],
       label: "debug cor",
+    },
+  });
+
+  // --- Estados por agente (doc 04 §5.5): a animação lê a física ---
+  // Transições parado⇄andando⇄correndo pela velocidade REAL (histerese);
+  // chegada assenta em idle/rezar; onda de chegada; dormentes contemplativos.
+  // Master off = modo global antigo (botões "Estados (morph seamless)").
+  const e = useControls("Estados (por agente)", {
+    auto: {
+      value: prefBool("estados", "Estados (por agente).auto", true),
+      label: "estados automáticos",
+    },
+    v0: {
+      value: prefNum("v0", "Estados (por agente).v0", 0.12),
+      min: 0.01,
+      max: 0.6,
+      label: "v0 parado⇄andar",
+    },
+    v1: {
+      value: prefNum("v1", "Estados (por agente).v1", 1.15),
+      min: 0.2,
+      max: 3,
+      label: "v1 andar⇄correr",
+    },
+    histerese: {
+      value: pref("Estados (por agente).histerese", 0.12),
+      min: 0,
+      max: 0.3,
+      label: "histerese (±)",
+    },
+    fadeEstado: {
+      value: pref("Estados (por agente).fadeEstado", 0.3),
+      min: 0.1,
+      max: 1,
+      label: "crossfade (s)",
+    },
+    pesoIdle: {
+      value: pref("Estados (por agente).pesoIdle", 1),
+      min: 0,
+      max: 4,
+      label: "assentar: peso idle",
+    },
+    pesoRezar: {
+      value: pref("Estados (por agente).pesoRezar", 0.6),
+      min: 0,
+      max: 4,
+      label: "assentar: peso rezar",
+    },
+    onda: {
+      value: prefNum("onda", "Estados (por agente).onda", 0.9),
+      min: 0,
+      max: 3,
+      label: "onda de chegada",
+    },
+    pausas: {
+      value: prefNum("pausas", "Estados (por agente).pausas", 0.45),
+      min: 0,
+      max: 1,
+      label: "pausas de wander",
+    },
+    dormVel: {
+      value: pref("Estados (por agente).dormVel", 0.7),
+      min: 0.2,
+      max: 1.5,
+      label: "dormentes: velocidade ×",
+    },
+    dormWander: {
+      value: pref("Estados (por agente).dormWander", 0.8),
+      min: 0.2,
+      max: 1.5,
+      label: "dormentes: wander ×",
     },
   });
 
@@ -112,53 +235,69 @@ export function CrowdMesh() {
   const [d, setD] = useControls(
     "Dados (M3)",
     () => ({
-      gravidade: { value: qpBool("gravity", false), label: "gravidade (UMAP)" },
+      gravidade: {
+        value: prefBool("gravity", "Dados (M3).gravidade", false),
+        label: "gravidade (UMAP)",
+      },
       mapScale: {
-        value: qpNum("mapScale", 14),
+        value: prefNum("mapScale", "Dados (M3).mapScale", 14),
         min: 4,
         max: 30,
         label: "escala do mapa",
       },
-      gravForca: { value: qpNum("gravForca", 2.2), min: 0.3, max: 6, label: "gravidade força" },
+      gravForca: {
+        value: prefNum("gravForca", "Dados (M3).gravForca", 2.2),
+        min: 0.3,
+        max: 6,
+        label: "gravidade força",
+      },
       lente: {
-        value: qpStr("lens", NO_LENS),
+        value: prefStr("lens", "Dados (M3).lente", NO_LENS),
         options: lensOptions,
         label: "lente (elemento)",
       },
-      fios: { value: qpBool("wires", true), label: "fios (grafo)" },
+      fios: { value: prefBool("wires", "Dados (M3).fios", true), label: "fios (grafo)" },
       fiosAlpha: {
-        value: qpNum("wiresAlpha", 0.22),
+        value: prefNum("wiresAlpha", "Dados (M3).fiosAlpha", 0.22),
         min: 0,
         max: 0.5,
         label: "fios alpha",
       },
-      fiosAltura: { value: 1.05, min: 0, max: 2, label: "fios altura" },
+      fiosAltura: {
+        value: pref("Dados (M3).fiosAltura", 1.05),
+        min: 0,
+        max: 2,
+        label: "fios altura",
+      },
       // --- leitura visual (M3.5) ---
       fiosFadePerto: {
-        value: qpNum("wiresNear", 6),
+        value: prefNum("wiresNear", "Dados (M3).fiosFadePerto", 6),
         min: 0.5,
         max: 25,
         label: "fios fade: perto",
       },
       fiosFadeLonge: {
-        value: qpNum("wiresFar", 14),
+        value: prefNum("wiresFar", "Dados (M3).fiosFadeLonge", 14),
         min: 2,
         max: 45,
         label: "fios fade: longe",
       },
       fiosPeso: {
-        value: qpNum("wiresGamma", 1.6),
+        value: prefNum("wiresGamma", "Dados (M3).fiosPeso", 1.6),
         min: 0.4,
         max: 4,
         label: "fios peso (gama)",
       },
       fiosSoNucleos: {
-        value: qpBool("wiresFormed", false),
+        value: prefBool("wiresFormed", "Dados (M3).fiosSoNucleos", false),
         label: "fios só núcleos formados",
       },
-      palavras: { value: qpBool("labels", true), label: "palavras (núcleos)" },
+      palavras: {
+        value: prefBool("labels", "Dados (M3).palavras", true),
+        label: "palavras (núcleos)",
+      },
       formRaio: {
-        value: qpNum("formRaio", 2.4),
+        value: prefNum("formRaio", "Dados (M3).formRaio", 2.4),
         min: 0.8,
         max: 8,
         label: "formação raio (coesão)",
@@ -177,7 +316,10 @@ export function CrowdMesh() {
     "Lente demográfica",
     () => ({
       dlente: {
-        value: qpStr("dlens", NO_LENS, [NO_LENS, ...DEMO_LENS_KEYS]),
+        value: prefStr("dlens", "Lente demográfica.dlente", NO_LENS, [
+          NO_LENS,
+          ...DEMO_LENS_KEYS,
+        ]),
         options: dlensOptions,
         label: "lente",
       },
@@ -238,18 +380,63 @@ export function CrowdMesh() {
   // Cores por instância: núcleo (padrão) ou categoria da lente demográfica
   // ativa — mesma via iColorScale; trocar lente NÃO reseta posições (as
   // pessoas caminham para o novo arranjo) e o rng por seed mantém as escalas.
-  // Por cima da cor-base, a ênfase (M3.5): lente de elemento dessatura os
-  // não-pertencentes; clique na Legenda dessatura tudo fora do grupo por ~2 s.
-  useEffect(() => {
+  // Por cima da cor-base, em ordem: (1) HSB global do grupo Aparência
+  // (paleta + dormentes), (2) ênfase — lente dessatura não-pertencentes;
+  // clique na Legenda colapsa todos fora do grupo num cinza uniforme, com
+  // envelope animado (hold pleno → fade suave; ver legendStore).
+  const hsb = useAppearance((st) => st.hsb);
+  const destaqueIntensidade = useAppearance((st) => st.destaqueIntensidade);
+  const paintColors = (flashK: number) => {
     const count = c.grid * c.grid;
     if (content) {
       fillContentAttributes(attrs, count, c.seed, content, demoCls);
+      if (!isHsbIdentity(hsb)) {
+        applyHsbToColorScale(
+          attrs.colorScale.array as Float32Array,
+          count,
+          hsb.hue,
+          hsb.sat,
+          hsb.bri,
+        );
+      }
       applyColorEmphasis(attrs, count, content, demoCls, {
         elementLens: d.lente === NO_LENS ? null : d.lente,
         flash: legendFlash,
+        flashK,
+        flashIntensity: destaqueIntensidade,
       });
-    } else fillStaticAttributes(attrs, count, c.seed);
-  }, [attrs, content, demoCls, c.grid, c.seed, d.lente, legendFlash]);
+    } else {
+      fillStaticAttributes(attrs, count, c.seed);
+      if (!isHsbIdentity(hsb)) {
+        applyHsbToColorScale(
+          attrs.colorScale.array as Float32Array,
+          count,
+          hsb.hue,
+          hsb.sat,
+          hsb.bri,
+        );
+      }
+    }
+    attrs.colorScale.needsUpdate = true;
+  };
+  const paintRef = useRef(paintColors);
+  paintRef.current = paintColors;
+  const lastFlashK = useRef(1);
+  useEffect(() => {
+    lastFlashK.current = 1;
+    paintRef.current(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    attrs,
+    content,
+    demoCls,
+    c.grid,
+    c.seed,
+    d.lente,
+    legendFlash,
+    hsb,
+    destaqueIntensidade,
+  ]);
 
   // Parâmetros de spawn mudaram → uniforms da sim e agenda reset GPU.
   useEffect(() => {
@@ -259,9 +446,33 @@ export function CrowdMesh() {
     sim.u.spawnArea.value = c.area;
     sim.u.spawnNoise.value = c.ruido;
     sim.u.seed.value = c.seed;
-    if (meshRef.current) meshRef.current.count = count;
     resetRef.current = true;
   }, [sim, content, c.grid, c.area, c.ruido, c.seed]);
+
+  // "Só quem tem história": desenha apenas os primeiros N slots (as pessoas
+  // reais — pessoa i = instância i por construção do M3; a permutação de
+  // spawn embaralha só a POSIÇÃO inicial, não a identidade do slot). A sim
+  // segue simulando todo mundo (dormentes continuam empurrando/ocupando
+  // espaço) — é corte de DESENHO, sem tocar na lógica da simulação. Efeito
+  // separado do reset: alternar o toggle não respawna ninguém.
+  const drawCount =
+    c.soHistorias && content
+      ? Math.min(content.manifest.people.length, c.grid * c.grid)
+      : c.grid * c.grid;
+  useEffect(() => {
+    if (meshRef.current) meshRef.current.count = drawCount;
+  }, [drawCount]);
+
+  // Meta por agente (com-história vs dormente + prob. de rezar ao assentar,
+  // com peso extra p/ quem tem `transformacao`) — CPU escreve, nada por frame.
+  useEffect(() => {
+    computeAgentMeta(content, MAX_GRID * MAX_GRID, sim.agentMetaArray, {
+      pesoIdle: e.pesoIdle,
+      pesoRezar: e.pesoRezar,
+      boostTransformacao: 2,
+    });
+    sim.commitAgentMeta();
+  }, [content, sim, e.pesoIdle, e.pesoRezar]);
 
   // Alvos dos dados (gravidade/lentes) — 46 escritas por mudança, nada por
   // frame. Lente demográfica ativa vence a lente de elemento (exclusão mútua
@@ -300,6 +511,15 @@ export function CrowdMesh() {
     sim.u.mouseWeight.value = s.mouseForca;
     sim.u.turnRate.value = s.giro;
     sim.u.phasePerUnit.value = s.passo;
+    sim.u.perAgentOn.value = e.auto ? 1 : 0;
+    sim.u.v0.value = e.v0;
+    sim.u.v1.value = e.v1;
+    sim.u.hyst.value = e.histerese;
+    sim.u.stateFade.value = e.fadeEstado;
+    sim.u.waveGain.value = e.onda;
+    sim.u.pauseAmount.value = e.pausas;
+    sim.u.dormantSpeedMul.value = e.dormVel;
+    sim.u.dormantWanderMul.value = e.dormWander;
     // Gravidade: lente ativa (elemento OU demográfica) força o seek mesmo com
     // o toggle desligado — aplicar uma lente sem gravidade não teria efeito.
     const seekOn = content && (d.gravidade || d.lente !== NO_LENS || demoCls);
@@ -326,6 +546,12 @@ export function CrowdMesh() {
         }
         return out;
       };
+      // Estados (vec4 sem padding): [clipA, clipB, blend, stateId+t/1000]×n.
+      w.__limiarReadStates = async (n: number) => {
+        const buf = await gl.getArrayBufferAsync(sim.states.value);
+        const raw = new Float32Array(buf);
+        return Array.from(raw.slice(0, n * 4));
+      };
     }
 
     // O reset (e o pre-roll do ?simT) espera o 2º frame: o leva só entrega os
@@ -349,9 +575,30 @@ export function CrowdMesh() {
     bundle.setScale(c.escala);
     bundle.setPaletteAmount(c.paleta ? 1 : 0);
     bundle.setDebugMode(
-      s.debug === "velocidade" ? 1 : s.debug === "direção" ? 2 : s.debug === "alvo" ? 3 : 0,
+      s.debug === "velocidade"
+        ? 1
+        : s.debug === "direção"
+          ? 2
+          : s.debug === "alvo"
+            ? 3
+            : s.debug === "estado"
+              ? 4
+              : 0,
     );
     bundle.setFaceFlip(s.faceFlip ? -1 : 1);
+    bundle.setPerAgentStates(e.auto);
+    bundle.tickAgentClock(delta);
+
+    // Envelope do destaque da legenda: 1 no hold (nenhum repaint) → fade
+    // suave a 0 (repinta o iColorScale enquanto o valor anda — ~40 frames
+    // de loop CPU barato, nada fora do fade).
+    if (legendFlash) {
+      const k = legendFlashK(legendFlash, performance.now());
+      if (Math.abs(k - lastFlashK.current) > 0.004) {
+        lastFlashK.current = k;
+        paintRef.current(k);
+      }
+    }
 
     if (markerRef.current) {
       markerRef.current.position.copy(mouseTarget.point);

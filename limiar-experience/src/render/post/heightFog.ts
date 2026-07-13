@@ -7,6 +7,8 @@ import {
   float,
   fog,
   max,
+  min,
+  mix,
   positionView,
   positionWorld,
   smoothstep,
@@ -59,6 +61,16 @@ const cheapTriNoise = /*@__PURE__*/ Fn(([position, t]: N[]) => {
  * factor = max(dist, altura) — longe tudo afunda na névoa; perto, só o que
  * está baixo ganha o véu. Funciona idêntico nos dois backends (é só TSL de
  * material; nenhum recurso WebGPU-only).
+ *
+ * RECUO POR ALTURA DA CÂMERA (pedido do Dudu, 2026-07-12 — "vistas de cima
+ * engolem tudo em névoa"): acima de uma altura configurável (uRecuo) a
+ * câmera "fura" a névoa — curva suave (smoothstep entre recuo e 1.75×recuo):
+ *  1. a névoa de DISTÂNCIA desvanece (multiplicada por 1−camK): o god view
+ *     enxerga o Campo inteiro em vez de uma poça cinza;
+ *  2. o BANCO troca o caminho óptico: de cima, um raio só atravessa ~a
+ *     espessura do banco (min(viewZ, 2.5×altura)), não a distância inteira
+ *     até o chão — god view limpo, chão ainda enevoado.
+ * uCamY é uniform atualizado pela câmera a cada frame (CPU, custo zero).
  */
 
 export interface HeightFogHandle {
@@ -72,6 +84,12 @@ export interface HeightFogHandle {
   /** Velocidade da deriva do ruído (1 = lenta, contemplativa). */
   setDrift(v: number): void;
   setRange(near: number, far: number): void;
+  /** Altura de câmera acima da qual a névoa recua (god view limpo). */
+  setRecede(v: number): void;
+  /** Altura ATUAL da câmera (chamar por frame — vira uniform). */
+  setCamHeight(v: number): void;
+  /** Cor da névoa (grupo Aparência — pode divergir do fundo). */
+  setColor(hex: string): void;
 }
 
 export function buildHeightFog(fogColor: THREE.Color): HeightFogHandle {
@@ -82,11 +100,18 @@ export function buildHeightFog(fogColor: THREE.Color): HeightFogHandle {
   const uNear: N = uniform(14);
   const uFar: N = uniform(55);
   const uColor: N = uniform(fogColor);
+  const uRecede: N = uniform(16);
+  const uCamY: N = uniform(9);
 
   const viewZ: N = positionView.z.negate();
 
-  // 1) Névoa de distância — mesma curva do THREE.Fog(near, far) que ela troca.
-  const distFactor: N = smoothstep(uNear, uFar, viewZ);
+  // Recuo pela altura da câmera: 0 rente ao chão → 1 no god view, com
+  // janela suave de 75% do próprio recuo (curva sem degrau perceptível).
+  const camK: N = smoothstep(uRecede, uRecede.mul(1.75), uCamY);
+
+  // 1) Névoa de distância — mesma curva do THREE.Fog(near, far) que ela
+  //    troca; desvanece conforme a câmera sobe (god view enxerga o Campo).
+  const distFactor: N = smoothstep(uNear, uFar, viewZ).mul(camK.oneMinus());
 
   // 2) Banco de altura: peso 1 no chão caindo exponencial até uHeight.
   const hNorm: N = clamp(positionWorld.y.div(max(uHeight, 0.001)), 0, 1);
@@ -101,10 +126,18 @@ export function buildHeightFog(fogColor: THREE.Color): HeightFogHandle {
     positionWorld.z.mul(0.09).sub(drift.mul(0.035)),
   );
   const noise: N = cheapTriNoise(noiseP, drift);
-  const densMod: N = noise.mul(2.2).sub(1.1).mul(uNoiseAmt).add(1).max(0);
+  // De cima o tri-noise (anisotrópico, cristas alinhadas aos eixos) viraria
+  // listras — no god view as nuvens desligam junto com o recuo (×(1−camK))
+  // e o banco vira um véu liso e uniforme sobre o chão.
+  const noiseAmtEff: N = uNoiseAmt.mul(camK.oneMinus());
+  const densMod: N = noise.mul(2.2).sub(1.1).mul(noiseAmtEff).add(1).max(0);
 
-  // Extinção exponencial-quadrada pela distância percorrida "dentro" do banco.
-  const sigma: N = uDensity.mul(0.14).mul(densMod).mul(heightBand).mul(viewZ);
+  // Extinção exponencial-quadrada pela distância percorrida "dentro" do
+  // banco. De cima (camK→1) o caminho óptico satura em ~2.5× a altura do
+  // banco: o raio de um god view só atravessa a espessura da camada — o
+  // chão fica enevoado sem o Campo inteiro afundar no cinza.
+  const effZ: N = mix(viewZ, min(viewZ, uHeight.mul(2.5)), camK);
+  const sigma: N = uDensity.mul(0.14).mul(densMod).mul(heightBand).mul(effZ);
   const heightFactor: N = sigma.mul(sigma).negate().exp().oneMinus();
 
   const factor: N = clamp(max(distFactor, heightFactor), 0, 1);
@@ -127,6 +160,15 @@ export function buildHeightFog(fogColor: THREE.Color): HeightFogHandle {
     setRange: (near, far) => {
       uNear.value = near;
       uFar.value = far;
+    },
+    setRecede: (v) => {
+      uRecede.value = v;
+    },
+    setCamHeight: (v) => {
+      uCamY.value = v;
+    },
+    setColor: (hex) => {
+      (uColor.value as THREE.Color).set(hex);
     },
   };
 }

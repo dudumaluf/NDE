@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import * as THREE from "three/webgpu";
 import { OrbitControls } from "@react-three/drei";
 import { useControls } from "leva";
 import { VatCharacter } from "../vat/VatCharacter";
@@ -5,29 +7,50 @@ import { CrowdMesh } from "../crowd/CrowdMesh";
 import { StateButtons } from "../ui/StateButtons";
 import { PlayerBridge } from "./PlayerBridge";
 import { mouseTarget } from "../sim/mouseTarget";
-import { qpNum, qpStr } from "../lib/urlParams";
+import { qpStr } from "../lib/urlParams";
+import { pref } from "../lib/prefs";
+import { useAppearance } from "../ui/appearanceStore";
 
 export const SCENE_MODES = ["multidao", "personagem"] as const;
 export type SceneMode = (typeof SCENE_MODES)[number];
 
 export function initialSceneMode(): SceneMode {
-  return qpStr<SceneMode>("scene", "multidao", SCENE_MODES);
+  // qp `scene` > padrão salvo (grupo Preferências) > fábrica.
+  const saved = pref<SceneMode>("Cena.modo", "multidao", SCENE_MODES);
+  return qpStr<SceneMode>("scene", saved, SCENE_MODES);
 }
 
 /**
- * Cena compartilhada: chão + grid (eco do patch), luzes neutras, fog cinza
- * herdado do ClearColor 0.427. Dois modos: multidão (M1) e personagem
- * (demo de morph M0.5) — os botões de estado valem para ambos.
+ * Cena compartilhada: chão + grid (eco do patch), luzes neutras. Dois modos:
+ * multidão (M1) e personagem (demo de morph M0.5) — os botões de estado
+ * valem para ambos.
+ *
+ * Cores do mundo (fundo/céu, chão, grid) vêm do grupo "Aparência" do leva
+ * (useAppearance). A NÉVOA inteira (de altura E a linear clássica) é
+ * propriedade do PostFX desde 2026-07-12 — o toggle master de lá liga/
+ * desliga de verdade; aqui não se declara mais `<fog>`.
  */
 export function Scene() {
   const { modo } = useControls("Cena", {
     modo: { value: initialSceneMode(), options: [...SCENE_MODES] },
   });
 
+  const fundo = useAppearance((s) => s.fundo);
+  const chao = useAppearance((s) => s.chao);
+  const gridCor = useAppearance((s) => s.gridCor);
+  const gridAlpha = useAppearance((s) => s.gridAlpha);
+
+  // GridHelper assa as duas cores em vertex colors no construtor — mudar cor
+  // exige remontar (key). Mantém a razão original entre linha central e as
+  // demais (#7c7c7c → #686868 ≈ ×0.84).
+  const gridSecundaria = useMemo(
+    () => "#" + new THREE.Color(gridCor).multiplyScalar(0.84).getHexString(),
+    [gridCor],
+  );
+
   return (
     <>
-      <color attach="background" args={["#6d6d6d"]} />
-      <fog attach="fog" args={["#6d6d6d", qpNum("fogNear", 14), qpNum("fogFar", 55)]} />
+      <color attach="background" args={[fundo]} />
 
       <hemisphereLight args={["#d8dde6", "#46413c", 1.0]} />
       <directionalLight position={[4, 6, 3]} intensity={1.7} color="#fff1de" />
@@ -40,11 +63,15 @@ export function Scene() {
         }}
       >
         <circleGeometry args={[80, 64]} />
-        <meshStandardMaterial color="#616161" roughness={0.95} metalness={0} />
+        <meshStandardMaterial color={chao} roughness={0.95} metalness={0} />
       </mesh>
       <gridHelper
-        args={[42.5, 170, "#7c7c7c", "#686868"]}
+        key={`${gridCor}-${gridAlpha < 1}`}
+        args={[42.5, 170, gridCor, gridSecundaria]}
         position-y={0.002}
+        visible={gridAlpha > 0.004}
+        material-transparent={gridAlpha < 1}
+        material-opacity={gridAlpha}
       />
 
       <PlayerBridge />

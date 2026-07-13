@@ -1,27 +1,39 @@
 import type { CrowdAttributes } from "../vat/vatGeometry";
 import type { Content } from "../data/types";
 import type { DemoClassification } from "../data/demoLens";
-import type { LegendFlash } from "../ui/legendStore";
+import type { ActiveLegendFlash } from "../ui/legendStore";
 import { desaturate } from "../data/palette";
 
 /**
- * Coesão visual (M3.5): quem NÃO pertence ao grupo em foco dessatura — a via
- * mais barata possível, re-escrevendo o MESMO iColorScale que já existe
- * (46 escritas por mudança, nada por frame, nenhum uniform/shader novo).
+ * Coesão visual (M3.5): re-escrita do MESMO iColorScale que já existe
+ * (46 escritas por mudança, nenhum uniform/shader novo).
  *
- * Duas intensidades:
+ * Duas vias:
  *  - lente de elemento ativa → quem não tem o elemento fica ~35% mais cinza
  *    e um tico mais escuro (segue legível, mas recua);
- *  - "flash" da legenda (clique num chip) → todos fora do grupo clicado
- *    dessaturam forte por ~2s (o timer vive no legendStore).
+ *  - "flash" da legenda (clique num chip) → contraste MÁXIMO (pedido do
+ *    Dudu, 2026-07-12): selecionados mantêm a cor PLENA, todos os demais
+ *    COLAPSAM para um cinza uniforme — mesmo tom para todo mundo, não só
+ *    dessaturado. `flashK` (envelope calculado no CrowdMesh: 1 no hold,
+ *    smootherstep→0 no fade) anima a volta; `flashIntensity` é o slider
+ *    "destaque: intensidade" (1 = colapso total no cinza).
  *
- * Rodar SEMPRE depois de fillContentAttributes (lê a cor base já escrita).
+ * Rodar SEMPRE depois de fillContentAttributes + ajuste HSB (lê a cor base
+ * já escrita — o cinza do colapso fica uniforme mesmo com HSB mexido).
  */
+
+/** O cinza uniforme do colapso: tom único, um degrau acima dos dormentes. */
+const FLASH_GRAY: [number, number, number] = [0.40, 0.395, 0.385];
+
 export interface EmphasisOpts {
   /** Key do elemento da lente ativa (null = sem lente de elemento). */
   elementLens: string | null;
   /** Destaque temporário disparado pela legenda. */
-  flash: LegendFlash | null;
+  flash: ActiveLegendFlash | null;
+  /** Envelope do flash agora (1 = pleno, 0 = apagado). Default 1. */
+  flashK?: number;
+  /** Slider "destaque: intensidade" (0..1). Default 1. */
+  flashIntensity?: number;
 }
 
 export function applyColorEmphasis(
@@ -29,13 +41,15 @@ export function applyColorEmphasis(
   count: number,
   content: Content,
   demoCls: DemoClassification | null,
-  { elementLens, flash }: EmphasisOpts,
+  { elementLens, flash, flashK = 1, flashIntensity = 1 }: EmphasisOpts,
 ): void {
-  if (!elementLens && !flash) return;
+  const flashOn = flash !== null && flashK > 0 && flashIntensity > 0;
+  if (!elementLens && !flashOn) return;
 
   const people = content.manifest.people;
   const n = Math.min(people.length, count);
   const arr = attrs.colorScale.array as Float32Array;
+  const collapse = flashOn ? flashK * flashIntensity : 0;
 
   for (let i = 0; i < n; i++) {
     const p = people[i];
@@ -55,22 +69,21 @@ export function applyColorEmphasis(
     }
     const inLens = elementLens ? p.elements.includes(elementLens) : true;
 
-    let k = 0;
-    let dim = 1;
-    if (flash && !inFlash) {
-      k = 0.7;
-      dim = 0.85;
-    } else if (!flash && !inLens) {
-      k = 0.35;
-      dim = 0.92;
-    }
-    if (k === 0) continue;
-
     const o = i * 4;
-    const [r, g, b] = desaturate([arr[o], arr[o + 1], arr[o + 2]], k, dim);
-    arr[o] = r;
-    arr[o + 1] = g;
-    arr[o + 2] = b;
+    const base: [number, number, number] = [arr[o], arr[o + 1], arr[o + 2]];
+
+    // Camada 1 — lente: recuo suave de quem não pertence.
+    const lensC = inLens ? base : desaturate(base, 0.35, 0.92);
+
+    // Camada 2 — flash: cor plena vs cinza uniforme, cruzadas por `collapse`
+    // (contínuo: no fim do fade volta exatamente à camada 1, sem pop).
+    const fr = inFlash ? base[0] : FLASH_GRAY[0];
+    const fg = inFlash ? base[1] : FLASH_GRAY[1];
+    const fb = inFlash ? base[2] : FLASH_GRAY[2];
+
+    arr[o] = lensC[0] + (fr - lensC[0]) * collapse;
+    arr[o + 1] = lensC[1] + (fg - lensC[1]) * collapse;
+    arr[o + 2] = lensC[2] + (fb - lensC[2]) * collapse;
   }
   attrs.colorScale.needsUpdate = true;
 }

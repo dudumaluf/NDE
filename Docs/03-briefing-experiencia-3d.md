@@ -238,3 +238,63 @@ automáticos"); off = os botões globais de estado continuam valendo (debug).
 Beats por pessoa dirigindo os estados (queda/hold/levantar do doc 01 §4 no
 Campo, além do follow) = Maré/M4: os slots z/w do agentMeta ficaram
 reservados para valência/beat.
+
+### 14.5 Aparência e preset persistente (2026-07-12 — pedidos diretos do Dudu)
+
+**Preset persistente (o `tuning.json` do §4.6 realizado).** Grupo
+"Preferências" no leva: *salvar como padrão* serializa TODOS os inputs de
+valor do painel (qualquer grupo — toggles, sliders, dropdowns, cores) num
+blob versionado no localStorage (`limiar.tuning`, formato
+`{app:"limiar-tuning", version, savedAt, values:{"<Grupo.key>": v}}`);
+*exportar* manda o MESMO blob para clipboard + download `tuning.json`;
+*importar* cola o JSON, aplica na hora (set no levaStore) e persiste;
+*restaurar fábrica* apaga e recarrega. Engenharia em `src/lib/prefs.ts`:
+os defaults de TODO controle passam por `pref("Grupo.key", fábrica)` (ou
+`prefNum/prefBool/prefStr("qp", "Grupo.key", fábrica)` quando existe query
+param) — precedência **query param > salvo > fábrica**, então URLs de
+screenshot seguem reproduzíveis. Merge por CHAVE e tolerante entre versões:
+chave salva que não existe mais é ignorada, controle novo usa a fábrica,
+tipo divergente cai na fábrica. **Regra para código novo: controle de leva
+novo nasce com o default embrulhado em pref()** — é o que o torna
+persistível. Sonda: `scripts/prefs-probe.mjs` (salva→reload→qp→fábrica).
+
+**Névoa dominável.** O PostFX virou o dono ÚNICO da névoa (Scene.tsx não
+declara mais `<fog>`): toggle **"névoa (master)"** — off = zero névoa (nem
+a linear clássica, que antes ficava sempre acesa por baixo do efeito);
+master on + efeito de altura off = THREE.Fog linear (paridade com o M0).
+**Recuo por altura da câmera** (o "vistas de cima engolem tudo" do Dudu):
+uniform `uCamY` alimentado pela câmera a cada frame + slider "névoa:
+altura de recuo" (`?fogRecuo=`, default 16 m; 80 ≈ nunca) — camK =
+smoothstep(recuo, 1.75×recuo, camY) desvanece a névoa de DISTÂNCIA
+(×(1−camK)), satura o caminho óptico do banco em 2,5× a altura dele
+(min(viewZ, 2.5×h) — de cima um raio só atravessa a espessura da camada,
+não a distância inteira) e desliga o tri-noise (anisotrópico, de topo
+viraria listras). Resultado: god view limpo com o chão ainda enevoado,
+rente ao chão nada muda.
+
+**Cores do mundo (grupo "Aparência").** Fundo/céu (não há dome — o céu É o
+clear color), cor da névoa (segue o fundo por default, toggle solta),
+chão, grid (cor + alpha; GridHelper assa cores em vertex colors → remonta
+por key na troca; a 2ª cor mantém a razão ×0.84 da original). **HSB global
+das pessoas**: matiz (°) / saturação / brilho aplicados à paleta de núcleos
+E aos dormentes por re-escrita do `iColorScale` (rgb→hsl→ajuste→rgb em
+`palette.applyHsbToColorScale`) — mesma via do colorEmphasis, CPU no evento,
+zero custo por frame, zero shader novo.
+
+**Destaque forte da legenda.** Clique no chip: selecionados mantêm cor
+PLENA, todos os demais COLAPSAM para um cinza uniforme (mesmo tom
+`FLASH_GRAY`, não dessaturação individual) — contraste máximo. Envelope
+temporal: hold pleno (slider "destaque: duração") → fade-out suave 0,7 s
+(smootherstep, repinta o iColorScale só enquanto o valor anda — ~40 frames
+de CPU barata). Slider "destaque: intensidade" (0..1) dosa o colapso; a
+camada da lente (dessaturação 35% dos não-pertencentes) é cruzada pelo
+envelope — sem pop no fim do fade. Headless: `?flash=cluster:5`
+(`demo:i`/`side:has|not`) + `?flashDelay=` + `?flashHold=`.
+
+**Só quem tem história.** Toggle na Multidão: `mesh.count` cai para o nº de
+pessoas reais — pessoa i = INSTÂNCIA i por construção do M3, e a permutação
+de spawn (`i×197 mod count`) embaralha só a POSIÇÃO inicial, não a
+identidade do slot, então desenhar os primeiros 46 desenha exatamente as 46
+pessoas. A sim continua inteira (dormentes seguem ocupando espaço e
+empurrando — corte de desenho, não de simulação); fios e labels seguem
+válidos (só referenciam índices < 46). `?onlyPeople=1`.

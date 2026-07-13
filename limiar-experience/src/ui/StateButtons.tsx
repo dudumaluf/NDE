@@ -3,6 +3,7 @@ import { button, useControls } from "leva";
 import { vatPlayer } from "../vat/VatClipPlayer";
 import { vat, vatB } from "../vat/runtime";
 import { cancelStoryArc, playStoryArc } from "../vat/storyArc";
+import { pref } from "../lib/prefs";
 
 /**
  * Botões de estado narrativo (doc 01 §4). Cada clique morfa a animação
@@ -58,7 +59,7 @@ export function StateButtons() {
         vatPlayer.play(0);
       }),
       fade: {
-        value: 0.35,
+        value: pref("Estados (morph seamless).fade", 0.35),
         min: 0,
         max: 1.5,
         label: "fade (s)",
@@ -67,7 +68,7 @@ export function StateButtons() {
         },
       },
       velocidade: {
-        value: 1,
+        value: pref("Estados (morph seamless).velocidade", 1),
         min: 0,
         max: 3,
         onChange: (v: number) => {

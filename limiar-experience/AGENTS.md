@@ -110,6 +110,45 @@ Leia antes de qualquer tarefa, nesta ordem:
   frase_visitante no bottom; ênfase de cor (`colorEmphasis.ts`) re-escreve
   o iColorScale (lente dessatura não-pertencentes; clique na legenda
   destaca por 2 s).
+- **Preferências persistentes (2026-07-12)**: `src/lib/prefs.ts` + grupo
+  "Preferências" (`src/ui/PrefsControls.tsx`). Blob versionado no
+  localStorage `limiar.tuning` com `values` por PATH do leva
+  ("Grupo.key" — a KEY, não o label). Precedência de boot: **query param >
+  salvo > fábrica**; merge por chave tolerante (chave morta ignorada, tipo
+  divergente cai na fábrica). REGRA: todo controle novo do leva nasce com o
+  default embrulhado — `pref("Grupo.key", def)` ou
+  `prefNum/Bool/Str("qp", "Grupo.key", def)` se tem query param; sem isso
+  ele salva mas não RESTAURA. Export/import = o mesmo blob (tuning.json,
+  doc 03 §4.6). Sonda: `scripts/prefs-probe.mjs`; ganchos dev
+  `__limiarPrefsCollect/__limiarPrefsSave`.
+- **Aparência (2026-07-12)**: grupo do leva em `src/ui/AppearanceControls.tsx`
+  → zustand `useAppearance` → consumidores: Scene (fundo/chão/grid; GridHelper
+  assa cor em vertex colors → remonta por `key`), PostFX (cor da névoa) e
+  CrowdMesh (HSB global + destaque). HSB das pessoas =
+  `palette.applyHsbToColorScale` re-escrevendo o iColorScale (núcleos E
+  dormentes; CPU no evento, nada por frame). NÃO há céu/dome — céu = clear
+  color.
+- **Névoa é do PostFX** (2026-07-12): Scene.tsx não declara `<fog>`.
+  Master toggle "névoa (master)" (`?fog=0` desliga TUDO); master on +
+  altura off = THREE.Fog linear clássico; altura on = fogNode TSL. **Recuo
+  por altura da câmera**: uCamY (uniform por frame) + slider "névoa: altura
+  de recuo" (`?fogRecuo=`, default 16; 80 ≈ nunca) — acima do recuo a névoa
+  de distância desvanece, o caminho óptico do banco satura em 2,5×altura e
+  o tri-noise desliga (de topo viraria listras). God view limpo, chão
+  enevoado.
+- **Destaque forte da legenda (2026-07-12)**: clique no chip → selecionados
+  com cor plena, resto colapsa num cinza ÚNICO (`FLASH_GRAY` no
+  colorEmphasis) com envelope hold→fade 0,7 s (`legendFlashK`; repaint do
+  iColorScale só enquanto o valor anda). Sliders "destaque:
+  intensidade/duração" (grupo Aparência). Headless: `?flash=cluster:5`
+  (`demo:i`/`side:has|not`) + `?flashDelay=` (do content pronto) +
+  `?flashHold=` (estica o hold p/ o screenshot cair na janela).
+- **"Só quem tem história"** (toggle na Multidão, `?onlyPeople=1`):
+  `mesh.count` = nº de pessoas — pessoa i = INSTÂNCIA i (a permutação de
+  spawn muda só a posição inicial, não a identidade do slot), então os
+  primeiros 46 desenhados SÃO as 46 pessoas. Corte de desenho: a sim roda
+  inteira (dormentes seguem empurrando); fios/labels intactos. Efeito
+  separado do reset — alternar não respawna.
 - **Aprendizados de GPU que custaram caro (não re-derivar)**:
   (a) num LineSegments, TODO nó que dependa de attribute de índice
   (aAgent/aOther) tem de ser avaliado no VERTEX e passado por `varying()` —

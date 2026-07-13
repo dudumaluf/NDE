@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useContent } from "../data/contentStore";
 import { useDemoLens } from "../data/demoLensStore";
 import { clusterColor, cssColor, desaturate } from "../data/palette";
+import { qpNum, qpStr } from "../lib/urlParams";
 import { triggerLegendFlash, useLegend, type LegendFlash } from "./legendStore";
+import { useAppearance } from "./appearanceStore";
 
 /**
  * Legenda da experiência (M3.5) — a primeira peça da UI REAL do LIMIAR,
@@ -160,11 +162,36 @@ function BottomPhrase({ phrase }: { phrase: string | null }) {
 export function Legend() {
   const model = useLegendModel();
   const flash = useLegend((s) => s.flash);
+  // Duração do destaque vem do grupo Aparência (slider "destaque: duração").
+  const destaqueDuracao = useAppearance((s) => s.destaqueDuracao);
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60);
     return () => clearTimeout(t);
   }, []);
+
+  // ?flash=cluster:5 (ou demo:2 / side:has) dispara o destaque sem clique —
+  // screenshots headless reproduzíveis. Conta a partir do content carregado
+  // (no fallback WebGL2 a compilação come segundos de relógio); ?flashHold=
+  // estica o hold além do slider (headless bate o shutter dentro da janela).
+  const hasModel = model !== null;
+  useEffect(() => {
+    if (!hasModel) return;
+    const spec = qpStr<string>("flash", "");
+    if (!spec) return;
+    const [kind, id] = spec.split(":");
+    if (!id || !["cluster", "demo", "side"].includes(kind)) return;
+    const t = setTimeout(
+      () =>
+        triggerLegendFlash(
+          { kind: kind as LegendFlash["kind"], id },
+          qpNum("flashHold", destaqueDuracao * 1000),
+        ),
+      qpNum("flashDelay", 800),
+    );
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasModel]);
 
   if (!model) return null;
   const activeFlashKey = flash ? `${flash.kind}:${flash.id}` : null;
@@ -213,7 +240,7 @@ export function Legend() {
             return (
               <button
                 key={chip.key}
-                onClick={() => triggerLegendFlash(chip.flash)}
+                onClick={() => triggerLegendFlash(chip.flash, destaqueDuracao * 1000)}
                 title="destacar no Campo"
                 style={{
                   all: "unset",

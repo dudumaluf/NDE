@@ -8,7 +8,7 @@ import { buildCharacterMaterial } from "./characterMaterial";
 import { useVatTextures } from "./useVatTextures";
 import { vatPlayer } from "./VatClipPlayer";
 import { hasRootMotion, rootMotionOffset } from "./rootMotion";
-import { qpBool } from "../lib/urlParams";
+import { pref, prefBool } from "../lib/prefs";
 
 /** Personagem único — palco da demo de morph entre estados (e entre VATs). */
 export function VatCharacter() {
@@ -25,10 +25,10 @@ export function VatCharacter() {
 
   const withRootMotion = useMemo(hasRootMotion, []);
   const c = useControls("Personagem", {
-    escala: { value: 2.5, min: 0.1, max: 5 },
+    escala: { value: pref("Personagem.escala", 2.5), min: 0.1, max: 5 },
     rootMotion: {
       // ?rootMotion=0 desliga (screenshots determinísticos do antes/depois)
-      value: qpBool("rootMotion", true),
+      value: prefBool("rootMotion", "Personagem.rootMotion", true),
       label: "root motion (translate)",
       hint: "aplica a trajetória exportada pelo bake in-place como translate do mesh — para one-shots dirigidos; a multidão ignora (movimento vem da simulação)",
       render: () => withRootMotion,

@@ -68,6 +68,52 @@ export function cssColor([r, g, b]: [number, number, number]): string {
   return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
 }
 
+/** Inverso do hslToRgb acima (h em graus 0–360, s/l em 0–1). */
+export function rgbToHsl(
+  r: number,
+  g: number,
+  b: number,
+): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d < 1e-6) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) h = 60 * (((g - b) / d) % 6);
+  else if (max === g) h = 60 * ((b - r) / d + 2);
+  else h = 60 * ((r - g) / d + 4);
+  return [(h + 360) % 360, Math.min(s, 1), l];
+}
+
+/**
+ * Ajuste GLOBAL de matiz/saturação/brilho das pessoas (grupo "Aparência"):
+ * re-escreve o MESMO iColorScale por cima da paleta (núcleos + dormentes),
+ * como o colorEmphasis — CPU no evento de mudança, zero custo por frame.
+ * hue em graus (−180..180), sat/bri multiplicadores (1 = paleta original).
+ */
+export function applyHsbToColorScale(
+  arr: Float32Array,
+  count: number,
+  hue: number,
+  sat: number,
+  bri: number,
+): void {
+  for (let i = 0; i < count; i++) {
+    const o = i * 4;
+    const [h, s, l] = rgbToHsl(arr[o], arr[o + 1], arr[o + 2]);
+    const [r, g, b] = hslToRgb(
+      (h + hue + 360) % 360,
+      Math.min(1, Math.max(0, s * sat)),
+      Math.min(1, Math.max(0, l * bri)),
+    );
+    arr[o] = r;
+    arr[o + 1] = g;
+    arr[o + 2] = b;
+  }
+}
+
 // --- Leitura visual (M3.5) ---------------------------------------------------
 
 /**
