@@ -324,6 +324,88 @@ check(
 );
 await page4.screenshot({ path: "shots/studio-8-perna.png" });
 
+// ---------------------------------------------------------------------------
+// Parte 5 — REGRESSÃO DO FLUXO CLÁSSICO (permanente): base GLB + anim GLB
+// sem skin do MESMO rig, com os nós do arquivo de animação POSADOS num frame
+// do clipe (como o Blender exporta) — o retarget deve aplicar DIRETO:
+// os valores entregues têm de ser IDÊNTICOS aos crus (delta 0.0, não
+// "pequeno"). Regressão real: o rebase por pose de descanso inferia o rest
+// do frame posado e cruzava os braços.
+
+console.log("--- parte 5: regressão do fluxo clássico (GLB + GLB sem skin, mesmo rig) ---");
+{
+  const THREE = await import("three");
+  const { loadModelFile: loadM, buildModel, selectClips } = await import("../vat-core.mjs");
+
+  // fixture gerada na hora: Walk do Soldier como anim-only, nós POSADOS em t=0.4s
+  const src = await loadM(resolve("tools/fixtures/Soldier.glb"), () => {});
+  const clip = src.animations.find((a) => a.name === "Walk").clone();
+  clip.name = "andar";
+  const mixer = new THREE.AnimationMixer(src.scene);
+  mixer.clipAction(clip).play();
+  mixer.setTime(0.4);
+  src.scene.updateMatrixWorld(true);
+  const holder = new THREE.Group();
+  src.scene.traverse((o) => {
+    if (o.isBone && !o.parent?.isBone) holder.add(o.clone(true));
+  });
+  const noskinPath = join(tmpdir(), "soldier-andar-noskin.glb");
+  writeFileSync(
+    noskinPath,
+    Buffer.from(
+      await new Promise((res, rej) =>
+        new GLTFExporter().parse(holder, res, rej, { binary: true, animations: [clip] }),
+      ),
+    ),
+  );
+
+  const files = [
+    { path: resolve("tools/fixtures/Soldier.glb"), gltf: await loadM(resolve("tools/fixtures/Soldier.glb"), () => {}) },
+    { path: noskinPath, gltf: await loadM(noskinPath, () => {}) },
+  ];
+  const model = buildModel(files[0].gltf, "Soldier.glb", () => {});
+  const raw = files[1].gltf.animations[0];
+  const entries = selectClips(files, model, [{ file: 1, clip: 0, name: "andar", mode: "loop", inPlace: false }], () => {});
+  let worst = 0;
+  let compared = 0;
+  for (const t of raw.tracks) {
+    const r = entries[0].clip.tracks.find((x) => x.name === t.name);
+    if (!r) continue;
+    compared += 1;
+    for (let i = 0; i < t.values.length; i++) worst = Math.max(worst, Math.abs(t.values[i] - r.values[i]));
+  }
+  check(
+    compared > 100 && worst === 0,
+    `fluxo clássico aplicado DIRETO: delta ${worst} em ${compared} tracks (exigido: 0.0 exato)`,
+  );
+
+  // e o caso FBX×GLB legítimo (mesmo personagem) segue rebaseado e no chão
+  const files2 = [
+    { path: resolve("tools/fixtures/xbot.glb"), gltf: await loadM(resolve("tools/fixtures/xbot.glb"), () => {}) },
+    { path: resolve("tools/fixtures/samba-anim.fbx"), gltf: await loadM(resolve("tools/fixtures/samba-anim.fbx"), () => {}) },
+  ];
+  const model2 = buildModel(files2[0].gltf, "xbot.glb", () => {});
+  const entries2 = selectClips(files2, model2, [{ file: 1, clip: 0, name: "samba", mode: "loop", inPlace: false }], () => {});
+  const mx = new THREE.AnimationMixer(files2[0].gltf.scene);
+  mx.clipAction(entries2[0].clip).play();
+  let minFoot = Infinity;
+  const v = new THREE.Vector3();
+  for (const t of [0.5, 2.0, 7.5]) {
+    mx.setTime(t);
+    files2[0].gltf.scene.updateMatrixWorld(true);
+    files2[0].gltf.scene.traverse((o) => {
+      if (o.isBone && /LeftFoot$|RightFoot$/.test(o.name)) {
+        o.getWorldPosition(v);
+        if (v.y < minFoot) minFoot = v.y;
+      }
+    });
+  }
+  check(
+    minFoot > -0.1 && minFoot < 0.35,
+    `FBX×GLB (mesmo personagem) segue com pés no chão (menor pé Y = ${minFoot.toFixed(3)})`,
+  );
+}
+
 console.log(failed ? "E2E: FALHOU" : "E2E: OK");
 if (logs.some((l) => l.startsWith("[pageerror]"))) console.log(logs.filter((l) => l.startsWith("[pageerror]")).join("\n"));
 

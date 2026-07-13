@@ -128,11 +128,22 @@ node tools/vat-bake.mjs tools/fixtures/samba.fbx tools/fixtures/samba-anim.fbx \
      clipes mostra `N/M tracks casam` e acusa **✗ esqueleto incompatível**
      (clipe já desmarcado) quando nada casa;
    - **misturar base GLB + animação FBX** (ou vice-versa) funciona: tracks
-     de posição/rotação são **rebaseadas para a convenção do rig da base**
-     (`tools/retarget-units.mjs` — rigs GLB do Blender guardam ossos em cm,
-     Z-up, sob nó 0,01 e reorientam juntas; sem o rebase o corpo afundava,
-     "chão na cintura", ou tombava). Tracks de containers ("Armature") de
-     outros arquivos são ignoradas — só ossos entram;
+     são adaptadas à convenção do rig da base quando necessário (abaixo).
+     Tracks de containers ("Armature") de outros arquivos são ignoradas —
+     só ossos entram;
+   - **quando o retarget transforma e quando aplica direto**
+     (`tools/retarget-units.mjs`): se os ossos homônimos têm as MESMAS
+     translações locais (critério imune a pose — cobre anims sem skin cujos
+     nós foram exportados posados num frame do clipe), a aplicação é
+     **DIRETA**, byte a byte — o fluxo clássico GLB+GLB do mesmo rig nunca
+     é "corrigido". O rebase só entra com diferença REAL de convenção
+     (anim FBX em m/Y-up sobre rig GLB em cm/Z-up sob nó 0,01): posições
+     rebaseadas (raiz exata; internas caem no descanso da base) e rotação
+     corrigida SÓ nos ossos-raiz (frame do container, imune a pose) — os
+     frames de junta internos são idênticos entre exports do mesmo
+     esqueleto (medido: 0,00° em 67 ossos), então rotações internas passam
+     cruas. Um "rest" duvidoso jamais vira base de correção: vira só o
+     aviso de pose de descanso na UI;
    - **chão por clipe**: no bake, CADA clipe é aterrado com os pés no y=0
      (offset automático registrado em `clips[].groundOffset` no vat.json).
      O campo **Y** ao lado de loop/única é o ajuste MANUAL por clipe

@@ -1,31 +1,38 @@
 /**
- * retarget-units — rebaseia tracks de POSIÇÃO e ROTAÇÃO à convenção do rig
- * de destino no retarget entre arquivos. Compartilhado entre o bake
+ * retarget-units — decide se tracks de animação de OUTRO arquivo entram
+ * DIRETO no rig do personagem ou precisam de rebase de convenção, e faz o
+ * rebase quando (e só quando) ele é necessário. Compartilhado entre o bake
  * (tools/vat-core.mjs) e o preview do Studio (tools/studio/app.js).
  *
- * O problema que resolve (bug real: base GLB + animação FBX do Mixamo, "o
- * chão ficou na cintura"): rotações e posições de track são expressas no
- * ESPAÇO LOCAL DO PAI de cada osso — e esse espaço difere entre exports do
- * mesmo esqueleto. Rig Mixamo→Blender→GLB típico: ossos em CENTÍMETROS num
- * espaço Z-up, sob um nó com rotação −90°X e escala 0,01; anim FBX
- * normalizada: metros, Y-up, pai identidade. Copiar valores crus afunda o
- * corpo (posição ~1% do esperado) e/ou tomba o personagem de lado (rotação
- * da raiz aplicada no espaço errado).
+ * POLÍTICA (aprendida com uma regressão real):
  *
- * Rebase relativo à pose de descanso (retarget clássico): o DELTA de cada
- * osso em relação ao próprio descanso viaja em espaço de mundo e é aplicado
- * sobre o descanso do rig de destino —
+ * 1. MESMO RIG/CONVENÇÃO → APLICAÇÃO DIRETA (bypass total). Critério
+ *    POSE-INVARIANTE: as translações LOCAIS dos ossos homônimos são iguais
+ *    dentro de tolerância apertada (≥95% dos ossos casados). Posar um
+ *    esqueleto muda quaternions, nunca as translações locais — então o
+ *    critério vale mesmo quando o arquivo de animação foi exportado com os
+ *    nós "descansando" num frame do clipe (anim-only do Blender), que era
+ *    exatamente o caso que gerava correções espúrias (braços cruzados no
+ *    fluxo clássico GLB+GLB).
  *
- *   posição:  v' = restDst + Mdst⁻¹ · s · Msrc · (v − restSrc)
- *   rotação:  q' = A · q · B,  A = Qdst⁻¹·Qsrc,  B = Wsrc⁻¹·Wdst
+ * 2. CONVENÇÕES DIFEREM (ex.: anim FBX em m/Y-up sobre rig GLB do Blender
+ *    com ossos em cm/Z-up sob nó 0,01×R(−90°X)) → rebase MÍNIMO e só com
+ *    quantidades confiáveis:
+ *    - posições: v' = restDst + Mdst⁻¹·s·Msrc·(v − restSrc), exato para a
+ *      raiz (os pais são containers, imunes a pose); tracks internas são
+ *      ~constantes e caem em restDst por construção;
+ *    - rotações: SÓ os ossos-RAIZ ganham a correção de frame do pai
+ *      (q' = Qdst⁻¹·Qsrc·q — containers, também imunes a pose). Ossos
+ *      internos passam CRUS: medido em bind real, os frames de junta de
+ *      exports GLB (Blender) e FBX (Mixamo) do mesmo esqueleto são
+ *      idênticos (Δ 0,00° em 67 ossos) — qualquer "correção" por osso
+ *      interno derivada da cena é contaminação de pose, não convenção.
+ *    - a proporção s vem de COMPRIMENTOS de osso (invariantes a pose),
+ *      não de posições de mundo.
  *
- * onde M e Q = matrixWorld (3×3 e rotação) do PAI em descanso, W = rotação
- * de MUNDO do PRÓPRIO osso em descanso e s = proporção entre os personagens
- * (mediana das razões de |posição de mundo| dos ossos homônimos). Por
- * construção, o descanso da fonte mapeia exatamente no descanso do destino;
- * rigs com a MESMA convenção de frames dão A=B=I (no-op). É o que faz uma
- * anim FBX crua do Mixamo funcionar sobre um rig GLB do Blender, que
- * reorienta os ossos (Y ao longo do osso) e guarda cm/Z-up sob nó 0,01.
+ * 3. "Rest" duvidoso NUNCA vira base de correção — os avisos heurísticos da
+ *    UI (pose de descanso, juntas congeladas) informam; transformação é
+ *    outra coisa.
  */
 
 import * as THREE from "three";
@@ -33,9 +40,10 @@ import * as THREE from "three";
 const EPS = 1e-4;
 
 /**
- * Mapa nome do osso → dados de descanso: translação local, 3×3 e rotação do
- * mundo do PAI, rotação de mundo do PRÓPRIO osso e posição de mundo. Chame
- * com a cena EM POSE DE DESCANSO.
+ * Mapa nome do osso → dados de descanso pose-seguros ou marcados:
+ * translação local (pose-invariante), 3×3/rotação do mundo do PAI
+ * (confiável só quando o pai NÃO é osso), se o pai é osso, posição de
+ * mundo e nome do pai (para comprimentos). Chame com a cena carregada.
  */
 export function restPoseMaps(scene) {
   scene.updateMatrixWorld(true);
@@ -49,13 +57,13 @@ export function restPoseMaps(scene) {
     o.getWorldPosition(world);
     const parentMW = o.parent ? o.parent.matrixWorld : new THREE.Matrix4();
     parentMW.decompose(pos, quat, scl);
-    const worldQuat = new THREE.Quaternion();
-    o.getWorldQuaternion(worldQuat);
     map.set(o.name, {
       local: o.position.clone(),
       parentM3: new THREE.Matrix3().setFromMatrix4(parentMW),
       parentQuat: quat.clone(),
-      worldQuat,
+      parentIsBone: Boolean(o.parent?.isBone),
+      parentName: o.parent?.name ?? null,
+      worldPos: world.clone(),
       worldMag: world.length(),
     });
   };
@@ -87,41 +95,61 @@ export function worldScaleOf(maps) {
   return vals[(vals.length - 1) >> 1];
 }
 
-/** Proporção fonte→destino: mediana das razões de |posição de mundo| dos ossos homônimos. */
+/**
+ * Proporção fonte→destino pela mediana das razões de COMPRIMENTO de osso
+ * (|mundo do osso − mundo do pai|) dos pares homônimos — comprimentos são
+ * invariantes a pose (rotação preserva distância), ao contrário das
+ * posições de mundo, que uma cena posada contaminaria.
+ */
 function proportionScale(srcMaps, dstMaps, resolveDstName) {
   const ratios = [];
   for (const [srcName, src] of srcMaps) {
-    if (src.worldMag < EPS) continue;
+    if (!src.parentName) continue;
+    const srcParent = srcMaps.get(src.parentName);
+    if (!srcParent) continue;
+    const lenSrc = src.worldPos.distanceTo(srcParent.worldPos);
+    if (lenSrc < EPS) continue;
     const dstName = resolveDstName(srcName);
     const dst = dstName ? dstMaps.get(dstName) : null;
-    if (!dst || dst.worldMag < EPS) continue;
-    ratios.push(dst.worldMag / src.worldMag);
+    if (!dst || !dst.parentName) continue;
+    const dstParent = dstMaps.get(dst.parentName);
+    if (!dstParent) continue;
+    const lenDst = dst.worldPos.distanceTo(dstParent.worldPos);
+    if (lenDst < EPS) continue;
+    ratios.push(lenDst / lenSrc);
   }
   if (ratios.length === 0) return { s: 1, matched: 0 };
   ratios.sort((a, b) => a - b);
   return { s: ratios[(ratios.length - 1) >> 1], matched: ratios.length };
 }
 
-/** ‖A − I‖∞ — para pular a transformação quando fonte e destino coincidem. */
-const I3 = new THREE.Matrix3();
-function deviationFromIdentity(A) {
-  let worst = 0;
-  for (let i = 0; i < 9; i++) {
-    const d = Math.abs(A.elements[i] - I3.elements[i]);
-    if (d > worst) worst = d;
+/** Fração de ossos casados com translação LOCAL igual (tolerância apertada). */
+function equalLocalShare(srcMaps, dstMaps, resolveDstName) {
+  let equal = 0;
+  let matched = 0;
+  for (const [srcName, src] of srcMaps) {
+    const dstName = resolveDstName(srcName);
+    const dst = dstName ? dstMaps.get(dstName) : null;
+    if (!dst) continue;
+    matched += 1;
+    if (src.local.distanceTo(dst.local) <= Math.max(1e-4, 1e-3 * dst.local.length())) equal += 1;
   }
-  return worst;
+  return { share: matched ? equal / matched : 0, matched };
 }
 
 /**
- * Rebaseia as tracks `.position` e `.quaternion` de um clipe da convenção da
- * FONTE para a do DESTINO (mutação). Tracks de nós sem dados em um dos lados
- * ficam intactas. Pressupõe que o retarget já renomeou as tracks para os
- * nomes do DESTINO. Retorna { rebased, s, matched }.
+ * Aplica a política ao clipe (mutação; tracks já renomeadas para o destino).
+ * Retorna { bypass, rebased, s, matched } — bypass true = aplicação direta
+ * (nenhum valor tocado, o comportamento clássico).
  */
 export function rebaseTracksToRig(clip, srcMaps, dstMaps, resolveDstName) {
+  const locals = equalLocalShare(srcMaps, dstMaps, resolveDstName);
+  // MESMO rig/convenção → direto (delta 0.0 por definição)
+  if (locals.matched >= 4 && locals.share >= 0.95)
+    return { bypass: true, rebased: 0, s: 1, matched: locals.matched };
+
   const { s, matched } = proportionScale(srcMaps, dstMaps, resolveDstName);
-  if (matched === 0) return { rebased: 0, s, matched };
+  if (matched === 0) return { bypass: true, rebased: 0, s: 1, matched: 0 };
 
   // nome no destino → dados da fonte (o nome pode ter sido normalizado)
   const srcByDst = new Map();
@@ -134,7 +162,6 @@ export function rebaseTracksToRig(clip, srcMaps, dstMaps, resolveDstName) {
   const inv = new THREE.Matrix3();
   const v = new THREE.Vector3();
   const qa = new THREE.Quaternion();
-  const qb = new THREE.Quaternion();
   const q = new THREE.Quaternion();
   let rebased = 0;
 
@@ -148,14 +175,10 @@ export function rebaseTracksToRig(clip, srcMaps, dstMaps, resolveDstName) {
     if (!src || !dst) continue;
 
     if (prop === ".position") {
-      // A = Mdst⁻¹ · s · Msrc (constante por osso: pais em pose de descanso —
-      // exato para a raiz; ossos internos têm tracks ~constantes = descanso,
-      // que caem exatamente em restDst)
+      // v' = restDst + Mdst⁻¹·s·Msrc·(v − restSrc): raiz exata (pais são
+      // containers); internas ~constantes caem em restDst
       inv.copy(dst.parentM3).invert();
       A3.copy(src.parentM3).multiplyScalar(s).premultiply(inv);
-      const restsMatch =
-        src.local.distanceTo(dst.local) < 1e-3 * Math.max(1, dst.local.length());
-      if (restsMatch && deviationFromIdentity(A3) < 1e-3) continue; // mesmo rig
       const val = t.values;
       for (let i = 0; i < val.length; i += 3) {
         v.set(val[i] - src.local.x, val[i + 1] - src.local.y, val[i + 2] - src.local.z);
@@ -166,16 +189,16 @@ export function rebaseTracksToRig(clip, srcMaps, dstMaps, resolveDstName) {
       }
       rebased += 1;
     } else {
-      // q' = A·q·B — A corrige o espaço do PAI, B corrige o frame do PRÓPRIO
-      // osso (rigs do Blender reorientam juntas: sem o B, pernas/braços
-      // dobram para o lado errado). Descanso mapeia em descanso.
+      // rotação: SÓ ossos-raiz (pai não é osso — containers são imunes a
+      // pose). Internos passam crus: frames de junta são iguais entre
+      // exports do mesmo esqueleto (medido: Δ 0,00°); "corrigi-los" a
+      // partir de uma cena possivelmente posada inverte braços/pernas.
+      if (src.parentIsBone || dst.parentIsBone) continue;
       qa.copy(dst.parentQuat).invert().multiply(src.parentQuat);
-      qb.copy(src.worldQuat).invert().multiply(dst.worldQuat);
-      if (Math.abs(1 - Math.abs(qa.w)) < 1e-6 && Math.abs(1 - Math.abs(qb.w)) < 1e-6)
-        continue; // mesma convenção de frames
+      if (Math.abs(1 - Math.abs(qa.w)) < 1e-6) continue; // mesmo frame de pai
       const val = t.values;
       for (let i = 0; i < val.length; i += 4) {
-        q.set(val[i], val[i + 1], val[i + 2], val[i + 3]).premultiply(qa).multiply(qb);
+        q.set(val[i], val[i + 1], val[i + 2], val[i + 3]).premultiply(qa);
         val[i] = q.x;
         val[i + 1] = q.y;
         val[i + 2] = q.z;
@@ -184,5 +207,5 @@ export function rebaseTracksToRig(clip, srcMaps, dstMaps, resolveDstName) {
       rebased += 1;
     }
   }
-  return { rebased, s, matched };
+  return { bypass: false, rebased, s, matched };
 }
