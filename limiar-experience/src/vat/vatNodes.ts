@@ -8,6 +8,7 @@ import {
   ivec2,
   mix,
   normalize,
+  select,
   textureLoad,
   uniform,
   vertexIndex,
@@ -36,6 +37,26 @@ export interface VatSampler {
 }
 
 /**
+ * Estado de animação POR INSTÂNCIA (doc 04 §5.5): nós que substituem os
+ * uniforms globais quando `enabled` > 0.5 — clipA/clipB/blend vêm do storage
+ * buffer `states` da sim e `clock` é o relógio de frame compartilhado
+ * (uniform, avança a vat().fps). A fase por agente continua dessincronizando
+ * os loops por cima do clock. Só clipes em LOOP passam por aqui (one-shots
+ * por agente ficam para o director/M4).
+ */
+export interface VatPerAgentNodes {
+  /** uniform 0/1 — o toggle master "estados automáticos". */
+  enabled: N;
+  /** Índice GLOBAL do clipe no slot A (float, por instância). */
+  clipA: N;
+  clipB: N;
+  /** Progresso do crossfade A→B [0,1] (por instância). */
+  blend: N;
+  /** Frame clock global [0, framesPerClip) — uniform do dono do material. */
+  clock: N;
+}
+
+/**
  * Cria o sampler TSL da VAT com crossfade entre dois clipes (A → B).
  *
  * Cada slot tem frame próprio (com lerp entre frames adjacentes) e o
@@ -45,11 +66,17 @@ export interface VatSampler {
  * `phaseNode` (opcional, por instância) dessincroniza a multidão; a fase
  * só se aplica a clipes em loop (phaseScale zerado pelo player em one-shots,
  * para quedas/levantadas dispararem em sincronia exata com o beat).
+ *
+ * `perAgent` (opcional): estados POR INSTÂNCIA vindos da sim — quando o
+ * gate está ligado, clipe/blend deixam de ser os uniforms globais e passam
+ * a ser lidos do storage buffer (select por uniform: os dois caminhos
+ * convivem no shader e o modo global segue como fallback de debug).
  */
 export function createVatSampler(
   posTex: THREE.Texture,
   nrmTex: THREE.Texture,
   phaseNode?: N,
+  perAgent?: VatPerAgentNodes,
 ): VatSampler {
   const v = vat();
   const uFrameA: N = uniform(0);
@@ -63,6 +90,25 @@ export function createVatSampler(
   const uOffset: N = uniform(new THREE.Vector3(...v.bakeOffset));
 
   const phase: N = phaseNode ?? float(0);
+
+  // Parâmetros efetivos dos dois slots: globais (player) ou por agente.
+  // No modo por agente todos os clipes são loops → phaseScale 1.
+  const gate: N = perAgent ? perAgent.enabled.greaterThan(0.5) : null;
+  const pick = (agentN: N, globalN: N): N =>
+    perAgent ? select(gate, agentN, globalN) : globalN;
+  const baseA: N = pick(
+    perAgent ? perAgent.clipA.mul(v.framesPerClip) : null,
+    uClipBaseA,
+  );
+  const baseB: N = pick(
+    perAgent ? perAgent.clipB.mul(v.framesPerClip) : null,
+    uClipBaseB,
+  );
+  const frameA: N = pick(perAgent ? perAgent.clock : null, uFrameA);
+  const frameB: N = pick(perAgent ? perAgent.clock : null, uFrameB);
+  const scaleA: N = pick(float(1), uPhaseScaleA);
+  const scaleB: N = pick(float(1), uPhaseScaleB);
+  const blend: N = pick(perAgent ? perAgent.blend : null, uBlend);
 
   /** Amostra um slot (clipe+frame) para uma coluna, com lerp interframe. */
   const sampleSlot = (
@@ -81,9 +127,9 @@ export function createVatSampler(
   };
 
   const sampleBlended = (tex: THREE.Texture, columnF: N): N => {
-    const a = sampleSlot(tex, columnF, uClipBaseA, uFrameA, uPhaseScaleA);
-    const b = sampleSlot(tex, columnF, uClipBaseB, uFrameB, uPhaseScaleB);
-    return mix(a, b, uBlend);
+    const a = sampleSlot(tex, columnF, baseA, frameA, scaleA);
+    const b = sampleSlot(tex, columnF, baseB, frameB, scaleB);
+    return mix(a, b, blend);
   };
 
   const localPosition = (columnF: N): N =>

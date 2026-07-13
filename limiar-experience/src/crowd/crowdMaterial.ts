@@ -2,17 +2,20 @@
 import * as THREE from "three/webgpu";
 import {
   clamp,
+  instanceIndex,
   instancedBufferAttribute,
   length,
   mix,
   normalize,
   select,
+  storage,
   transformNormalToView,
   uniform,
   varying,
   vec3,
 } from "three/tsl";
 import { createVatSampler, type VatSampler } from "../vat/vatNodes";
+import { vat } from "../vat/runtime";
 import type { CrowdAttributes } from "../vat/vatGeometry";
 import type { CrowdSim } from "../sim/CrowdSim";
 
@@ -24,16 +27,25 @@ export interface CrowdMaterialBundle {
   setScale(v: number): void;
   /** 0 = cinza (dormentes), 1 = paleta por instância (paridade com o patch). */
   setPaletteAmount(v: number): void;
-  /** 0 = normal, 1 = cor por velocidade, 2 = cor por direção. */
+  /** 0=normal, 1=velocidade, 2=direção, 3=alvo, 4=estado (máquina §5.5). */
   setDebugMode(v: number): void;
   /** +1/−1: calibra para onde o modelo "olha" em relação ao movimento. */
   setFaceFlip(v: number): void;
+  /** Liga/desliga os estados POR AGENTE (off = uniforms globais do player). */
+  setPerAgentStates(on: boolean): void;
+  /** Avança o relógio de frame dos estados por agente (dt em segundos). */
+  tickAgentClock(dt: number): void;
 }
 
 /**
  * Material da multidão dirigido pela simulação: posição, direção e fase do
  * passo vêm dos storage buffers da CrowdSim (via toAttribute, compatível com
  * o fallback WebGL2); cor e variação de escala continuam atributos estáticos.
+ *
+ * Estados por agente (doc 04 §5.5): clipA/clipB/blend são lidos do buffer
+ * `states` da sim como STORAGE no vertex stage — read-only direto no WebGPU,
+ * PBO (cópia para DataTexture) no WebGL2, padrão dos fios. Não é atributo:
+ * os 7 vertex buffers atuais ficam intactos (limite de 8 do WebGPU).
  */
 export function buildCrowdMaterial(
   posTex: THREE.Texture,
@@ -51,7 +63,26 @@ export function buildCrowdMaterial(
   const iVel: N = (sim.velocities as N).toAttribute();
   const iTarget: N = (sim.targets as N).toAttribute();
 
-  const sampler = createVatSampler(posTex, nrmTex, iPhase);
+  // Estado de animação por agente (storage read no vertex — não conta no
+  // limite de vertex buffers). setPBO: caminho por textura no WebGL2.
+  const iState: N = storage((sim.states as N).value, "vec4", sim.maxCount)
+    .setPBO(true)
+    .toReadOnly()
+    .element(instanceIndex);
+
+  // Nasce em 0 (global): o dono do mesh liga via setPerAgentStates — sem o
+  // wiring, o material se comporta exatamente como antes do M3.6.
+  const uPerAgent: N = uniform(0);
+  const uAgentClock: N = uniform(0);
+  let clock = 0;
+
+  const sampler = createVatSampler(posTex, nrmTex, iPhase, {
+    enabled: uPerAgent,
+    clipA: iState.x,
+    clipB: iState.y,
+    blend: iState.z,
+    clock: uAgentClock,
+  });
   const uScale: N = uniform(2.5);
   const uPalette: N = uniform(1);
   const uDebug: N = uniform(0);
@@ -98,6 +129,22 @@ export function buildCrowdMaterial(
     iTarget.w,
     0,
   );
+  // debug 4 (estado): cinza=parado · verde=andando · laranja=correndo ·
+  // azul=assentado-idle · roxo=rezando (stateId vive em floor(states.w)).
+  const stId: N = iState.w.floor();
+  const stateColor: N = select(
+    stId.lessThan(0.5),
+    vec3(0.72, 0.72, 0.72),
+    select(
+      stId.lessThan(1.5),
+      vec3(0.2, 0.85, 0.3),
+      select(
+        stId.lessThan(2.5),
+        vec3(1.0, 0.45, 0.08),
+        select(stId.lessThan(3.5), vec3(0.25, 0.45, 1.0), vec3(0.85, 0.25, 0.95)),
+      ),
+    ),
+  );
 
   material.colorNode = select(
     uDebug.lessThan(0.5),
@@ -105,7 +152,11 @@ export function buildCrowdMaterial(
     select(
       uDebug.lessThan(1.5),
       speedColor,
-      select(uDebug.lessThan(2.5), headingColor, tgtColor),
+      select(
+        uDebug.lessThan(2.5),
+        headingColor,
+        select(uDebug.lessThan(3.5), tgtColor, stateColor),
+      ),
     ),
   );
 
@@ -123,6 +174,15 @@ export function buildCrowdMaterial(
     },
     setFaceFlip: (v) => {
       uFaceFlip.value = v;
+    },
+    setPerAgentStates: (on) => {
+      uPerAgent.value = on ? 1 : 0;
+    },
+    tickAgentClock: (dt) => {
+      // relógio compartilhado dos loops por agente: paridade ~18 fps do
+      // patch; a fase por instância dessincroniza por cima.
+      clock = (clock + dt * vat().fps) % vat().framesPerClip;
+      uAgentClock.value = clock;
     },
   };
 }

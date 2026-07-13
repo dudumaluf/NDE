@@ -57,3 +57,46 @@ export function computeTargets(
     out[i * 4 + 3] = 1;
   }
 }
+
+export interface AgentMetaParams {
+  /** Peso do assentamento em idle (sorteio idle vs rezar, doc 04 §5.5). */
+  pesoIdle: number;
+  /** Peso do assentamento em rezar. */
+  pesoRezar: number;
+  /** Multiplicador do peso de rezar p/ quem tem `transformacao` no corpus. */
+  boostTransformacao: number;
+}
+
+/**
+ * Preenche o meta por agente (vec4: x = com-história 0/1, y = probabilidade
+ * de rezar ao assentar, z/w reservados p/ Maré/M4). O dado escolhe o gesto:
+ * quem carrega o elemento `transformacao` tende a ajoelhar. Sem content/,
+ * TODO mundo é "com-história" (multidão procedural do M2 não muda de
+ * comportamento). CPU-only; subir com sim.commitAgentMeta().
+ */
+export function computeAgentMeta(
+  content: Content | null,
+  agentCount: number,
+  out: Float32Array,
+  { pesoIdle, pesoRezar, boostTransformacao }: AgentMetaParams,
+): void {
+  const probBase = pesoRezar / Math.max(pesoIdle + pesoRezar, 1e-6);
+  const real = content ? 0 : 1;
+  for (let i = 0; i < agentCount; i++) {
+    out[i * 4 + 0] = real;
+    out[i * 4 + 1] = probBase;
+    out[i * 4 + 2] = 0;
+    out[i * 4 + 3] = 0;
+  }
+  if (!content) return;
+
+  const people = content.manifest.people;
+  const n = Math.min(people.length, agentCount);
+  for (let i = 0; i < n; i++) {
+    const wRezar =
+      pesoRezar *
+      (people[i].elements.includes("transformacao") ? boostTransformacao : 1);
+    out[i * 4 + 0] = 1;
+    out[i * 4 + 1] = wRezar / Math.max(pesoIdle + wRezar, 1e-6);
+  }
+}

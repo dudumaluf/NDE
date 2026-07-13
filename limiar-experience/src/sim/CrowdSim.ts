@@ -16,13 +16,16 @@ import {
   mix,
   mx_noise_float,
   normalize,
+  select,
   smoothstep,
   textureLoad,
   uniform,
   vec2,
   vec3,
+  vec4,
 } from "three/tsl";
 import { vat } from "../vat/runtime";
+import { detectClipRoles, type ClipRoles } from "../vat/clipRoles";
 import { mouseTarget } from "./mouseTarget";
 
 type N = any;
@@ -31,8 +34,12 @@ type N = any;
  * Simulação da multidão em compute (TSL).
  *
  * Estado por agente em storage buffers: posição, velocidade, direção
- * (suavizada) e fase do passo. Forças por frame:
- *   wander     — curl noise 2D (campo sem divergência, evolui no tempo)
+ * (suavizada), fase do passo e ESTADO DE ANIMAÇÃO (doc 04 §5.5). Forças por
+ * frame:
+ *   wander     — curl noise 2D (campo sem divergência, evolui no tempo),
+ *                com "pausas" orgânicas por agente (noise lento gateia o
+ *                wander → uns param, outros andam — multidão mista) e
+ *                multiplicadores por grupo (com-história vs dormentes)
  *   separação  — cada agente empurra os vizinhos: ninguém atravessa ninguém
  *                (O(N²) por enquanto; hash grid espacial é o upgrade p/ 16k+.
  *                 No fallback WebGL2 a separação desliga: transform feedback
@@ -43,14 +50,26 @@ type N = any;
  *                buscam targets[i].xyz com arrival (desacelera chegando) e
  *                damping tangencial (não orbita). targets[i].w = tem-alvo;
  *                uSeekWeight (a "gravidade") liga/desliga globalmente.
+ *   onda       — na gravidade, quem está LONGE do alvo ganha teto de
+ *                velocidade maior (chega "correndo", assenta por último) —
+ *                formação rápida E legível (doc 04 §5.5).
  *
- * Os alvos moram num Float32Array espelhado em DOIS recursos GPU: storage
- * buffer (lido pelo compute WebGPU) e DataTexture (lida pelo compute do
- * fallback WebGL2 via texelFetch) — ler storage extra num pass de transform
- * feedback estouraria o limite de 4 varyings do TF (cada leitura de storage
- * vira um varying no GLSLNodeBuilder, mesmo sem escrita).
+ * Máquina de estados POR AGENTE (pass próprio, buildStatePass): lê a
+ * velocidade REAL e a distância ao alvo e escreve `states` (vec4: clipA,
+ * clipB, blend, stateId+stateTime empacotados em w). Transições parado ⇄
+ * andando ⇄ correndo com histerese; chegada assenta em idle OU rezar
+ * (sorteio estável por agente, peso vem do agentMeta). O crossfade A/B que
+ * o shader já fazia globalmente passa a ler estes valores por instância.
  *
- * A fase do passo integra a velocidade real: quem anda devagar pisa devagar.
+ * Orçamento de varyings do transform feedback (WebGL2, teto de 4 por pass —
+ * cada storage lido/escrito vira attribute+varying no GLSLNodeBuilder):
+ *   update:    positions + velocities + headings           = 3 (sobra 1)
+ *   state:     states + phases + positions + velocities    = 4 (cheio)
+ *   reset:     positions + velocities + headings + phases  = 4 (cheio)
+ *   resetStates: states                                    = 1
+ * A fase do passo migrou do update para o state pass por isso. Alvos e meta
+ * entram nos passes TF por DataTexture + textureLoad (padrão dos targets do
+ * M3): Float32Array espelhado em storage (WebGPU) e textura (WebGL2).
  */
 export class CrowdSim {
   readonly maxCount: number;
@@ -65,6 +84,25 @@ export class CrowdSim {
   readonly targetsArray: Float32Array;
   /** O mesmo array como DataTexture — caminho do compute no fallback WebGL2. */
   private targetsTexture: THREE.DataTexture;
+  /**
+   * vec4 por agente: x = com-história (1) / dormente (0), y = probabilidade
+   * de REZAR ao assentar (peso extra de `transformacao` já embutido na CPU),
+   * z/w reservados (Maré/M4: valência e beat). CPU escreve (commitAgentMeta).
+   */
+  readonly agentMeta: N;
+  readonly agentMetaArray: Float32Array;
+  private agentMetaTexture: THREE.DataTexture;
+  /**
+   * Estado de animação por agente (vec4): x = clipA, y = clipB (índices
+   * GLOBAIS de clipe), z = blend A→B [0,1], w = stateId + stateTime/1000
+   * (0 parado · 1 andando · 2 correndo · 3 assentado-idle · 4 rezando).
+   * Escrito no state pass; o render lê via storage PBO (não é atributo —
+   * o limite de 8 vertex buffers do WebGPU fica intacto).
+   */
+  readonly states: N;
+  /** Papéis de clipe detectados do descriptor ativo (idle/walk/run/rezar). */
+  readonly clipRoles: ClipRoles;
+
   private texSide: number;
 
   readonly u = {
@@ -98,11 +136,49 @@ export class CrowdSim {
     turnRate: uniform(6),
     /** Frames de walk cycle por unidade percorrida (acopla passo à velocidade). */
     phasePerUnit: uniform(34),
+
+    // --- estados por agente (doc 04 §5.5) ---
+    /** 1 = máquina de estados por agente; 0 = modo global antigo (botões).
+     *  Nasce em 0 (o CrowdMesh liga via leva): sim sem o wiring novo se
+     *  comporta exatamente como antes — compat entre commits paralelos. */
+    perAgentOn: uniform(0),
+    /** Limiar parado⇄andando (|v| em unidades/s). */
+    v0: uniform(0.12),
+    /** Limiar andando⇄correndo. */
+    v1: uniform(1.15),
+    /** Histerese fracional dos limiares (±12% default). */
+    hyst: uniform(0.12),
+    /** Duração do crossfade entre estados (s). */
+    stateFade: uniform(0.3),
+    /** Tempo mínimo num estado antes de trocar (anti-flicker). */
+    dwell: uniform(0.35),
+    /** Playback extra do passo no estado correndo (walk como corrida). */
+    runBoost: uniform(1.35),
+    /** Papéis de clipe (índices globais — ver clipRoles.ts). */
+    clipIdle: uniform(0),
+    clipIdle2: uniform(0),
+    clipWalk: uniform(0),
+    clipRun: uniform(0),
+    clipRezar: uniform(0),
+    /** Onda de chegada: ganho do teto de velocidade por distância ao alvo.
+     *  Default 0 (neutro) — o valor de design (0.9) entra pelo leva. */
+    waveGain: uniform(0),
+    waveNear: uniform(5),
+    waveFar: uniform(20),
+    /** Dormentes (sem história): multiplicadores de velocidade e wander. */
+    dormantSpeedMul: uniform(0.7),
+    dormantWanderMul: uniform(0.8),
+    /** Pausas orgânicas do wander (0 = ninguém para; design 0.45 no leva). */
+    pauseAmount: uniform(0),
+    pauseEvolve: uniform(0.05),
   };
 
   private resetPass: N;
+  private resetStatesPass: N;
   private updateFull: N; // com separação (WebGPU)
   private updateNoSep: N; // sem separação (fallback WebGL2/TF)
+  private stateFull: N; // alvos/meta via storage (WebGPU)
+  private stateNoSep: N; // alvos/meta via DataTexture (WebGL2/TF)
 
   constructor(maxCount: number) {
     this.maxCount = maxCount;
@@ -112,28 +188,70 @@ export class CrowdSim {
     this.phases = instancedArray(maxCount, "float");
     this.targets = instancedArray(maxCount, "vec4");
     this.targetsArray = this.targets.value.array as Float32Array;
+    this.states = instancedArray(maxCount, "vec4");
+    this.agentMeta = instancedArray(maxCount, "vec4");
+    this.agentMetaArray = this.agentMeta.value.array as Float32Array;
+    // Default seguro: todo mundo "com-história" (multiplicadores neutros) —
+    // sem computeAgentMeta o comportamento é idêntico ao pré-M3.6.
+    for (let i = 0; i < maxCount; i++) this.agentMetaArray[i * 4] = 1;
 
     this.texSide = Math.ceil(Math.sqrt(maxCount));
-    this.targetsTexture = new THREE.DataTexture(
-      this.targetsArray,
+    this.targetsTexture = this.makeMirrorTexture(this.targetsArray);
+    this.agentMetaTexture = this.makeMirrorTexture(this.agentMetaArray);
+
+    this.clipRoles = detectClipRoles();
+    this.u.clipIdle.value = this.clipRoles.idle;
+    this.u.clipIdle2.value = this.clipRoles.idle2;
+    this.u.clipWalk.value = this.clipRoles.walk;
+    this.u.clipRun.value = this.clipRoles.run;
+    this.u.clipRezar.value = this.clipRoles.rezar;
+    // Com clipe de corrida REAL (VAT futura do Studio), o walk não precisa
+    // de playback extra — o clipe já corre.
+    if (this.clipRoles.hasRunClip) this.u.runBoost.value = 1;
+
+    this.resetPass = this.buildResetPass();
+    this.resetStatesPass = this.buildResetStatesPass();
+    this.updateFull = this.buildUpdatePass(true);
+    this.updateNoSep = this.buildUpdatePass(false);
+    this.stateFull = this.buildStatePass(true);
+    this.stateNoSep = this.buildStatePass(false);
+  }
+
+  private makeMirrorTexture(array: Float32Array): THREE.DataTexture {
+    const tex = new THREE.DataTexture(
+      array,
       this.texSide,
       this.texSide,
       THREE.RGBAFormat,
       THREE.FloatType,
     );
-    this.targetsTexture.magFilter = THREE.NearestFilter;
-    this.targetsTexture.minFilter = THREE.NearestFilter;
-    this.targetsTexture.needsUpdate = true;
-
-    this.resetPass = this.buildResetPass();
-    this.updateFull = this.buildUpdatePass(true);
-    this.updateNoSep = this.buildUpdatePass(false);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   /** Sobe o espelho CPU dos alvos para a GPU (após computeTargets). */
   commitTargets(): void {
     (this.targets.value as THREE.BufferAttribute).needsUpdate = true;
     this.targetsTexture.needsUpdate = true;
+  }
+
+  /** Sobe o espelho CPU do meta por agente (após computeAgentMeta). */
+  commitAgentMeta(): void {
+    (this.agentMeta.value as THREE.BufferAttribute).needsUpdate = true;
+    this.agentMetaTexture.needsUpdate = true;
+  }
+
+  /** Variação de idle estável por agente (~35% usam o idle 2).
+   *  CUIDADO: hash() do TSL trunca o seed com toUint() — seeds precisam ser
+   *  INTEIROS DISTINTOS por agente (fi + offset), nunca fi×fração. */
+  private idleVariant(fi: N): N {
+    return select(
+      hash(fi.add(11 * 4096)).lessThan(0.35),
+      this.u.clipIdle2,
+      this.u.clipIdle,
+    );
   }
 
   private buildResetPass(): N {
@@ -167,10 +285,24 @@ export class CrowdSim {
     })().compute(this.maxCount);
   }
 
+  /** Estados nascem em "parado" com a variação de idle do agente (pass
+   *  próprio: escrever `states` no reset principal estouraria os 4 varyings
+   *  do transform feedback no WebGL2). */
+  private buildResetStatesPass(): N {
+    return Fn(() => {
+      const fi: N = float(instanceIndex);
+      const idleClip: N = this.idleVariant(fi);
+      this.states
+        .element(instanceIndex)
+        .assign(vec4(idleClip, idleClip, 0, 0));
+    })().compute(this.maxCount);
+  }
+
   private buildUpdatePass(withSeparation: boolean): N {
     const u = this.u;
     return Fn(() => {
       const selfI: N = int(instanceIndex);
+      const fi: N = float(instanceIndex);
       const p: N = this.positions.element(instanceIndex).toVar();
       const v: N = this.velocities.element(instanceIndex).toVar();
 
@@ -178,15 +310,16 @@ export class CrowdSim {
       // targets.w=1 marca agente com pessoa/alvo; uSeekWeight é a gravidade
       // global. `arrive` desacelera chegando; `nearT` alimenta o damping e a
       // atenuação do wander (perto do alvo o noise não re-arranca o agente).
-      // No pass sem separação (fallback WebGL2/TF) o alvo vem da textura:
-      // um 5º storage read estouraria os 4 varyings do transform feedback.
+      // No pass sem separação (fallback WebGL2/TF) alvo e meta vêm de
+      // texturas: um 4º/5º storage read estouraria os varyings do TF.
       const side = int(this.texSide);
+      const texUv: N = ivec2(selfI.mod(side), selfI.div(side));
       const tgt: N = withSeparation
         ? this.targets.element(instanceIndex)
-        : textureLoad(
-            this.targetsTexture,
-            ivec2(selfI.mod(side), selfI.div(side)),
-          );
+        : textureLoad(this.targetsTexture, texUv);
+      const meta: N = withSeparation
+        ? this.agentMeta.element(instanceIndex)
+        : textureLoad(this.agentMetaTexture, texUv);
       const seekGate: N = tgt.w.mul(smoothstep(0.0, 0.05, u.seekWeight));
       const toTgt: N = tgt.xz.sub(p.xz);
       const tDist: N = length(toTgt).add(1e-5);
@@ -207,8 +340,37 @@ export class CrowdSim {
       const dPdz: N = pot(p.xz.add(vec2(0, e))).sub(pot(p.xz.sub(vec2(0, e))));
       const wander: N = normalize(vec2(dPdz, dPdx.negate()).add(vec2(1e-5, 0)));
 
+      // Pausas orgânicas: cada agente vive um ciclo lento próprio (sawtooth
+      // de hash + tempo); enquanto o ciclo está abaixo de uPauseAmount o
+      // wander desliga e o drag o assenta — a máquina de estados LÊ o
+      // resultado (idle) em vez de encená-lo. A fração parada é exatamente
+      // o slider (ciclo uniforme em [0,1)); episódios de ~10–25 s.
+      const pauseRate: N = mix(
+        float(0.015),
+        float(0.05),
+        hash(fi.add(2 * 4096)),
+      );
+      const pauseCycle: N = hash(fi.add(3 * 4096))
+        .add(u.time.mul(pauseRate))
+        .fract();
+      const pauseGate: N = smoothstep(
+        u.pauseAmount.sub(0.03),
+        u.pauseAmount.add(0.03),
+        pauseCycle,
+      );
+      // Gravidade vence a pausa (quem é chamado vai): com seek ativo o
+      // agente não pausa — dormentes (sem alvo) seguem pausando, o contraste
+      // é parte da leitura.
+      const pauseEff: N = mix(pauseGate, float(1), seekGate);
+
+      // Grupos: com-história (meta.x=1) usa os pesos base; dormentes (0)
+      // ganham multiplicadores próprios — mais lentos/contemplativos.
       const wanderAtten: N = float(1).sub(nearT.mul(0.85));
-      const acc: N = wander.mul(u.wanderWeight).mul(wanderAtten).toVar();
+      const wanderMul: N = u.wanderWeight
+        .mul(wanderAtten)
+        .mul(mix(u.dormantWanderMul, float(1), meta.x))
+        .mul(pauseEff);
+      const acc: N = wander.mul(wanderMul).toVar();
 
       // --- separação: vizinhos empurram (evitação de sobreposição) ---
       if (withSeparation) {
@@ -256,6 +418,10 @@ export class CrowdSim {
 
       // --- integração com drag e teto de velocidade ---
       // O damping do arrival soma ao drag base: quem chegou perde inércia.
+      // Onda de chegada (doc 04 §5.5): com gravidade ativa, quem está LONGE
+      // do alvo ganha teto maior — chega "correndo" e assenta por último; o
+      // boost decai sozinho conforme se aproxima. Dormentes andam mais
+      // devagar (leitura dos núcleos fica limpa).
       const dt: N = u.dt;
       const dragTotal: N = u.drag.add(nearT.mul(u.seekDamp));
       const vel2: N = v.xz
@@ -263,7 +429,13 @@ export class CrowdSim {
         .mul(exp(dragTotal.negate().mul(dt)))
         .toVar();
       const speed: N = length(vel2).add(1e-6);
-      vel2.assign(vel2.mul(min(float(1), u.maxSpeed.div(speed))));
+      const wave: N = float(1).add(
+        u.waveGain.mul(seekGate).mul(smoothstep(u.waveNear, u.waveFar, tDist)),
+      );
+      const speedCap: N = u.maxSpeed
+        .mul(mix(u.dormantSpeedMul, float(1), meta.x))
+        .mul(wave);
+      vel2.assign(vel2.mul(min(float(1), speedCap.div(speed))));
 
       const newPos: N = p.xz.add(vel2.mul(dt));
       this.positions.element(instanceIndex).assign(vec3(newPos.x, 0, newPos.y));
@@ -280,16 +452,151 @@ export class CrowdSim {
         .element(instanceIndex)
         .assign(normalize(mix(h, blended, gate).add(vec2(1e-6, 0))));
 
-      // --- fase do passo integra a velocidade real ---
+      // (a fase do passo migrou para o state pass — orçamento de varyings)
+    })().compute(this.maxCount);
+  }
+
+  /**
+   * Máquina de estados por agente (doc 04 §5.5) + integração da fase.
+   * Transições dirigidas pela velocidade REAL com histerese (limiar de
+   * ENTRAR > limiar de FICAR) e dwell mínimo — nunca pisca. Chegada
+   * (gravidade ativa, perto do alvo, parado) assenta em idle ou rezar por
+   * sorteio estável (seed = índice do agente, peso do agentMeta). O
+   * crossfade avança aqui (blend += dt/fade) e promove B→A ao completar —
+   * mesma mecânica do VatClipPlayer, agora por agente na GPU.
+   */
+  private buildStatePass(withStorage: boolean): N {
+    const u = this.u;
+    return Fn(() => {
+      const selfI: N = int(instanceIndex);
+      const fi: N = float(instanceIndex);
+      const side = int(this.texSide);
+      const texUv: N = ivec2(selfI.mod(side), selfI.div(side));
+
+      const p: N = this.positions.element(instanceIndex).toVar();
+      const v: N = this.velocities.element(instanceIndex).toVar();
+      const s4: N = this.states.element(instanceIndex).toVar();
+
+      const tgt: N = withStorage
+        ? this.targets.element(instanceIndex)
+        : textureLoad(this.targetsTexture, texUv);
+      const meta: N = withStorage
+        ? this.agentMeta.element(instanceIndex)
+        : textureLoad(this.agentMetaTexture, texUv);
+
+      const speed: N = length(v.xz);
+      const clipA: N = s4.x.toVar();
+      const clipB: N = s4.y.toVar();
+      const blend: N = s4.z.toVar();
+      // w empacota stateId + stateTime/1000 (tempo saturado em 900 s —
+      // float32 dá resolução < 1 ms nessa faixa, sobra para o dwell).
+      const stateId: N = s4.w.floor().toVar();
+      const stateTime: N = s4.w.fract().mul(1000).add(u.dt).min(900).toVar();
+
+      // --- crossfade em andamento avança e promove B→A ao completar ---
+      If(clipA.notEqual(clipB).or(blend.greaterThan(0)), () => {
+        blend.assign(blend.add(u.dt.div(u.stateFade.max(1e-4))).min(1));
+        If(blend.greaterThanEqual(1), () => {
+          clipA.assign(clipB);
+          blend.assign(0);
+        });
+      });
+
+      // --- contexto do alvo (assentamento) ---
+      const tDist: N = length(tgt.xz.sub(p.xz));
+      const seekOn: N = tgt.w.mul(smoothstep(0.0, 0.05, u.seekWeight));
+      const settleR: N = u.seekArrive.mul(1.5);
+
+      // --- locomoção com histerese: entrar exige mais que ficar ---
+      const hUp: N = float(1).add(u.hyst);
+      const hDn: N = float(1).sub(u.hyst);
+      const walkThr: N = select(
+        stateId.greaterThanEqual(1),
+        u.v0.mul(hDn),
+        u.v0.mul(hUp),
+      );
+      const runThr: N = select(
+        stateId.equal(2),
+        u.v1.mul(hDn),
+        u.v1.mul(hUp),
+      );
+      const loco: N = select(
+        speed.greaterThan(runThr),
+        float(2),
+        select(speed.greaterThan(walkThr), float(1), float(0)),
+      );
+
+      // --- assentar: chamado (gravidade/lente), chegou e parou ---
+      const settled: N = stateId.greaterThanEqual(3);
+      const enterSettle: N = seekOn
+        .greaterThan(0.5)
+        .and(tDist.lessThan(settleR))
+        .and(speed.lessThan(u.v0.mul(hUp)));
+      const exitSettle: N = seekOn
+        .lessThan(0.5)
+        .or(tDist.greaterThan(settleR.mul(1.6)))
+        .or(speed.greaterThan(u.v0.mul(3)));
+
+      // Sorteio ponderado ESTÁVEL por agente (seed = índice): quem carrega
+      // `transformacao` tende a rezar (peso extra já veio no meta.y).
+      const rnd: N = hash(fi.add(5 * 4096));
+      const praying: N = rnd.lessThan(meta.y);
+      const settleState: N = select(praying, float(4), float(3));
+      const idleClip: N = this.idleVariant(fi);
+      const settleClip: N = select(praying, u.clipRezar, idleClip);
+
+      const desired: N = loco.toVar();
+      If(settled.and(exitSettle.not()).or(enterSettle), () => {
+        desired.assign(settleState);
+      });
+
+      // --- transição (respeitando o dwell anti-flicker) ---
+      const desiredClip: N = select(
+        desired.equal(0),
+        idleClip,
+        select(
+          desired.equal(1),
+          u.clipWalk,
+          select(desired.equal(2), u.clipRun, settleClip),
+        ),
+      );
+      If(desired.notEqual(stateId).and(stateTime.greaterThan(u.dwell)), () => {
+        // mesma promoção do player: interromper um fade >50% promove o B
+        If(blend.greaterThan(0.5), () => {
+          clipA.assign(clipB);
+        });
+        clipB.assign(desiredClip);
+        blend.assign(0);
+        stateId.assign(desired);
+        stateTime.assign(0);
+      });
+
+      // --- fase do passo integra a velocidade real (migrada do update) ---
+      // Correndo, o playback ganha boost extra (walk como corrida enquanto
+      // não há clipe run na VAT — clipRoles.hasRunClip zera o boost).
+      const runBoost: N = mix(
+        float(1),
+        u.runBoost,
+        select(stateId.equal(2), float(1), float(0)).mul(u.perAgentOn),
+      );
       const ph: N = this.phases.element(instanceIndex);
       this.phases
         .element(instanceIndex)
-        .assign(ph.add(spd.mul(dt).mul(u.phasePerUnit)).mod(vat().framesPerClip));
+        .assign(
+          ph
+            .add(speed.mul(u.dt).mul(u.phasePerUnit).mul(runBoost))
+            .mod(vat().framesPerClip),
+        );
+
+      this.states
+        .element(instanceIndex)
+        .assign(vec4(clipA, clipB, blend, stateId.add(stateTime.div(1000))));
     })().compute(this.maxCount);
   }
 
   reset(renderer: THREE.WebGPURenderer): void {
     renderer.compute(this.resetPass);
+    renderer.compute(this.resetStatesPass);
   }
 
   /** Avança um passo. `withSeparation=false` no fallback WebGL2. */
@@ -304,5 +611,8 @@ export class CrowdSim {
     this.u.mouseMode.value =
       mouseTarget.mode === "atrair" ? 1 : mouseTarget.mode === "repelir" ? -1 : 0;
     renderer.compute(withSeparation ? this.updateFull : this.updateNoSep);
+    // O state pass roda sempre (custo ~0): os estados ficam quentes mesmo
+    // com o toggle master desligado — religar é seamless.
+    renderer.compute(withSeparation ? this.stateFull : this.stateNoSep);
   }
 }

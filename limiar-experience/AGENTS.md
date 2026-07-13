@@ -33,16 +33,45 @@ Leia antes de qualquer tarefa, nesta ordem:
   (`iColorScale`). Cuidado ao adicionar novos atributos por instância —
   prefira storage buffers da sim.
 - Simulação (`src/sim/CrowdSim.ts`): storage buffers (`instancedArray`) de
-  posição/velocidade/direção/fase; render lê via `.toAttribute()` (compatível
-  com WebGL2). Separação é O(N²) com `Loop` — só roda no backend WebGPU
-  (transform feedback não tem acesso aleatório a buffers); hash grid espacial
-  é o upgrade planejado para >4096 agentes.
+  posição/velocidade/direção/fase/estado; render lê via `.toAttribute()`
+  (compatível com WebGL2). Separação é O(N²) com `Loop` — só roda no backend
+  WebGPU (transform feedback não tem acesso aleatório a buffers); hash grid
+  espacial é o upgrade planejado para >4096 agentes.
 - **Transform feedback (compute WebGL2) tem teto de 4 varyings** — TODA
   leitura de storage num pass TF vira attribute+varying no GLSLNodeBuilder,
-  mesmo sem escrita. Os 4 slots já estão tomados (pos/vel/heading/phase);
-  buffer novo lido pelo compute (ex.: targets do M3) entra como
-  **DataTexture + textureLoad** no pass sem separação (mesmo Float32Array
-  espelhado nos dois recursos; `commitTargets()` marca os dois).
+  mesmo sem escrita. Orçamento por pass desde o M3.6 (estados por agente):
+  update = pos/vel/heading (3, sobra 1); state pass = states/phases/pos/vel
+  (4, cheio — a integração da FASE mora nele, não no update); reset = 4;
+  resetStates = 1. Buffer novo lido por um pass TF (targets do M3,
+  agentMeta do M3.6) entra como **DataTexture + textureLoad** (mesmo
+  Float32Array espelhado nos dois recursos; `commitTargets()`/
+  `commitAgentMeta()` marcam os dois).
+- **Estados de animação POR AGENTE (M3.6, doc 04 §5.5)**: buffer `states`
+  vec4 = (clipA, clipB, blend, stateId + stateTime/1000 empacotados em w;
+  0 parado · 1 andando · 2 correndo · 3 assentado-idle · 4 rezando).
+  Transições no state pass pela velocidade REAL com histerese (entrar exige
+  v×(1+h), ficar tolera v×(1−h)) + dwell 0,35 s; chegada (seek ativo,
+  dist<1,5×seekArrive, |v|<v0) assenta em idle/rezar por sorteio ESTÁVEL
+  (`hash(índice)`, prob. no agentMeta.y — peso 2× p/ quem tem
+  `transformacao`). "Correndo" = walk com boost de fase (runBoost 1,35;
+  detectClipRoles em `src/vat/clipRoles.ts` acha um clipe /corr|run/ por
+  nome e zera o boost quando a VAT tiver corrida de verdade). Render lê
+  `states` como **storage PBO read-only no vertex** (padrão dos fios — NÃO
+  é atributo; os 7 vertex buffers ficam) e o sampler (`createVatSampler`
+  com `perAgent`) troca uniforms↔storage por `select` no toggle master
+  ("estados automáticos" no leva; off = botões globais de debug). Onda de
+  chegada = teto de velocidade × (1 + waveGain×smoothstep(near,far,dist))
+  — quem está longe corre e assenta por último. Pausas orgânicas: sawtooth
+  `hash(i)+t×rate` gateia o wander (fração parada ≈ slider; no WebGPU a
+  separação re-empurra parte dos pausados — %parado real fica menor que o
+  slider em multidão densa, e é honesto assim). Dormentes: multiplicadores
+  próprios de velocidade/wander via agentMeta.x.
+- **hash() do TSL trunca o seed com toUint()** — `hash(fi.mul(0.017))`
+  colapsa TODOS os agentes no mesmo valor (uint(0.x)=0). Seeds por agente
+  = inteiros distintos: `hash(fi.add(k*4096))`.
+- **Readback (`getArrayBufferAsync`) no WebGL2 durante o readback amostrado
+  dos ClusterLabels volta VAZIO** — sondas de buffer devem usar `&labels=0`
+  (nota no scripts/states-probe.mjs).
 - **Storage buffer lido no VERTEX stage do render**: WebGPU permite direto
   (acesso vira read-only automaticamente); WebGL2 exige `.setPBO(true)` no
   nó `storage()` — o backend copia o buffer TF para uma DataTexture após

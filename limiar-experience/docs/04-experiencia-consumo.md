@@ -249,6 +249,14 @@ Regras fechadas com o Dudu:
   velocidade com histerese; o crossfade A/B já existe desde o M0.5.
 - **Entra em:** M4–M5 (junto da gravidade progressiva); a base técnica
   do M2/M3 já suporta.
+- **✔ Implementado (M3.6, 2026-07-12)** — tudo acima está no ar (doc 03
+  §14.4): parado⇄andando⇄correndo pela velocidade real com histerese,
+  onda de chegada, assentar idle/rezar com peso de `transformacao`, pausas
+  orgânicas (a multidão mista existe sem gravidade) e grupos com-história/
+  dormentes. "Correndo" usa walk acelerado até a VAT ganhar um clipe de
+  corrida do Studio (detecção automática por nome). O que fica para o
+  M4/Maré: BEATS por pessoa comandando os estados (queda/hold/levantar) —
+  os slots z/w do meta por agente já estão reservados.
 
 ### 5.6 Fios com leitura inteligente (2026-07-12)
 

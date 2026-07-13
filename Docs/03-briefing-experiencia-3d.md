@@ -214,3 +214,27 @@ Verificados durante o data layer (detalhe canônico no
 - Implicação para o roadmap: mecânicas novas que leem estado da sim no
   render (fios inteligentes, palavras no espaço, Maré — doc 04 §5.4–5.7)
   já têm o padrão de acesso resolvido nos dois backends.
+
+### 14.4 Estados de animação por agente (M3.6 — a state machine do §4.2 na GPU)
+
+A máquina de estados por agente do §4.2 saiu do papel (2026-07-12): pass de
+compute PRÓPRIO (`buildStatePass`), separado do update de forças — no WebGL2
+cada pass tem orçamento de 4 varyings de TF, e o state pass usa exatamente
+states+phases+positions+velocities (a integração da fase migrou para ele; o
+update ficou com 3). Buffer `states` vec4 por agente: clipA, clipB, blend e
+stateId+stateTime empacotados (o crossfade A/B do M0.5 agora roda POR
+INSTÂNCIA; o render lê como storage PBO no vertex — nenhum vertex buffer
+novo). Transições dirigidas pela velocidade REAL com histerese e dwell;
+chegada assenta em idle/rezar (sorteio estável, peso extra de rezar p/ quem
+tem `transformacao` — o dado escolhe o gesto); onda de chegada = teto de
+velocidade cresce com a distância ao alvo (longe corre, perto assenta);
+pausas orgânicas de wander (sawtooth por agente) criam a multidão mista
+parado/andando SEM script; dormentes têm multiplicadores próprios
+(velocidade/wander). Clipes por PAPEL (`src/vat/clipRoles.ts`, match por
+nome pt/en): o estado "correndo" usa walk + boost de playback enquanto a VAT
+não tem clipe de corrida — quando o VAT Studio assar um clipe /corr|run/,
+ele é detectado e o boost desliga sozinho. Toggle master no leva ("estados
+automáticos"); off = os botões globais de estado continuam valendo (debug).
+Beats por pessoa dirigindo os estados (queda/hold/levantar do doc 01 §4 no
+Campo, além do follow) = Maré/M4: os slots z/w do agentMeta ficaram
+reservados para valência/beat.
