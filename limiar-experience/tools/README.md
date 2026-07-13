@@ -94,6 +94,7 @@ node tools/vat-bake.mjs tools/fixtures/samba.fbx tools/fixtures/samba-anim.fbx \
 | `--fps <n>` | 18 | velocidade de playback gravada no descriptor (paridade com o patch) |
 | `--clip Nome:loop\|oneshot` | loop | modo de playback por clipe (one-shot segura o último frame) |
 | `--skip Nome` | — | não assa esse clipe (ex.: `--skip TPose`) |
+| `--y-offset Nome:v` | — | offset Y manual do clipe (unidades da fonte). O chão é automático por clipe — isto soma em cima (fontes fora do padrão) |
 | `--height <h>` | 0.7 | normaliza a altura (frame 0 do 1º clipe) para `h` — 0.7 é a convenção do asset legado (com escala 2.5 do app ≈ 1.75 no mundo); `0` mantém o tamanho original |
 | `--max-verts <n>` | 0 | decima a malha até ≤ n vértices únicos (meshoptimizer) antes do bake — ex.: `--max-verts 2500` para multidão |
 | `--topology soup\|indexed\|auto` | auto | `soup` = triangle soup como o asset legado; `indexed` = textura por vértice único + index buffer (menor download); `auto` = indexed sempre que a malha compartilha vértices |
@@ -125,7 +126,18 @@ node tools/vat-bake.mjs tools/fixtures/samba.fbx tools/fixtures/samba-anim.fbx \
    - animação **sem malha** ("Without Skin"): funciona como GLB de animação
      avulsa — as tracks retargetam para o personagem carregado; a lista de
      clipes mostra `N/M tracks casam` e acusa **✗ esqueleto incompatível**
-     (clipe já desmarcado) quando nada casa.
+     (clipe já desmarcado) quando nada casa;
+   - **misturar base GLB + animação FBX** (ou vice-versa) funciona: tracks
+     de posição/rotação são **rebaseadas para a convenção do rig da base**
+     (`tools/retarget-units.mjs` — rigs GLB do Blender guardam ossos em cm,
+     Z-up, sob nó 0,01 e reorientam juntas; sem o rebase o corpo afundava,
+     "chão na cintura", ou tombava). Tracks de containers ("Armature") de
+     outros arquivos são ignoradas — só ossos entram;
+   - **chão por clipe**: no bake, CADA clipe é aterrado com os pés no y=0
+     (offset automático registrado em `clips[].groundOffset` no vat.json).
+     O campo **Y** ao lado de loop/única é o ajuste MANUAL por clipe
+     (unidades da fonte; vazio = só o automático) — vale no preview e no
+     bake, e sai documentado como `clips[].yOffset` quando usado.
 3. **O que ainda pede conversão** (o Studio/CLI recusam com a mensagem
    certa): FBX **ASCII** ou **6.x antigo** (o Mixamo atual exporta binário
    7.x, suportado). Nesses casos, converta para GLB:
@@ -241,5 +253,7 @@ node tools/studio/e2e.mjs   # GLB: Soldier (deleta clipe, combina, assa) + FBX: 
 Fixtures em `tools/fixtures/`: `Soldier.glb` (three.js), `samba.fbx`
 ("Samba Dancing" do Mixamo, via repo do three.js — personagem X Bot com
 skin, FBX binário 7.4 em cm, clipe "mixamo.com"), `samba-anim.fbx` (a mesma
-animação SEM malha, derivada no Blender — caso "Without Skin") e
+animação SEM malha, derivada no Blender — caso "Without Skin"),
+`xbot.glb` (o mesmo X Bot convertido para GLB no Blender, sem animações —
+base do caso "GLB + anim FBX", regressão do bug do chão na cintura) e
 `old-ascii.fbx` (FBX 6.1 ASCII mínimo para o caso de erro).

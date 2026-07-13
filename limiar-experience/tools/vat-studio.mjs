@@ -389,6 +389,8 @@ const server = createServer(async (req, res) => {
       return sendFile(res, join(TOOLS_DIR, "merge-clips.mjs"));
     if (url.pathname === "/fbx-normalize.mjs")
       return sendFile(res, join(TOOLS_DIR, "fbx-normalize.mjs"));
+    if (url.pathname === "/retarget-units.mjs")
+      return sendFile(res, join(TOOLS_DIR, "retarget-units.mjs"));
 
     if (VENDOR[url.pathname]) return sendFile(res, VENDOR[url.pathname]);
     if (url.pathname.startsWith("/vendor/addons/")) {

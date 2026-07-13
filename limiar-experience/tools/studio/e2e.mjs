@@ -190,6 +190,75 @@ check(!fbxResult.includes("✗") && !fbxResult.includes("FALHOU"), "bake do FBX 
 check(/samba(?!-e2e)/.test(fbxResult) && fbxResult.includes("samba-anim"), "os 2 clipes FBX (com e sem skin) assados");
 await page2.screenshot({ path: "shots/studio-6-fbx-resultado.png" });
 
+// ---------------------------------------------------------------------------
+// Parte 3 — regressão do bug "base GLB + anim FBX afunda (chão na cintura)":
+// xbot.glb (rig GLB do Blender: ossos em cm/Z-up sob nó 0,01 — a convenção
+// do fluxo do criador) + samba-anim.fbx (m/Y-up). Sem o rebase de tracks no
+// retarget, o preview mostrava o corpo ~0,9 m abaixo do chão. Também
+// exercita o offset Y manual por clipe.
+
+console.log("--- parte 3: base GLB + anim FBX (regressão do afundamento) ---");
+const page3 = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page3.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
+page3.on("dialog", (d) => d.accept());
+await page3.goto("http://localhost:5198/", { waitUntil: "domcontentloaded" });
+await page3.setInputFiles("#filepick", [
+  resolve("tools/fixtures/xbot.glb"),
+  resolve("tools/fixtures/samba-anim.fbx"),
+]);
+await page3.waitForFunction(() => document.querySelectorAll("#clips .clip").length >= 1, null, { timeout: 60000 });
+
+// toca o clipe FBX e mede o menor Y skinado do preview
+const names3 = await page3.$$eval("#clips .clip input.name", (els) => els.map((e) => e.value));
+const idxFbx = names3.indexOf("samba-anim");
+check(idxFbx >= 0, `clipe FBX presente na lista (${names3.join(", ")})`);
+const alturaOk = /altura 1\.[78]/.test((await page3.textContent("#meshinfo")).trim());
+check(alturaOk, `altura da base GLB medida via skinning (${(await page3.textContent("#meshinfo")).trim().slice(-12)})`);
+await page3.click(`#clips .clip[data-i="${idxFbx}"] [data-k=play]`);
+await page3.waitForTimeout(1200);
+const minY = await page3.evaluate(() => window.__studio.skinnedMinY());
+check(
+  minY !== null && minY > -0.15 && minY < 0.4,
+  `preview do clipe FBX com pés no chão (min Y skinado = ${minY?.toFixed(3)}; antes do fix ≈ −0,9)`,
+);
+await page3.screenshot({ path: "shots/bug-depois-fix.png" });
+
+// offset Y manual por clipe: +0.3 sobe o personagem no preview
+await page3.fill(`#clips .clip[data-i="${idxFbx}"] [data-k=yoff]`, "0.3");
+await page3.dispatchEvent(`#clips .clip[data-i="${idxFbx}"] [data-k=yoff]`, "change");
+await page3.waitForTimeout(300);
+const minYOff = await page3.evaluate(() => window.__studio.skinnedMinY());
+check(
+  minYOff !== null && minYOff - minY > 0.2,
+  `offset Y manual aplicado no preview (min Y ${minY?.toFixed(3)} → ${minYOff?.toFixed(3)})`,
+);
+// volta para auto e assa
+await page3.fill(`#clips .clip[data-i="${idxFbx}"] [data-k=yoff]`, "");
+await page3.dispatchEvent(`#clips .clip[data-i="${idxFbx}"] [data-k=yoff]`, "change");
+await page3.waitForSelector("#lights button[data-action=decimate]", { timeout: 5000 });
+await page3.click("#lights button[data-action=decimate]");
+await page3.waitForFunction(
+  () => document.querySelector("#lights")?.textContent.includes("Redução aplicada"),
+  null,
+  { timeout: 180000 },
+);
+await page3.fill("#assetName", "bugfix-e2e");
+await page3.click("#bakeBtn");
+await page3.waitForFunction(
+  () => {
+    const r = document.getElementById("result");
+    const log = document.getElementById("log")?.textContent ?? "";
+    return (r && !r.classList.contains("hidden")) || log.includes("FALHOU");
+  },
+  null,
+  { timeout: 180000 },
+);
+const mixResult = (await page3.textContent("#result")).trim().replace(/\s+/g, " ");
+check(
+  !mixResult.includes("✗") && !mixResult.includes("FALHOU"),
+  "bake GLB+FBX validado (selftest com pé no chão POR CLIPE)",
+);
+
 console.log(failed ? "E2E: FALHOU" : "E2E: OK");
 if (logs.some((l) => l.startsWith("[pageerror]"))) console.log(logs.filter((l) => l.startsWith("[pageerror]")).join("\n"));
 

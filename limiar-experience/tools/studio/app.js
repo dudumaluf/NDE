@@ -21,6 +21,7 @@ import {
   neutralizeFbxMaterials,
   translateFbxError,
 } from "/fbx-normalize.mjs";
+import { rebaseTracksToRig, restPoseMaps } from "/retarget-units.mjs";
 
 /* ------------------------------------------------------------------------ */
 /* Constantes de orçamento (espelham vat-core.mjs e os limites web reais)    */
@@ -225,6 +226,7 @@ function rebuildPreview() {
     const box = new THREE.Box3().setFromObject(root);
     const center = box.getCenter(new THREE.Vector3());
     root.position.set(-center.x, -box.min.y, -center.z);
+    root.userData.baseY = root.position.y; // referência p/ offset Y manual por clipe
     if (variants.length === 2) root.position.x += (i === 0 ? -1 : 1) * (spacing / 2);
     if (variant.meshes) applyReducedIndices(root, variant.meshes);
     root.traverse((o) => {
@@ -260,6 +262,24 @@ function rebuildPreview() {
   playClip(state.currentClip >= 0 && state.clips[state.currentClip]?.preview ? state.currentClip : first);
 }
 
+/**
+ * Pose de descanso dos rigs (memoizada): insumo do rebase de posições no
+ * retarget — tracks de posição carregam unidades E eixos da fonte; sem o
+ * rebase, anim FBX (m, Y-up) sobre rig GLB (ossos em cm sob nó 0,01) afunda
+ * o corpo (o bug do "chão na cintura"). Mesmo módulo que o bake usa
+ * (/retarget-units.mjs) — preview = resultado.
+ */
+const unitsRatioCache = new Map(); // cena → restPoseMaps
+
+function restMapsFor(scene) {
+  let maps = unitsRatioCache.get(scene);
+  if (!maps) {
+    maps = restPoseMaps(scene);
+    unitsRatioCache.set(scene, maps);
+  }
+  return maps;
+}
+
 /** Retarget leve no browser (mesma regra do vat-core): tracks → nós do personagem. */
 function buildPartClip(fileIdx, clipIdx, inPlace, name) {
   const charScene = charFile()?.gltf.scene;
@@ -267,8 +287,10 @@ function buildPartClip(fileIdx, clipIdx, inPlace, name) {
   if (!charScene || !raw) return null;
 
   const nodeNames = new Set();
+  const boneNames = new Set();
   charScene.traverse((o) => {
     if (o.name) nodeNames.add(o.name);
+    if (o.isBone && o.name) boneNames.add(o.name);
   });
   const normMap = new Map();
   for (const n of nodeNames) {
@@ -281,15 +303,20 @@ function buildPartClip(fileIdx, clipIdx, inPlace, name) {
     if (o.isBone && !o.parent?.isBone) rootBones.add(o.name);
   });
 
+  // clipes de OUTRO arquivo só podem mirar OSSOS: track de container
+  // ("Armature") sobrescreveria rotação/escala (0,01!) do nó homônimo
+  const foreign = state.files[fileIdx]?.gltf.scene !== charScene;
+  const allowed = foreign ? boneNames : nodeNames;
+
   const kept = [];
   for (const track of raw.tracks) {
     const dot = track.name.lastIndexOf(".");
     const nodeName = track.name.slice(0, dot);
     let finalName = null;
-    if (nodeNames.has(nodeName)) finalName = nodeName;
+    if (allowed.has(nodeName)) finalName = nodeName;
     else {
       const remap = normMap.get(normName(nodeName));
-      if (remap) finalName = remap;
+      if (remap && allowed.has(remap)) finalName = remap;
     }
     if (!finalName) continue;
     const t = track.clone();
@@ -305,7 +332,13 @@ function buildPartClip(fileIdx, clipIdx, inPlace, name) {
     kept.push(t);
   }
   if (kept.length === 0) return null;
-  return new THREE.AnimationClip(name, raw.duration, kept);
+  const clip = new THREE.AnimationClip(name, raw.duration, kept);
+  const srcScene = state.files[fileIdx]?.gltf.scene;
+  if (srcScene && srcScene !== charScene)
+    rebaseTracksToRig(clip, restMapsFor(srcScene), restMapsFor(charScene), (srcName) =>
+      nodeNames.has(srcName) ? srcName : normMap.get(normName(srcName)) ?? null,
+    );
+  return clip;
 }
 
 /** "Anda no lugar" num clipe pronto (combos: depois do merge, como no bake). */
@@ -346,6 +379,12 @@ function buildPreviewClip(entry) {
   return merged;
 }
 
+/** Offset Y manual do clipe corrente aplicado ao(s) personagem(ns) do preview. */
+function applyPreviewYOffset(entry) {
+  for (const c of view.chars)
+    c.root.position.y = (c.root.userData.baseY ?? c.root.position.y) + (entry?.yOff || 0);
+}
+
 function playClip(idx) {
   const entry = state.clips[idx];
   if (!entry) return;
@@ -359,6 +398,7 @@ function playClip(idx) {
     action.clampWhenFinished = true;
     action.play();
   }
+  applyPreviewYOffset(entry);
   renderClips();
 }
 
@@ -446,6 +486,7 @@ async function analyze() {
     alert(`Análise falhou: ${e.message}`);
     return;
   }
+  unitsRatioCache.clear(); // o personagem (rig de referência) pode ter mudado
   // Reconstrói a lista preservando edições (nome/modo/ordem), combos e
   // deleções — chaves: simples = "file:clip", combo = "combo<N>".
   const prev = new Map(state.clips.map((c) => [c.key, c]));
@@ -466,6 +507,7 @@ async function analyze() {
         // esqueleto incompatível (0 tracks casam) nasce desmarcado
         enabled: old?.enabled ?? c.matchedTracks > 0,
         inPlace: old?.inPlace ?? travels,
+        yOff: old?.yOff ?? 0,
         travels,
         preview: true,
       };
@@ -747,6 +789,7 @@ function combineSelected() {
     mode: "loop",
     enabled: true,
     inPlace: rows.some((r) => r.travels && r.inPlace),
+    yOff: 0,
     travels: rows.some((r) => r.travels),
     preview: true,
   };
@@ -783,6 +826,7 @@ function splitCombo(i) {
       mode: "loop",
       enabled: true,
       inPlace: travels,
+      yOff: 0,
       travels,
       preview: true,
     });
@@ -833,6 +877,8 @@ function renderClips() {
             <button data-k="mode" data-v="oneshot" data-i="${i}" class="${c.mode === "oneshot" ? "on" : ""}"
               title="toca uma vez e congela no último frame (morrer, levantar…)">única</button>
           </span>
+          <span class="fadefield" title="offset Y manual do clipe (unidades da fonte, ex.: 0.05 = sobe 5 cm num personagem de ~1,8) — vazio = automático: cada clipe é aterrado com os pés no y=0 no bake">
+            Y <input type="number" data-k="yoff" data-i="${i}" step="0.01" placeholder="auto" value="${c.yOff ? c.yOff : ""}" /></span>
           <button class="playbtn ${playing ? "on" : ""}" data-k="play" data-i="${i}">${playing ? "▶ tocando" : "▶"}</button>
           ${isCombo ? "" : `<button class="delbtn" data-k="dup" data-i="${i}" title="duplicar a linha — para usar o mesmo clipe 2× num combinado (ex.: idle+olhar+idle)">⧉</button>`}
           <button class="delbtn" data-k="del" data-i="${i}" title="${isCombo ? "remover o combinado da lista" : "remover este clipe da lista (o arquivo fonte não é alterado)"}">×</button>
@@ -917,6 +963,14 @@ function renderClips() {
       if (+x.dataset.i === state.currentClip) playClip(+x.dataset.i);
     }),
   );
+  el.querySelectorAll("[data-k=yoff]").forEach((x) => {
+    x.addEventListener("change", () => {
+      const c = state.clips[+x.dataset.i];
+      c.yOff = Number.isFinite(parseFloat(x.value)) ? parseFloat(x.value) : 0;
+      if (+x.dataset.i === state.currentClip) applyPreviewYOffset(c);
+    });
+    x.addEventListener("dragstart", (e) => e.preventDefault());
+  });
   el.querySelectorAll("[data-k=sel]").forEach((x) =>
     x.addEventListener("change", () => {
       const key = state.clips[+x.dataset.i].key;
@@ -979,8 +1033,8 @@ async function bake() {
     .filter((c) => c.enabled)
     .map((c) =>
       c.kind === "combo"
-        ? { parts: c.parts, fade: c.fade, name: c.name, mode: c.mode, inPlace: c.inPlace }
-        : { file: c.file, clip: c.clip, name: c.name, mode: c.mode, inPlace: c.inPlace },
+        ? { parts: c.parts, fade: c.fade, name: c.name, mode: c.mode, inPlace: c.inPlace, yOffset: c.yOff || 0 }
+        : { file: c.file, clip: c.clip, name: c.name, mode: c.mode, inPlace: c.inPlace, yOffset: c.yOff || 0 },
     );
   if (selection.length === 0) return;
   const dupes = selection.map((s) => s.name.toLowerCase());
@@ -1230,3 +1284,30 @@ $("bakeBtn").addEventListener("click", bake);
   pollDev();
   setInterval(pollDev, 5000);
 })();
+
+/* ------------------------------------------------------------------------ */
+/* Sonda para o e2e (tools/studio/e2e.mjs): menor Y skinado em mundo do 1º   */
+/* personagem do preview — mede "pés no chão" com a pose corrente.           */
+
+const _probeV = new THREE.Vector3();
+window.__studio = {
+  state,
+  skinnedMinY() {
+    const root = view.chars[0]?.root;
+    if (!root) return null;
+    root.updateMatrixWorld(true);
+    let minY = Infinity;
+    root.traverse((o) => {
+      if (!o.isSkinnedMesh) return;
+      const pos = o.geometry.attributes.position;
+      const step = Math.max(1, Math.floor(pos.count / 4000));
+      for (let i = 0; i < pos.count; i += step) {
+        _probeV.fromBufferAttribute(pos, i);
+        o.applyBoneTransform(i, _probeV);
+        _probeV.applyMatrix4(o.matrixWorld);
+        if (_probeV.y < minY) minY = _probeV.y;
+      }
+    });
+    return Number.isFinite(minY) ? minY : null;
+  },
+};

@@ -58,6 +58,8 @@ opções:
   --fps <n>            fps de playback no descriptor (default 18 — paridade)
   --clip <Nome:modo>   modo de playback do clipe: loop | oneshot (default loop)
   --skip <Nome>        não assar este clipe (ex.: --skip TPose)
+  --y-offset <Nome:v>  offset Y manual do clipe (unidades da fonte; o
+                       aterramento por clipe é automático — isto soma em cima)
   --height <h>         normaliza a altura (frame 0 do 1º clipe) para h unidades
                        (default 0.7 = convenção do asset atual; 0 = manter metros)
   --max-verts <n>      decima a malha até ≤ n vértices únicos (meshoptimizer)
@@ -84,6 +86,7 @@ function parseArgs(argv) {
     frames: 60,
     clipModes: new Map(), // nome minúsculo → "loop" | "oneshot"
     skip: new Set(),
+    yOffsets: new Map(), // nome minúsculo → offset Y manual (unid. da fonte)
     height: 0.7,
     maxVerts: 0,
     topology: "auto",
@@ -120,6 +123,16 @@ function parseArgs(argv) {
       case "--skip":
         args.skip.add(next().toLowerCase());
         break;
+      case "--y-offset": {
+        const raw = next();
+        const ci = raw.lastIndexOf(":");
+        const name = ci >= 0 ? raw.slice(0, ci) : "";
+        const val = Number(ci >= 0 ? raw.slice(ci + 1) : NaN);
+        if (!name || !Number.isFinite(val))
+          fail(`--y-offset espera Nome:valor em unidades da fonte (recebi "${raw}")`);
+        args.yOffsets.set(name.toLowerCase(), val);
+        break;
+      }
       case "--height":
         args.height = Number(next());
         break;
@@ -217,11 +230,18 @@ async function main() {
           }
           if (ev.type === "rootmotion")
             console.log(`  root motion exportado: "${ev.clip}" desloca ${ev.travel} un. (descriptor.rootMotion)`);
-          if (ev.type === "normalize")
+          if (ev.type === "normalize") {
             console.log(
               `  normalização: translate ${fmtV3(ev.translate)} · escala ${ev.scale.toFixed(4)}` +
                 ` (altura fonte ${ev.sourceHeight.toFixed(3)} → ${(ev.sourceHeight * ev.scale).toFixed(3)})`,
             );
+            for (const g of ev.grounds ?? [])
+              if (Math.abs(g.groundOffset) > 5e-4 || g.yOffset)
+                console.log(
+                  `    chão de "${g.clip}": ${g.groundOffset >= 0 ? "+" : ""}${g.groundOffset.toFixed(4)}` +
+                    (g.yOffset ? ` + manual ${g.yOffset.toFixed(4)}` : ""),
+                );
+          }
         },
       },
     );

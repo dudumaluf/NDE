@@ -16,6 +16,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { mergeClips, DEFAULT_MERGE_FADE } from "./merge-clips.mjs";
 import { isFbxBinary, normalizeFbxResult, translateFbxError } from "./fbx-normalize.mjs";
+import { rebaseTracksToRig, restPoseMaps, worldScaleOf } from "./retarget-units.mjs";
 
 /** Largura máxima de textura segura no WebGPU com limites default do three. */
 export const MAX_TEXTURE_WIDTH = 8192;
@@ -229,12 +230,18 @@ export function buildModel(gltf, sourceName, warn = console.warn) {
   const model = { scene, meshInfos, uniqueCount, drawIndices: null, nodeNames: null, restPose: null, rootBoneNames: null, rootBone: null };
   rebuildDrawIndices(model);
 
-  // Nomes de nós (para casar tracks de animação de outros arquivos).
+  // Nomes de nós (para casar tracks de animação de outros arquivos) e de
+  // OSSOS (tracks vindas de outros arquivos só podem mirar ossos: nós de
+  // container tipo "Armature" carregam rotação/escala do export — 0,01 no
+  // GLB do Blender — e uma track estrangeira ali explode o rig 100×).
   const nodeNames = new Set();
+  const boneNames = new Set();
   scene.traverse((o) => {
     if (o.name) nodeNames.add(o.name);
+    if (o.isBone && o.name) boneNames.add(o.name);
   });
   model.nodeNames = nodeNames;
+  model.boneNames = boneNames;
 
   // Pose de descanso (restaurada antes de cada clipe — evita vazamento entre clipes
   // quando um clipe não anima todos os ossos).
@@ -314,15 +321,25 @@ export function computeMeshHash(model) {
   return h.digest("hex").slice(0, 16);
 }
 
-/** Bounding box da bind pose em espaço de mundo (altura "natural" do modelo). */
+/**
+ * Bounding box da bind pose em espaço de mundo (altura "natural" do modelo).
+ * Passa pelo SKINNING (applyBoneTransform), não pela geometria crua: em rigs
+ * GLB do Blender os vértices moram no espaço do armature (cm sob nó 0,01) e
+ * a matrixWorld do mesh sozinha dá alturas absurdas — o mesmo caminho do
+ * bake garante a medida certa em qualquer convenção.
+ */
 export function measureBindPose(model) {
+  model.scene.updateMatrixWorld(true);
   const v = new THREE.Vector3();
   const min = new THREE.Vector3(Infinity, Infinity, Infinity);
   const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
   for (const mi of model.meshInfos) {
     const attr = mi.mesh.geometry.attributes.position;
-    for (let i = 0; i < attr.count; i++) {
-      v.fromBufferAttribute(attr, i).applyMatrix4(mi.mesh.matrixWorld);
+    const step = Math.max(1, Math.floor(attr.count / 20000));
+    for (let i = 0; i < attr.count; i += step) {
+      v.fromBufferAttribute(attr, i);
+      mi.mesh.applyBoneTransform(i, v);
+      v.applyMatrix4(mi.mesh.matrixWorld);
       min.min(v);
       max.max(v);
     }
@@ -459,20 +476,60 @@ function buildNormMap(model) {
 }
 
 /**
- * Retarget leve: mantém só tracks cujo nó existe na cena base (com tolerância
- * de nomenclatura). Retorna false se o clipe ficou sem nenhum track útil.
+ * Pose de descanso (translações locais + matrizes de mundo dos pais) de uma
+ * cena, memoizada — insumo do rebase de posições no retarget entre arquivos.
  */
-function retargetTracks(clip, clipLabel, model, normMap, warn) {
+function restMapsFor(scene, cache) {
+  let maps = cache.get(scene);
+  if (!maps) {
+    maps = restPoseMaps(scene);
+    cache.set(scene, maps);
+  }
+  return maps;
+}
+
+/**
+ * Rebaseia tracks de POSIÇÃO e ROTAÇÃO à convenção do rig do personagem.
+ * Tracks são expressas no espaço local do PAI de cada osso, e esse espaço
+ * difere entre exports do mesmo esqueleto (bug real: rig GLB do Blender com
+ * ossos em cm/Z-up sob nó 0,01×−90°X + anim FBX em m/Y-up → o corpo afunda
+ * — "chão na cintura" — e tomba de lado). Ver tools/retarget-units.mjs.
+ */
+function adaptPositionUnits(clip, clipLabel, srcScene, model, normMap, cache, warn) {
+  if (!srcScene || srcScene === model.scene) return; // clipes do próprio personagem
+  const srcMaps = restMapsFor(srcScene, cache);
+  const dstMaps = restMapsFor(model.scene, cache);
+  const r = rebaseTracksToRig(clip, srcMaps, dstMaps, (srcName) =>
+    model.nodeNames.has(srcName) ? srcName : normMap.get(normalizeName(srcName)) ?? null,
+  );
+  if (r.rebased > 0 && !cache.warnedScenes?.has(srcScene)) {
+    (cache.warnedScenes ??= new Set()).add(srcScene);
+    warn(
+      `tracks rebasedas para o espaço do rig do personagem (${r.rebased} track(s), proporção ×${r.s.toFixed(3)}, ` +
+        `${r.matched} ossos medidos) — fonte com unidades/eixos próprios, ex.: anim FBX sobre rig GLB (clipe "${clipLabel}")`,
+    );
+  }
+}
+
+/**
+ * Retarget leve: mantém só tracks cujo nó existe na cena base (com tolerância
+ * de nomenclatura). `bonesOnly` (clipes de OUTRO arquivo) restringe a ossos —
+ * tracks de containers ("Armature" do Blender) sobrescreveriam a rotação e a
+ * ESCALA (0,01) do nó homônimo no rig destino. Retorna false se o clipe
+ * ficou sem nenhum track útil.
+ */
+function retargetTracks(clip, clipLabel, model, normMap, warn, bonesOnly = false) {
+  const allowed = bonesOnly ? model.boneNames : model.nodeNames;
   const kept = [];
   let dropped = 0;
   for (const track of clip.tracks) {
     const { nodeName } = THREE.PropertyBinding.parseTrackName(track.name);
-    if (!nodeName || model.nodeNames.has(nodeName)) {
+    if (!nodeName || allowed.has(nodeName)) {
       kept.push(track);
       continue;
     }
     const remap = normMap.get(normalizeName(nodeName));
-    if (remap) {
+    if (remap && allowed.has(remap)) {
       track.name = remap + track.name.slice(nodeName.length);
       kept.push(track);
     } else {
@@ -484,7 +541,7 @@ function retargetTracks(clip, clipLabel, model, normMap, warn) {
     return false;
   }
   if (dropped > 0)
-    warn(`clipe "${clipLabel}": ${dropped}/${clip.tracks.length} tracks sem nó correspondente (esqueleto diferente?)`);
+    warn(`clipe "${clipLabel}": ${dropped}/${clip.tracks.length} tracks sem osso correspondente (containers/esqueleto diferente — ignoradas)`);
   clip.tracks = kept;
   return true;
 }
@@ -537,6 +594,7 @@ export function collectClips(files, model, args, warn = console.warn) {
   const used = new Set();
   const entries = [];
   const normMap = buildNormMap(model);
+  const unitsCache = new Map();
 
   for (const { path, gltf } of files) {
     for (const clip of gltf.animations ?? []) {
@@ -545,7 +603,8 @@ export function collectClips(files, model, args, warn = console.warn) {
         continue;
       used.add(name.toLowerCase());
 
-      if (!retargetTracks(clip, name, model, normMap, warn)) continue;
+      if (!retargetTracks(clip, name, model, normMap, warn, gltf.scene !== model.scene)) continue;
+      adaptPositionUnits(clip, name, gltf.scene, model, normMap, unitsCache, warn);
       let sourceClip = null;
       if (args.inPlace) {
         sourceClip = clip.clone();
@@ -554,7 +613,8 @@ export function collectClips(files, model, args, warn = console.warn) {
 
       const mode = args.clipModes.get(name.toLowerCase()) ??
         args.clipModes.get((clip.name ?? "").toLowerCase()) ?? "loop";
-      entries.push({ name, mode, clip, sourceClip, source: basename(path) });
+      const yOffsetSrc = Number(args.yOffsets?.get(name.toLowerCase())) || 0;
+      entries.push({ name, mode, clip, sourceClip, source: basename(path), yOffsetSrc });
     }
   }
 
@@ -579,12 +639,13 @@ export function selectClips(files, model, selection, warn = console.warn) {
   const used = new Set();
   const entries = [];
   const normMap = buildNormMap(model);
+  const unitsCache = new Map();
 
   const resolvePart = (ref, label) => {
     const file = files[ref.file];
     const clip = file?.gltf.animations?.[ref.clip];
     if (!clip) err(`seleção inválida: clipe ${ref.clip} do arquivo ${ref.file}${label ? ` (em "${label}")` : ""}`);
-    return { clip: clip.clone(), source: basename(file.path) };
+    return { clip: clip.clone(), source: basename(file.path), scene: file.gltf.scene };
   };
 
   for (const sel of selection) {
@@ -600,7 +661,10 @@ export function selectClips(files, model, selection, warn = console.warn) {
       const parts = sel.parts.map((p) => resolvePart(p, name));
       const kept = [];
       for (const p of parts)
-        if (retargetTracks(p.clip, name, model, normMap, warn)) kept.push(p);
+        if (retargetTracks(p.clip, name, model, normMap, warn, p.scene !== model.scene)) {
+          adaptPositionUnits(p.clip, name, p.scene, model, normMap, unitsCache, warn);
+          kept.push(p);
+        }
       if (kept.length < 2) {
         warn(`combinado "${name}" descartado — menos de 2 partes casam com o esqueleto`);
         continue;
@@ -610,7 +674,8 @@ export function selectClips(files, model, selection, warn = console.warn) {
       source = [...new Set(kept.map((p) => p.source))].join(" + ");
     } else {
       const part = resolvePart(sel);
-      if (!retargetTracks(part.clip, name, model, normMap, warn)) continue;
+      if (!retargetTracks(part.clip, name, model, normMap, warn, part.scene !== model.scene)) continue;
+      adaptPositionUnits(part.clip, name, part.scene, model, normMap, unitsCache, warn);
       clip = part.clip;
       source = part.source;
     }
@@ -629,6 +694,9 @@ export function selectClips(files, model, selection, warn = console.warn) {
       clip,
       sourceClip,
       source,
+      // offset Y manual da UI (unidades da FONTE, ex.: +0,05 = 5 cm num
+      // personagem de 1,8 m) — escape hatch por clipe, soma ao aterramento
+      yOffsetSrc: Number(sel.yOffset) || 0,
     });
   }
 
@@ -759,9 +827,14 @@ export function sampleRootMotion(model, entry, frames) {
 }
 
 // ---------------------------------------------------------------------------
-// Normalização: pés no y=0, centro XZ na origem, escala opcional de altura
+// Normalização: pés no y=0 POR CLIPE, centro XZ na origem, escala opcional
+// de altura. O aterramento por clipe importa quando as fontes vêm de rigs
+// diferentes (ex.: anim FBX retargetada num rig GLB): proporções distintas
+// deixam um clipe flutuando ou afundando em relação aos outros — cada clipe
+// ganha o próprio offset (documentado no descriptor), e o offset MANUAL da
+// UI (yOffsetSrc, em unidades da fonte) soma por cima como escape hatch.
 
-export function normalizeBake(pos, rows, uniqueCount, targetHeight) {
+export function normalizeBake(pos, rows, uniqueCount, targetHeight, clips = null) {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < pos.length; i += 3)
@@ -791,11 +864,38 @@ export function normalizeBake(pos, rows, uniqueCount, targetHeight) {
     pos[i + 2] = (pos[i + 2] + translate[2]) * scale;
   }
 
-  const bounds = {
-    min: min.map((m, c) => (m + translate[c]) * scale),
-    max: max.map((m, c) => (m + translate[c]) * scale),
-  };
-  return { translate, scale, sourceHeight, bounds };
+  // Aterramento por clipe: o menor Y skinado do clipe vai para 0 (+ offset
+  // manual). groundOffset registrado em unidades ASSADAS (pós-escala).
+  const perClip = [];
+  if (clips && clips.length > 0) {
+    const framesPer = Math.round(rows / clips.length);
+    for (let ci = 0; ci < clips.length; ci++) {
+      const start = ci * framesPer * uniqueCount * 3;
+      const end = (ci + 1) * framesPer * uniqueCount * 3;
+      let yMin = Infinity;
+      for (let i = start + 1; i < end; i += 3) if (pos[i] < yMin) yMin = pos[i];
+      const manual = (Number(clips[ci]?.yOffsetSrc) || 0) * scale;
+      const shift = -yMin + manual;
+      if (Math.abs(shift) > 1e-9)
+        for (let i = start + 1; i < end; i += 3) pos[i] += shift;
+      perClip.push({
+        groundOffset: +(-yMin).toFixed(6),
+        yOffsetBaked: +manual.toFixed(6),
+      });
+    }
+  }
+
+  // Bounds finais (pós aterramento por clipe)
+  const bmin = [Infinity, Infinity, Infinity];
+  const bmax = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pos.length; i += 3)
+    for (let c = 0; c < 3; c++) {
+      const val = pos[i + c];
+      if (val < bmin[c]) bmin[c] = val;
+      if (val > bmax[c]) bmax[c] = val;
+    }
+
+  return { translate, scale, sourceHeight, bounds: { min: bmin, max: bmax }, perClip };
 }
 
 // ---------------------------------------------------------------------------
@@ -895,6 +995,12 @@ export function writeOutput({
       rowStart: i * frames,
       rowEnd: (i + 1) * frames,
       sourceDuration: +e.clip.duration.toFixed(6),
+      // Aterramento POR CLIPE (unidades assadas): quanto o clipe foi
+      // deslocado em Y para os pés tocarem o y=0 — automático (fontes de
+      // rigs distintos aterram diferente); yOffset só aparece quando houve
+      // ajuste MANUAL na UI/CLI (já incluído nas posições assadas).
+      groundOffset: norm.perClip?.[i]?.groundOffset ?? 0,
+      ...(norm.perClip?.[i]?.yOffsetBaked ? { yOffset: norm.perClip[i].yOffsetBaked } : {}),
     })),
     files: {
       positions: "positions_f16.bin",
@@ -980,12 +1086,23 @@ export async function bakeToDir(cfg, hooks) {
   });
 
   const { pos, nrm, rows } = await bakeClips(model, entries, frames, hooks.onProgress);
-  const norm = normalizeBake(pos, rows, model.uniqueCount, height);
+  const norm = normalizeBake(
+    pos,
+    rows,
+    model.uniqueCount,
+    height,
+    entries.map((e) => ({ yOffsetSrc: e.yOffsetSrc ?? 0 })),
+  );
   info({
     type: "normalize",
     translate: norm.translate.map((v) => +v.toFixed(4)),
     scale: +norm.scale.toFixed(4),
     sourceHeight: +norm.sourceHeight.toFixed(4),
+    grounds: norm.perClip.map((p, i) => ({
+      clip: entries[i].name,
+      groundOffset: p.groundOffset,
+      ...(p.yOffsetBaked ? { yOffset: p.yOffsetBaked } : {}),
+    })),
   });
 
   // Root motion dos clipes in-place: delta em espaço de mundo × escala da
@@ -1060,22 +1177,34 @@ export async function analyzeFiles(paths, warn = console.warn) {
   const model = buildModel(files[charIndex].gltf, files[charIndex].path, warn);
   const bind = measureBindPose(model);
 
-  // Compatibilidade de esqueleto por clipe: quantas tracks casam com nós do
-  // personagem (com a tolerância de nomenclatura do retarget). 0 = esqueleto
+  // Compatibilidade de esqueleto por clipe: quantas tracks casam com OSSOS
+  // do personagem (com a tolerância de nomenclatura do retarget; clipes do
+  // próprio arquivo do personagem podem mirar qualquer nó). 0 = esqueleto
   // incompatível — a UI avisa antes de qualquer bake.
   const normMap = buildNormMap(model);
-  const countMatched = (clip) => {
+  const countMatched = (clip, foreign) => {
+    const allowed = foreign ? model.boneNames : model.nodeNames;
     let n = 0;
     for (const track of clip.tracks) {
       const { nodeName } = THREE.PropertyBinding.parseTrackName(track.name);
-      if (!nodeName || model.nodeNames.has(nodeName) || normMap.get(normalizeName(nodeName))) n += 1;
+      if (!nodeName || allowed.has(nodeName)) {
+        n += 1;
+        continue;
+      }
+      const remap = normMap.get(normalizeName(nodeName));
+      if (remap && allowed.has(remap)) n += 1;
     }
     return n;
   };
 
   const clips = [];
   const used = new Set();
+  const unitsCache = new Map();
   files.forEach((f, fi) => {
+    // escala de mundo do rig FONTE (cm sob nó 0,01 → 0,01): converte o
+    // rootTravel medido nas tracks para metros — o limiar do "andar no
+    // lugar" compara com a altura (metros) e vale para qualquer fonte
+    const worldScale = worldScaleOf(restMapsFor(f.gltf.scene, unitsCache));
     (f.gltf.animations ?? []).forEach((clip, ci) => {
       const name = suggestClipName(clip, f.path, used, clips.length);
       used.add(name.toLowerCase());
@@ -1086,8 +1215,8 @@ export async function analyzeFiles(paths, warn = console.warn) {
         name,
         duration: +clip.duration.toFixed(3),
         tracks: clip.tracks.length,
-        matchedTracks: countMatched(clip),
-        rootTravel: +measureRootTravel(clip, model.rootBoneNames).toFixed(4),
+        matchedTracks: countMatched(clip, f.gltf.scene !== model.scene),
+        rootTravel: +(measureRootTravel(clip, model.rootBoneNames) * worldScale).toFixed(4),
         source: basename(f.path),
       });
     });
@@ -1180,9 +1309,30 @@ export function runSelftest(outDir) {
   spread > 1e-4 && spread < 100
     ? ok(`bounds ${fmtV3(mn)} → ${fmtV3(mx)}`)
     : bad(`bounds implausíveis: ${fmtV3(mn)} → ${fmtV3(mx)}`);
-  Math.abs(mn[1]) <= 0.01
-    ? ok(`pé no chão (ymin=${mn[1].toFixed(4)})`)
-    : bad(`ymin=${mn[1].toFixed(4)} — esperava ≈0 (pés no y=0)`);
+
+  // 4c. pé no chão POR CLIPE: o menor Y skinado de CADA clipe deve ficar em
+  // ≈0 (ou no yOffset manual) — regressão do bug "base GLB + anim FBX afunda
+  // (chão na cintura)": retarget sem rebase de posições deixava um clipe
+  // ~0,9 m abaixo dos outros.
+  for (const clip of desc.clips) {
+    let yMin = Infinity;
+    for (let r = clip.rowStart; r < clip.rowEnd; r++) {
+      const base = r * w * 3;
+      for (let cIdx = 0; cIdx < w; cIdx++) {
+        const y = posF[base + cIdx * 3 + 1];
+        if (y < yMin) yMin = y;
+      }
+    }
+    const expected = clip.yOffset ?? 0;
+    Math.abs(yMin - expected) <= 0.01
+      ? ok(
+          `pé no chão em "${clip.name}" (ymin=${yMin.toFixed(4)}${expected ? `, offset manual ${expected}` : ""})`,
+        )
+      : bad(
+          `clipe "${clip.name}" fora do chão: ymin=${yMin.toFixed(4)}, esperava ≈${expected} — ` +
+            `retarget de fonte com unidades/eixos diferentes? (caso típico: anim FBX sobre rig GLB)`,
+        );
+  }
 
   // 4b. escala coerente ENTRE clipes: diagonal do frame 0 de cada clipe vs a
   // do 1º clipe — pega fontes com unidades mistas (ex.: um FBX em cm no meio
