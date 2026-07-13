@@ -3,6 +3,7 @@ import * as THREE from "three/webgpu";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Leva } from "leva";
 import { Scene, initialSceneMode } from "./scene/Scene";
+import { PostFX } from "./render/post/PostFX";
 import { qpBool, qpStr } from "./lib/urlParams";
 import { useContent } from "./data/contentStore";
 import { useDemoLens } from "./data/demoLensStore";
@@ -129,6 +130,9 @@ export default function App() {
             ...(props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
             antialias: true,
             forceWebGL: qpBool("forceWebGL", false),
+            // GPU timestamps p/ medir o custo real dos efeitos (menu Effects);
+            // sem suporte (feature/extensão ausente) cai no frame-time.
+            trackTimestamp: true,
           });
           await renderer.init();
           return renderer;
@@ -136,6 +140,7 @@ export default function App() {
       >
         <Suspense fallback={null}>
           <Scene />
+          <PostFX />
           <Probe onReady={setBackend} onFps={setFps} />
         </Suspense>
       </Canvas>
