@@ -190,13 +190,13 @@ A camada que torna os núcleos exploráveis. Design no doc 04 §5.11/5.12.
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
 | `label anti-overlap` | on | `labelAnti` | Resolve rótulos de núcleo que se sobrepõem na tela: o menor (menos membros) sobe com uma mola e some um pouco quando a câmera está longe demais para separá-los |
-| `label distance falloff` | — | `labelDist` | Quanto os rótulos encolhem com a distância da câmera (hierarquia de leitura), com piso para não sumirem |
-| `cluster outlines` | — | `outlines` | Um **contorno suave** desenhado no chão em volta de cada núcleo FORMADO (precisa de gravidade). Respira devagar; custo ~zero |
-| `outline alpha` | — | `outlineAlpha` | Opacidade do contorno |
-| `data view (birdseye)` | — | `dataView` | Acima da altura de câmera abaixo, as pessoas **desvanecem em discos coloridos** no chão — a leitura "circle packing" do acervo inteiro (1 draw call, ~zero custo) |
-| `data view height` | — | `dataViewH` | Altura da câmera em que a vista de dados começa |
-| `data view fade band` | — | `dataViewBand` | Faixa de altura do crossfade pessoas↔discos |
-| `disc size` | — | `discSize` | Tamanho dos discos na vista de dados |
+| `label distance falloff` | 0.35 | `labelDist` | Quanto os rótulos encolhem com a distância da câmera (hierarquia de leitura), com piso em 0,65× para não sumirem |
+| `cluster outlines` | on | `outlines` | Um **contorno suave** desenhado no chão em volta de cada núcleo FORMADO (precisa de gravidade). Respira devagar; custo ~zero |
+| `outline alpha` | 0.16 | `outlineAlpha` | Opacidade máxima do contorno (o núcleo modula por cima) |
+| `data view (birdseye)` | on | `dataView` | Acima da altura de câmera abaixo, as pessoas **desvanecem em discos coloridos** no chão — a leitura "circle packing" do acervo inteiro (1 draw call, ~zero custo) |
+| `data view height` | 55 | `dataViewH` | Altura da câmera (m) em que os discos chegam a plena opacidade |
+| `data view fade band` | 18 | `dataViewBand` | Faixa de altura (m) do crossfade pessoas↔discos (começo do fade-in) |
+| `disc size` | 1 | `discSize` | Tamanho base dos discos na vista de dados |
 
 > **Clicar num rótulo de núcleo** voa a câmera até ele, destaca os membros e
 > abre um painel com os elementos do núcleo como chips filtráveis (doc 04
