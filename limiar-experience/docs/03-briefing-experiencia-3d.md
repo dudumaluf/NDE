@@ -298,3 +298,57 @@ identidade do slot, então desenhar os primeiros 46 desenha exatamente as 46
 pessoas. A sim continua inteira (dormentes seguem ocupando espaço e
 empurrando — corte de desenho, não de simulação); fios e labels seguem
 válidos (só referenciam índices < 46). `?onlyPeople=1`.
+
+### 14.6 Interação, Vocabulary e terreno vivo (M4a–f, 2026-07-13)
+
+**positionMirror (`src/sim/positionMirror.ts`)** — espelho CPU das posições
+dos agentes: readback `getArrayBufferAsync(positions)` CONTÍNUO com guarda
+de inflight (um em voo por vez; ao completar, agenda o próximo no rAF —
+~60 Hz efetivo, latência 1–3 frames, invisível com o damping da câmera).
+Singleton com refcount (`acquire()`/release) — só roda enquanto hover/follow
+precisam. Stride 4 (WebGPU, padding vec4) vs 3 (WebGL2/TF packed) detectado
+pelo tamanho. **Armadilha aprendida:** um `getArrayBufferAsync` ANTES do
+primeiro compute registra o attribute vazio no cache do backend WebGL2 e o
+compute quebra (`switchBuffers is not a function`) — o mirror espera
+`sim.u.time > 0`. Hover/follow/timeline leem daqui; se um dia o espelho
+mostrar limite, o upgrade é picking GPU (pendência).
+
+**Vocabulary (M4b)** — os papéis de clipe (idle/idle2/walk/run/pray) têm
+precedência painel > `role` declarado no descriptor (dropdown por linha no
+VAT Studio → `clips[].role` no vat.json) > regex por nome. O **sorteio do
+gesto de assentamento migrou do shader para a CPU**: `agentMeta.y` deixou
+de ser probabilidade e carrega o GESTO decidido em
+`agentMapping.computeAgentMeta` (−1 = idle próprio → estado 3; ≥0 = índice
+GLOBAL do clipe → estado 4), sorteio ponderado estável por slot
+(mulberry32) com candidatos idle/rezar/regras `elemento → clipe (peso)` —
+regras novas nunca mais tocam a GPU. **Playback × por estado sem buffer
+novo**: o clock global anda a `fps` frames/s; somar `(mult−1)×fps×dt` na
+FASE por agente (state pass) faz o frame efetivo andar a `mult×fps` — o
+sampler não muda, o orçamento de 4 varyings do TF fica intacto.
+
+**Follow (M4d)** — transição de 1,2 s (smootherstep) anima câmera +
+`controls.target` até atrás/acima da pessoa (azimute preservado); no lock,
+o DELTA do movimento da pessoa é somado no alvo E na câmera por frame — o
+OrbitControls fica LIGADO (órbita/zoom livres ao redor de quem anda).
+Clique ≠ arrasto: down→up com <6 px e <400 ms. `?follow=<i>` headless.
+
+**Terreno vivo (M4f)** — `src/scene/heightfield.ts` implementa h(x,z) DUAS
+vezes com a MESMA matemática: TSL (chão + sim) e JS (marker, labels).
+Paridade por construção: hash PCG INTEIRO (o mesmo do `hash()` do three;
+nada de `fract(sin(...))`, que quebra em float32/WebGL2), lattice→seed em
+aritmética uint32 dos dois lados (`Math.imul`/`>>>` ≡ wrap da GPU),
+value-noise bilinear com fade quíntico, fbm ≤5 oitavas com gate fracionário,
+domain warp e **flatten radial no centro** (anfiteatro dos núcleos, doc 04
+§1.1). Sonda de paridade mediu erro máx ~2e-6 (float32) nos 2 backends.
+Os uniforms são compartilhados em module-level: o MESMO nó alimenta o
+material do chão e os passes da sim (`y = h(x,z)` no reset e no update —
+forças seguem em XZ; fios/render/espelho herdam o y). O chão virou UM mesh
+(RingGeometry 0→80, subdividida nas duas direções — CircleGeometry só
+divide o perímetro) com `MeshStandardNodeMaterial`: `positionNode` desloca
+y, normal por diferenças finitas no vertex (varying), e o GRID é TSL no
+próprio material (fract/fwidth anti-aliased, célula 0,25/extensão 42,5 do
+gridHelper antigo, cores do Appearance) — abraça o relevo em vez de boiar.
+Raycast do mouse continua na malha CPU flat; o y real vem do `heightJS`
+(marker/labels). FPS 60→60 nos dois backends com terreno ligado. Grupo
+"Terrain" no leva com presets (só mudam params); `?terrain=<preset>`,
+`?terrainAmp=`, `?terrainOn=`. Amplitude default 0 = paridade visual total.

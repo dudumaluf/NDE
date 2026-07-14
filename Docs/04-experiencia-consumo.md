@@ -38,6 +38,13 @@ cheia mas menos legível, ela está errada — recua, filtra ou espera sua vez.
 Toda mecânica visual nova se testa contra isso, na mesma mesa em que se
 testa contra o arrepio-tese do §2.
 
+**Nota de leitura — o terreno (2026-07-13, M4f):** o Campo ganhou relevo
+opcional (colinas por heightfield, grupo Terrain), e este princípio é o que
+o disciplina: o centro fica **PLANO por design** (`flatten radius` — um
+anfiteatro) para os núcleos se formarem em leitura limpa; as colinas moram
+na borda, onde são horizonte e não obstáculo. Amplitude nasce em 0 — o
+relevo é decisão do criador, não default.
+
 ## 2. A emoção central (a tese em uma frase)
 
 > **A vertigem de perceber que centenas de estranhos, que nunca se conheceram,
@@ -109,6 +116,30 @@ A escada hover → clique → escuta, fechada com o Dudu:
 
 Nada disso adiciona UI persistente: nome e timeline só existem enquanto o
 gesto (hover, follow) existe.
+
+### 4.2 A cadeia no ar (2026-07-13 — M4c/M4d/M4e implementados)
+
+A escada do §4.1 saiu do papel, ainda sem o áudio:
+
+1. **Hover** — a pessoa REAL mais próxima do cursor (raio ~1,2 m; dormentes
+   não respondem — quem tem história fala) ganha o **nome flutuando** sobre
+   a cabeça: billboard com fade de ~0,25 s, cor da paleta de labels
+   (segue o núcleo ou fixa, grupo Appearance), cursor vira pointer.
+2. **Clique = follow em 3ª pessoa** — transição suave de ~1,2 s até
+   atrás/acima da pessoa; depois a câmera ACOMPANHA (órbita e zoom seguem
+   livres — o OrbitControls não desliga). ESC ou clique no vazio solta,
+   sem teleporte. Arrastos de órbita nunca disparam clique.
+3. **Timeline da história** — aparece só no follow, bottom-center, irmã
+   estética da Legenda (que desvanece — uma voz por vez, §1.1): linha com
+   leve atração ao mouse (eco do menu cables do Dudu), **pontos nos beats
+   (`t_norm`) coloridos por valência** (fria→quente), anel na virada do
+   arco, nome + entrada/saída do arco à esquerda; hover num ponto = resumo
+   do beat + rótulo emocional; clique seleciona o beat. **v1 é visual** —
+   tocar o corte de áudio do beat é a próxima etapa (Supabase, §5.2).
+
+Pendências assumidas: áudio (a Sintonia §5.1 e o corte por beat), e o
+espelho de posições (doc 03 §14.6) como limite conhecido — se a latência
+de readback incomodar em multidões maiores, o upgrade é picking GPU.
 
 ## 5. As mecânicas novas (batizadas em 2026-07-10 e 2026-07-12)
 
