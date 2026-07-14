@@ -582,6 +582,62 @@ do acervo):
   empurram — invisível na prática); heightfield tileado só combina perfeito
   com o wrap ligado.
 
+### 5.11 Foco no núcleo e sublentes por interseção (2026-07-14)
+
+Estende §5.7 (palavras no espaço). Três camadas de HIERARQUIA e EXPLORAÇÃO,
+para o Campo deixar de ser "sopa bonita" e virar mapa navegável:
+
+**Rótulos sem sobreposição.** O problema real relatado: com núcleos vizinhos
+e a câmera longe, os nomes empilhavam ilegíveis. Agora há anti-colisão em
+espaço de TELA — o núcleo MAIOR fica no lugar, o menor SOBE (animado, nunca
+"pula") até limpar, e desvanece um tico quando a câmera está longe demais
+para separar. A escala do rótulo cai suavemente com a distância: hierarquia
+de leitura (o que está perto, e é grande, lê-se primeiro). É o §1.1 aplicado
+à tipografia — ordem emergindo, não etiquetas brigando.
+
+**Rótulo clicável → foco.** Clicar num nome (ou no ícone ⌖ discreto do chip
+da Legenda) **voa a câmera** até enquadrar o núcleo (~1,4 s, suave,
+preservando de onde você olhava — sem teletransporte) e **acende só aquele
+núcleo**, o resto do Campo colapsando num cinza. Abre um **painel de foco**
+(irmão da Legenda, mesma linguagem): nome, quantas pessoas, e a
+**ASSINATURA** — os ~6 elementos que mais DISTINGUEM o núcleo (não os mais
+comuns: os de maior *lift*, % dentro do núcleo vs % no corpus). Ex.: "Os
+jardins de luz" assina por *estado de graça* (2,3×), *a fronteira*, *a
+passagem* — não por "inefabilidade", que todos têm. A assinatura responde a
+"por que estas pessoas estão juntas?".
+
+**Sublente por interseção (v1).** Cada elemento da assinatura é um CHIP
+clicável: tocar isola **só os membros do núcleo que viveram aquele
+elemento** (núcleo ∩ elemento). É a Lente (§5.3) em miniatura, dentro de um
+núcleo — o começo do drill-down "temas dentro de temas". Re-tocar volta ao
+núcleo inteiro; ESC / clicar no vazio sai do foco (a câmera fica onde está).
+
+**Contornos dos núcleos (opção visual).** Um contorno suave desenhado no
+chão ao redor de cada núcleo formado — blob spline que "respira" devagar,
+discreto (cor do núcleo dessaturada). Torna os grupos legíveis como REGIÕES,
+não só nuvens de pontos. Toggle no grupo "Focus & reading".
+
+### 5.12 A vista de dados (LOD) — a semente da constelação (2026-07-14)
+
+Quando a câmera **sobe** (visão de pássaro), as pessoas fazem crossfade para
+**discos achatados coloridos no chão**: a leitura *circle-packing* do corpus
+inteiro. Perto, é uma multidão de corpos que caminham e rezam; longe, é
+DADO — manchas de cor por núcleo sobre um campo de discos cinzas (os
+dormentes). É a transição contemplativa **gente → dado** e de volta, parte
+do **arco da vertigem** (doc 01): a mesma verdade em duas escalas, e a
+constelação prometida para o M6 começa aqui — os núcleos vistos como
+constelações de pontos, não como uma turba. Sobe-se para entender o todo,
+desce-se para escutar um. (v1: a multidão real não some ao subir — de tão
+longe já é minúscula, e os discos entram por cima; o fade do próprio corpo
+fica para depois.)
+
+**Pendência registrada (não implementada):** hoje o export de núcleos é
+PLANO (cada pessoa num núcleo). Para o drill-down "temas dentro de temas"
+virar de verdade — sub-grupos REAIS dentro de cada núcleo — o `analyze` do
+acervo precisa exportar a **hierarquia do HDBSCAN (condensed tree)**. A
+sublente por interseção (§5.11) é a v1 disso via elementos; a v2 usaria a
+sub-estrutura do próprio clustering.
+
 ## 6. O loop de descoberta (fechado)
 
 ```

@@ -643,3 +643,103 @@ de formação nos centroides UMAP×mapScale, no ground frame — fluem e
 wrappam), círculo do campo do ativo e seta do rumo da viagem. <20 objetos,
 posições por frame (barato). É a área canônica mostrada como o palco de
 tudo.
+
+### 14.10 Hierarquia visual e exploração dos núcleos (2026-07-14)
+
+A camada de leitura/exploração dos núcleos (doc 04 §5.11/§5.12). Montada em
+`App.tsx` DENTRO do Canvas (NÃO no `CrowdMesh` — território da Multidão em
+edição paralela); os componentes leem a sim viva via `positionMirror.simRef`
+(o hover/follow já registram a `CrowdSim` lá) e os parâmetros do CrowdMesh
+via `levaStore` (`src/lib/levaRead.ts`, leitura imperativa, nunca escreve).
+
+**Anti-colisão dos rótulos em screen-space (`ClusterLabels.tsx`).** Por
+frame projeta-se o centro de cada núcleo (≤13) para pixels; a meia-extensão
+do quad billboard vira px por `m/mpp` (`mpp = 2·tan(fov/2)·depth/altura`).
+Relaxação em ≤4 passadas por PRIORIDADE (nº de membros desc): o maior fica,
+o menor sobe até limpar o AABB do maior (`desiredJy = iy − halfH_i −
+halfH_j − margem`). O offset é em PIXELS, animado por spring (τ 0,18 s) e
+convertido em deslocamento no mundo pelo vetor UP da câmera
+(`worldUp = −offsetPx·mpp`) — sobe na tela em qualquer ângulo. Fade extra
+por aglomeração (offset grande = câmera longe demais → some até ~45%).
+Escala do rótulo decresce com a distância (clamp `MIN_SCALE_MUL` 0,62) para
+hierarquia de leitura. Verificado headless: câmera baixa, 13 núcleos
+vizinhos, **7 pares sobrepostos → 0** com a feature ligada (2 backends).
+
+**Rótulo clicável → FOCUS (`scene/ClusterFocus.tsx` + `scene/focusStore.ts`).**
+Picking em screen-space (mesma projeção da anti-colisão; cursor pointer em
+`useFrame` priority 2 — roda DEPOIS do PersonHover, que reseta o cursor no
+priority 0, sem briga). Clique curto (não-arrasto) num rótulo → `focusCluster`;
+clique no vazio → `clearFocus`. O rig de foco é PRÓPRIO e simples (não usa
+nem edita o FollowCamera): captura pose atual, alvo = centroide VIVO dos
+membros (positionMirror; fallback centroide UMAP×mapScale), distância =
+`clamp(raio·2,3 + 3,2, 5, 42)`, preservando o azimute; voa em ~1,4 s com
+smootherstep. Durante o voo `controls.enabled=false` (o drei só chama
+`update()` com enabled) e a pose é escrita à mão; ao pousar religa e
+`controls.update()` sincroniza — sem costura. **Bloqueado se
+`followStore.following ≠ null`** (a câmera tem dono); follow ativo cancela o
+foco. Sair NÃO teleporta (só solta).
+
+**Destaque persistente + sublente por interseção (`legendStore` +
+`crowd/colorEmphasis.ts`).** `triggerLegendFlash(flash, Infinity)` — hold
+INDEFINIDO (sem timer; `legendFlashK` devolve 1 enquanto `holdMs` não é
+finito); `clearLegendFlash()` re-baseia para "hold acabou" e percorre o fade
+normal. Novo `kind: "clusterElement"` (id `"<clusterId>:<elementKey>"`) no
+colorEmphasis: só quem é do núcleo E tem o elemento mantém a cor; o resto
+(inclusive o resto do núcleo) colapsa no cinza. Reusa 100% o mecanismo de
+flash existente do CrowdMesh (zero edição nele).
+
+**Assinatura por LIFT (`data/clusterSignature.ts`).** Para cada elemento:
+`lift = (% de membros do núcleo com o elemento) ÷ (% do corpus com o
+elemento)`. Ordena por lift desc com piso de suporte (≥2 membros, ou ≥40%
+em núcleos ≤4) — assim "inefabilidade/missão" (quase universais) não
+encabeçam todos os núcleos; sobem os que DISTINGUEM (ex.: "Os jardins de
+luz" → estado_de_graca 2,3×). Top-6 viram CHIPS clicáveis no painel de foco
+(`ui/FocusPanel.tsx`, irmão da Legend). Tudo client-side sobre
+`manifest.people`.
+
+**Contorno/spline dos núcleos (`render/ClusterOutlines.tsx`).** Para cada
+núcleo FORMADO (sinal COMPARTILHADO — ver abaixo) um blob no chão: hull
+RADIAL de 12 setores (em cada um, o membro mais distante do centroide vivo +
+folga, espalhado aos vizinhos), suavizado por **Catmull-Rom fechado** (6
+subpontos/segmento) + lerp temporal (amostra ~0,3 s) + leve respiração.
+`THREE.Line` com fecho explícito (o WebGPU do three **não suporta
+LineLoop** — mesma lição do §14.9), material dessaturado, `depthWrite:false`,
+y = `heightJS(x,z) + 0,02`. ~13×(12×6+1) ≈ 950 vértices reescritos/frame na
+CPU (posições do positionMirror — sem readback novo): desprezível.
+
+**Sinal de formação compartilhado (`data/clusterFormation.ts`).** A detecção
+saiu do ClusterLabels (que tinha readback GPU próprio) para um módulo que lê
+o **positionMirror** (espelho CPU contínuo que hover/follow já mantêm) —
+`tickClusterFormation` é idempotente (relógio de 0,6 s; labels E outlines
+chamam, só o 1º faz trabalho). Mesma regra de antes (média das distâncias
+dos membros aos alvos UMAP < formRadius, histerese 1,35×; fallback por tempo
+se o espelho quebrar). **Um readback a MENOS** que antes.
+
+**LOD "vista de dados" (`render/DataViewDiscs.tsx`).** InstancedMesh próprio
+(1 draw call, `MeshBasicNodeMaterial`): `positionNode` lê `sim.positions`
+como **storage read-only + `setPBO(true)`** (padrão dos fios — zero tráfego
+CPU↔GPU), coloca um quad no plano XZ (via `uv−0,5`, raio = escala por pessoa
+× slider) em `iPos.xz`, y = `iPos.y + 0,04`; `opacityNode` = círculo suave
+(`oneMinus(smoothstep(0,82, 1, dist_uv))`) × crossfade × alpha. Crossfade
+por ALTURA da câmera (`smoothstep(H−banda, H, camY)`, slider default 55).
+**Cor dos discos (dívida documentada):** o `iColorScale` da multidão é
+atributo do CrowdMesh (não editável aqui), então reconstrói-se a cor com as
+MESMAS funções puras (`fillContentAttributes` de `crowd/spawn.ts`, seed lida
+do levaStore) no próprio atributo — determinístico; v1 não reflete HSB/lente/
+destaque do CrowdMesh. A multidão real NÃO some (fade do mesh dela exigiria
+tocar seu material — ticket para a Multidão); os discos entram POR CIMA (de
+longe a multidão já é minúscula).
+
+**Grupo leva "Focus & reading" (`ui/FocusControls.tsx` + `focusReadingStore`).**
+Arquivo próprio (montado em App.tsx como o AppearanceControls) para não tocar
+CrowdMesh: anti-overlap on/off, label distance falloff, cluster outlines +
+alpha, data view (birdseye) + height + fade band + disc size. Tudo
+pref()-wrapped (persiste pelo grupo Preferences; query params vencem —
+`?labelAnti=`, `?outlines=`, `?outlineAlpha=`, `?dataView=`, `?dataViewH=`,
+`?discSize=`…).
+
+**Custo (medido headless, 2 backends).** A camada é ~grátis: 4096 agentes
+WebGL2 **57,7 fps (camada OFF) vs 57,8 fps (ON)**; birdseye com discos
+ativos 60 fps. Rótulos+contornos não movem o ponteiro; os discos são 1 draw
+call sobre o mesmo storage. `scripts/hier-shots.mjs` (4 cenários × 2
+backends) e `scripts/hier-fps.mjs`. follow/prefs/states-probe seguem verdes.
