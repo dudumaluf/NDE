@@ -63,6 +63,15 @@ export function applyColorEmphasis(
         inFlash = p.cluster_id === Number(flash.id);
       } else if (flash.kind === "demo") {
         inFlash = demoCls !== null && demoCls.personCat[i] === Number(flash.id);
+      } else if (flash.kind === "clusterElement") {
+        // Sublente do focus (2026-07-14): interseção núcleo ∩ elemento —
+        // id = "<clusterId>:<elementKey>". Só quem é do núcleo E tem o
+        // elemento mantém a cor; o resto (inclusive o resto do núcleo)
+        // colapsa no cinza.
+        const sep = flash.id.indexOf(":");
+        const cid = Number(flash.id.slice(0, sep));
+        const el = flash.id.slice(sep + 1);
+        inFlash = p.cluster_id === cid && p.elements.includes(el);
       } else {
         // "side": os dois lados da lente de elemento (tem / não tem)
         inFlash =

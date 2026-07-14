@@ -162,6 +162,16 @@ class PositionMirror {
   sampleAge(now = performance.now()): number {
     return this.data ? now - this.dataT : Infinity;
   }
+
+  /**
+   * A CrowdSim viva (null até o primeiro acquire). Componentes montados FORA
+   * do CrowdMesh (ClusterOutlines/DataViewDiscs, 2026-07-14) precisam do
+   * storage de posições para ler na GPU sem tocar no CrowdMesh — o espelho
+   * já conhece a sim porque hover/follow a registram aqui.
+   */
+  get simRef(): CrowdSim | null {
+    return this.sim;
+  }
 }
 
 export const positionMirror = new PositionMirror();

@@ -14,8 +14,11 @@ import { create } from "zustand";
  */
 
 export interface LegendFlash {
-  /** cluster = núcleo (id numérico) · demo = categoria demográfica (índice) · side = lado da lente de elemento ("has"/"not"). */
-  kind: "cluster" | "demo" | "side";
+  /** cluster = núcleo (id numérico) · demo = categoria demográfica (índice) ·
+   *  side = lado da lente de elemento ("has"/"not") ·
+   *  clusterElement = interseção núcleo ∩ elemento ("<clusterId>:<elementKey>",
+   *  a sublente do modo focus — 2026-07-14). */
+  kind: "cluster" | "demo" | "side" | "clusterElement";
   id: string;
 }
 
@@ -23,7 +26,8 @@ export interface LegendFlash {
 export interface ActiveLegendFlash extends LegendFlash {
   /** performance.now() do clique. */
   start: number;
-  /** Quanto tempo segura em intensidade cheia antes do fade-out. */
+  /** Quanto tempo segura em intensidade cheia antes do fade-out.
+   *  Infinity = segura até clearLegendFlash() (modo focus). */
   holdMs: number;
 }
 
@@ -47,12 +51,16 @@ let flashTimer: ReturnType<typeof setTimeout> | null = null;
 /**
  * Destaca um grupo por `holdMs` + fade; re-clicar reinicia o relógio.
  * O timer limpa o estado DEPOIS do fade completar (o envelope já chegou a 0).
+ * holdMs = Infinity (modo focus) não agenda timer — quem limpa é o
+ * clearLegendFlash() ao sair do foco.
  */
 export function triggerLegendFlash(flash: LegendFlash, holdMs = 2000): void {
   if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = null;
   useLegend.setState({
     flash: { ...flash, start: performance.now(), holdMs },
   });
+  if (!Number.isFinite(holdMs)) return;
   flashTimer = setTimeout(
     () => {
       useLegend.setState({ flash: null });
@@ -62,8 +70,30 @@ export function triggerLegendFlash(flash: LegendFlash, holdMs = 2000): void {
   );
 }
 
+/**
+ * Solta um flash de hold indefinido COM fade: re-baseia o relógio para "o
+ * hold acabou de terminar" — o envelope percorre o fade normal e o timer
+ * limpa o estado no fim. Sem flash ativo, é no-op.
+ */
+export function clearLegendFlash(): void {
+  const { flash } = useLegend.getState();
+  if (!flash) return;
+  if (flashTimer) clearTimeout(flashTimer);
+  useLegend.setState({
+    flash: { ...flash, start: performance.now(), holdMs: 0 },
+  });
+  flashTimer = setTimeout(
+    () => {
+      useLegend.setState({ flash: null });
+      flashTimer = null;
+    },
+    LEGEND_FLASH_FADE_S * 1000 + 120,
+  );
+}
+
 /** Envelope do flash em t=agora: 1 no hold, smootherstep → 0 no fade. */
 export function legendFlashK(flash: ActiveLegendFlash, now: number): number {
+  if (!Number.isFinite(flash.holdMs)) return 1; // hold indefinido (focus)
   const t = (now - flash.start - flash.holdMs) / (LEGEND_FLASH_FADE_S * 1000);
   if (t <= 0) return 1;
   if (t >= 1) return 0;

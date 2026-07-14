@@ -10,6 +10,11 @@ import { Legend } from "./ui/Legend";
 import { StoryTimeline } from "./ui/StoryTimeline";
 import { AppearanceControls } from "./ui/AppearanceControls";
 import { PrefsControls } from "./ui/PrefsControls";
+import { FocusControls } from "./ui/FocusControls";
+import { FocusPanel } from "./ui/FocusPanel";
+import { ClusterFocus } from "./scene/ClusterFocus";
+import { ClusterOutlines } from "./render/ClusterOutlines";
+import { DataViewDiscs } from "./render/DataViewDiscs";
 
 // A legenda do que está em cena (núcleos/lentes, chips clicáveis, frase do
 // bottom) vive em src/ui/Legend.tsx — UI real da experiência, fora do leva.
@@ -80,9 +85,11 @@ export default function App() {
         theme={{ sizes: { rootWidth: "380px", controlWidth: "170px" } }}
       />
       {/* Grupos do leva que vivem fora do Canvas: cores do mundo + HSB das
-          pessoas (Aparência) e o preset persistente (Preferências). */}
+          pessoas (Aparência), o preset persistente (Preferências) e a camada
+          de hierarquia/leitura (Focus & reading). */}
       <AppearanceControls />
       <PrefsControls />
+      <FocusControls />
       <Canvas
         camera={{ position: initialCamera(), fov: 45, near: 0.05, far: 300 }}
         gl={async (props) => {
@@ -101,6 +108,13 @@ export default function App() {
         <Suspense fallback={null}>
           <Scene />
           <PostFX />
+          {/* Camada de hierarquia (2026-07-14): contornos dos núcleos, discos
+              LOD e o rig de foco. Montados AQUI (não no CrowdMesh, território
+              da Multidão); leem a sim viva via positionMirror.simRef e os
+              parâmetros do CrowdMesh via levaStore. */}
+          {content && <ClusterOutlines content={content} />}
+          {content && <DataViewDiscs content={content} />}
+          {content && <ClusterFocus content={content} />}
           <Probe onReady={setBackend} onFps={setFps} />
         </Suspense>
       </Canvas>
@@ -122,6 +136,7 @@ export default function App() {
         {fps !== null ? ` · ${fps.toFixed(0)} fps` : ""}
       </div>
       <Legend />
+      <FocusPanel />
       <StoryTimeline />
       {content && (
         <div

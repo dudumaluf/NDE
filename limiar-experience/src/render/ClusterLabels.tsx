@@ -6,33 +6,51 @@ import type { CrowdSim } from "../sim/CrowdSim";
 import type { Content } from "../data/types";
 import { clusterLabelColor, hexToRgb01 } from "../data/palette";
 import { useAppearance } from "../ui/appearanceStore";
+import { useFocusReading } from "../ui/focusReadingStore";
 import { heightJS } from "../scene/heightfield";
+import {
+  buildClusterFormationInfos,
+  formationEvaluated,
+  isClusterFormed,
+  tickClusterFormation,
+} from "../data/clusterFormation";
+import { focusCluster, clearFocus, useFocus } from "../scene/focusStore";
 
 /**
- * Palavras 3D nos núcleos (M3.5): quando um núcleo "se forma" sob a gravidade
- * UMAP, o NOME dele (clusters.json "label") flutua no centro — billboard com
- * fade-in lento; fade-out quando a gravidade desliga ou uma lente reorganiza.
+ * Palavras 3D nos núcleos (M3.5 + hierarquia 2026-07-14): quando um núcleo
+ * "se forma" sob a gravidade UMAP, o NOME dele flutua no centro — billboard
+ * canvas→plane com fade-in lento. Duas alternativas foram DESCARTADAS por
+ * incompatibilidade: troika/drei <Text> (injeta GLSL via onBeforeCompile, que
+ * o WebGPURenderer não executa) e THREE.Sprite (não desenha no fallback
+ * WebGL2 do r185).
  *
- * Texto: canvas 2D → CanvasTexture num Mesh(Plane) + MeshBasicNodeMaterial,
- * billboard feito na CPU (quaternion da câmera copiado por frame — 12 quads,
- * custo zero). Duas alternativas foram DESCARTADAS por incompatibilidade:
- * troika/drei <Text> injeta GLSL via onBeforeCompile, que o WebGPURenderer
- * não executa; e THREE.Sprite+SpriteNodeMaterial renderiza no WebGPU mas
- * silenciosamente NÃO desenha no fallback WebGL2 do r185 (testado aqui).
+ * NOVO (hierarquia visual):
+ *  1. Anti-colisão em ESPAÇO DE TELA: os centros são projetados por frame
+ *     (≤13), pares sobrepostos (AABB do quad projetado) são resolvidos com
+ *     offset VERTICAL suave por prioridade (núcleo MAIOR fica no lugar; o
+ *     menor sobe, animado por spring) + leve fade do menor quando a
+ *     sobreposição persiste (câmera longe). Prioridade = nº de membros.
+ *  2. Escala levemente decrescente com a distância da câmera (clamp) —
+ *     hierarquia de leitura.
+ *  3. Rótulo CLICÁVEL → modo FOCUS do núcleo (voo de câmera + destaque +
+ *     painel). Picking em screen-space (mesma projeção da anti-colisão);
+ *     cursor pointer no hover. Clique no vazio sai do foco.
  *
- * Detecção de formação: leitura AMOSTRADA das posições reais (readback GPU
- * via getArrayBufferAsync a cada ~0,6 s, nunca por frame) → média das
- * distâncias de cada membro ao SEU alvo UMAP; abaixo de `formRadius` o
- * núcleo está coeso (histerese 1,35× para não piscar na fronteira). Se o
- * readback falhar em algum ambiente, cai na heurística do briefing:
- * gravidade ativa há 8 s = formado.
+ * O sinal de FORMAÇÃO agora vem do módulo compartilhado clusterFormation
+ * (lê o positionMirror — sem readback próprio; o ClusterOutlines usa o mesmo).
  */
 
 const LABEL_FONT = '300 72px "Inter", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif';
 const LINE_HEIGHT = 90;
 const PAD = 28;
+/** Margem entre rótulos empilhados (px). */
+const STACK_MARGIN = 5;
+/** Escala mínima com a distância (clamp) — legível de longe. */
+const MIN_SCALE_MUL = 0.62;
+/** Distância (m) de referência p/ o falloff de escala. */
+const SCALE_FAR = 60;
 
-/** Um plane 1×1 compartilhado pelos 12 rótulos (escala por sprite). */
+/** Um plane 1×1 compartilhado pelos rótulos (escala por sprite). */
 const PLANE = /* @__PURE__ */ new THREE.PlaneGeometry(1, 1);
 
 /** Quebra equilibrada em até 2 linhas (rótulos longos: "Encontros durante…"). */
@@ -92,14 +110,29 @@ interface LabelEntry {
   clusterId: number;
   /** Centroide do núcleo no espaço UMAP unitário (x, z). */
   centroid: [number, number];
-  /** Slot de agente e alvo UMAP unitário (x, z) de cada membro. */
-  memberSlots: number[];
-  memberTargets: [number, number][];
-  /** Altura do sprite no mundo (por nº de membros). */
+  /** Nº de membros — prioridade da anti-colisão (maior fica no lugar). */
+  size: number;
+  /** Altura-base do sprite no mundo (por nº de membros). */
   height: number;
   aspect: number;
   opacity: number;
-  formed: boolean;
+  /** Offset vertical em PIXELS (anti-colisão) + velocidade da spring. */
+  offsetPx: number;
+  offsetVel: number;
+  /** Fade extra por aglomeração (câmera longe). */
+  crowdFade: number;
+  /** Estado projetado no frame (px). */
+  sx: number;
+  sy: number;
+  halfW: number;
+  halfH: number;
+  onScreen: boolean;
+  /** Metros por pixel na profundidade do rótulo (offset px→mundo). */
+  mpp: number;
+  /** Posição-base no mundo (antes do offset da anti-colisão). */
+  worldX: number;
+  worldY: number;
+  worldZ: number;
 }
 
 function buildEntries(content: Content): { group: THREE.Group; entries: LabelEntry[] } {
@@ -109,22 +142,19 @@ function buildEntries(content: Content): { group: THREE.Group; entries: LabelEnt
 
   const entries: LabelEntry[] = [];
   for (const cluster of content.clusters) {
-    const memberSlots: number[] = [];
-    const memberTargets: [number, number][] = [];
     let cx = 0;
     let cz = 0;
+    let n = 0;
     for (const id of cluster.members) {
-      const slot = slotByPerson.get(id);
       const pos = content.layout[id];
-      if (slot === undefined || !pos) continue;
-      memberSlots.push(slot);
-      memberTargets.push([pos.umap3d[0], pos.umap3d[2]]);
+      if (slotByPerson.get(id) === undefined || !pos) continue;
       cx += pos.umap3d[0];
       cz += pos.umap3d[2];
+      n += 1;
     }
-    if (memberSlots.length === 0) continue;
-    cx /= memberSlots.length;
-    cz /= memberSlots.length;
+    if (n === 0) continue;
+    cx /= n;
+    cz /= n;
 
     const { texture, aspect } = makeLabelTexture(cluster.label);
     const material = new THREE.MeshBasicNodeMaterial({
@@ -138,11 +168,12 @@ function buildEntries(content: Content): { group: THREE.Group; entries: LabelEnt
     material.opacity = 0;
 
     // Tamanho por nº de membros — crescimento logarítmico, sem gritar.
-    const height = 0.5 + 0.28 * Math.log(memberSlots.length);
+    const height = 0.5 + 0.28 * Math.log(n);
     const sprite = new THREE.Mesh(PLANE, material);
     sprite.scale.set(height * aspect, height, 1);
     sprite.renderOrder = 20;
     sprite.visible = false;
+    sprite.userData.clusterId = cluster.id;
     group.add(sprite);
 
     entries.push({
@@ -151,19 +182,28 @@ function buildEntries(content: Content): { group: THREE.Group; entries: LabelEnt
       texture,
       clusterId: cluster.id,
       centroid: [cx, cz],
-      memberSlots,
-      memberTargets,
+      size: n,
       height,
       aspect,
       opacity: 0,
-      formed: false,
+      offsetPx: 0,
+      offsetVel: 0,
+      crowdFade: 0,
+      sx: 0,
+      sy: 0,
+      halfW: 0,
+      halfH: 0,
+      onScreen: false,
+      mpp: 1,
+      worldX: 0,
+      worldY: 0,
+      worldZ: 0,
     });
   }
   return { group, entries };
 }
 
 export function ClusterLabels({
-  sim,
   content,
   active,
   mapScale,
@@ -178,6 +218,7 @@ export function ClusterLabels({
 }) {
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
   const built = useMemo(() => buildEntries(content), [content]);
+  const infos = useMemo(() => buildClusterFormationInfos(content), [content]);
 
   useEffect(() => {
     const { entries } = built;
@@ -189,8 +230,7 @@ export function ClusterLabels({
     };
   }, [built]);
 
-  // Cor dos rótulos (grupo Appearance): derivada do núcleo (default) ou
-  // fixa — só o tint muda (material.color), as texturas ficam intactas.
+  // Cor dos rótulos (grupo Appearance): derivada do núcleo (default) ou fixa.
   const labelsSeguemNucleo = useAppearance((s) => s.labelsSeguemNucleo);
   const labelsCor = useAppearance((s) => s.labelsCor);
   useEffect(() => {
@@ -202,91 +242,222 @@ export function ClusterLabels({
     }
   }, [built, labelsSeguemNucleo, labelsCor]);
 
-  const inflight = useRef(false);
-  const readBroken = useRef(false);
-  const seekTime = useRef(0);
-  const sampleTimer = useRef(0.35);
-  // 1ª avaliação concluída → opacidade "pula" para o alvo (sem fade): com
-  // ?simT= o mundo chega pré-rolado e o screenshot não esperaria 2 s de fade.
+  const antiOverlap = useFocusReading((s) => s.labelAntiOverlap);
+  const distFalloff = useFocusReading((s) => s.labelDistScale);
+  const focusedCluster = useFocus((s) => s.cluster);
+
+  // 1ª avaliação da formação → opacidade "pula" p/ o alvo (screenshots).
   const pendingSnap = useRef(true);
+  const hovered = useRef(-1);
+  const camUp = useMemo(() => new THREE.Vector3(), []);
+  const world = useMemo(() => new THREE.Vector3(), []);
+  const proj = useMemo(() => new THREE.Vector3(), []);
+
+  // Cursor do mouse em px do canvas (screen-space picking dos rótulos).
+  const cursor = useRef({ x: 0, y: 0, has: false });
+  useEffect(() => {
+    const el = gl.domElement;
+    const onMove = (ev: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      cursor.current.x = ev.clientX - r.left;
+      cursor.current.y = ev.clientY - r.top;
+      cursor.current.has = true;
+    };
+    const onLeave = () => {
+      cursor.current.has = false;
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerleave", onLeave);
+    return () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerleave", onLeave);
+    };
+  }, [gl]);
+
+  // Clique (não arrasto): rótulo → foco; vazio → sai do foco.
+  useEffect(() => {
+    const el = gl.domElement;
+    let down: { x: number; y: number; t: number } | null = null;
+    const onDown = (ev: PointerEvent) => {
+      down = { x: ev.clientX, y: ev.clientY, t: performance.now() };
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (!down) return;
+      const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y);
+      const held = performance.now() - down.t;
+      down = null;
+      if (moved > 6 || held > 400) return; // arrasto de órbita
+      if (hovered.current >= 0) focusCluster(hovered.current);
+      else if (useFocus.getState().cluster !== null) clearFocus();
+    };
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointerup", onUp);
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointerup", onUp);
+    };
+  }, [gl]);
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.1);
     const { entries } = built;
-    const camQ = state.camera.quaternion;
+    const camera = state.camera as THREE.PerspectiveCamera;
+    const camQ = camera.quaternion;
+    const { width, height: vh } = state.size;
 
-    seekTime.current = active ? seekTime.current + dt : 0;
-    sampleTimer.current -= dt;
+    // Formação compartilhada (idempotente com o ClusterOutlines).
+    tickClusterFormation(infos, active, mapScale, formRadius);
+    const evaluated = formationEvaluated();
 
-    // --- amostragem (nunca por frame): readback → dispersão por núcleo ---
-    if (
-      active &&
-      !readBroken.current &&
-      !inflight.current &&
-      sampleTimer.current <= 0
-    ) {
-      sampleTimer.current = 0.6;
-      inflight.current = true;
-      gl
-        .getArrayBufferAsync(sim.positions.value)
-        .then((buf: ArrayBuffer) => {
-          const pos = new Float32Array(buf);
-          // Stride do elemento difere por backend: WebGPU aloca storage vec3
-          // alinhado a 16 bytes (x,y,z,pad); WebGL2/TF devolve packed (x,y,z).
-          const stride = pos.length >= sim.maxCount * 4 ? 4 : 3;
-          for (const e of entries) {
-            let acc = 0;
-            for (let k = 0; k < e.memberSlots.length; k++) {
-              const s3 = e.memberSlots[k] * stride;
-              const dx = pos[s3 + 0] - e.memberTargets[k][0] * mapScale;
-              const dz = pos[s3 + 2] - e.memberTargets[k][1] * mapScale;
-              acc += Math.hypot(dx, dz);
-            }
-            const mean = acc / e.memberSlots.length;
-            // histerese: entra em formRadius, só sai em 1,35× — sem piscar.
-            e.formed = e.formed ? mean < formRadius * 1.35 : mean < formRadius;
-            if (pendingSnap.current) e.opacity = active && e.formed ? 0.92 : 0;
-          }
-          pendingSnap.current = false;
-          inflight.current = false;
-        })
-        .catch(() => {
-          readBroken.current = true;
-          inflight.current = false;
-        });
-    }
-    // Fallback (briefing): sem readback, "gravidade ativa há N s" = formado.
-    if (readBroken.current) {
-      const formed = seekTime.current > 8;
-      for (const e of entries) e.formed = formed;
-    }
+    camUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+    const tanHalfFov = Math.tan((camera.fov * Math.PI) / 360);
+    const focusEl = focusedCluster;
 
-    // --- fades + posição (12 sprites, custo desprezível) ---
+    // --- pass A: opacidade-alvo + projeção + escala por distância ---
     for (const e of entries) {
-      const target = active && e.formed ? 0.92 : 0;
-      const tau = target > e.opacity ? 1.8 : 0.7; // fade-in lento, out mais curto
-      e.opacity += (target - e.opacity) * (1 - Math.exp(-dt / tau));
-      e.material.opacity = e.opacity;
-      e.sprite.visible = e.opacity > 0.012;
+      const formed = active && isClusterFormed(e.clusterId);
+      let target = formed ? 0.92 : 0;
+      // O núcleo em foco nunca some (a câmera está enquadrando ele).
+      if (focusEl === e.clusterId && formed) target = 1;
+      const tau = target > e.opacity ? 1.8 : 0.7;
+      if (pendingSnap.current && evaluated) e.opacity = target;
+      else e.opacity += (target - e.opacity) * (1 - Math.exp(-dt / tau));
+
       const lx = e.centroid[0] * mapScale;
       const lz = e.centroid[1] * mapScale;
-      // Terreno vivo: a palavra flutua sobre a SUPERFÍCIE do núcleo.
-      e.sprite.position.set(lx, 2.85 + e.height * 0.55 + heightJS(lx, lz), lz);
-      e.sprite.quaternion.copy(camQ); // billboard na CPU
+      const baseY = 2.85 + e.height * 0.55 + heightJS(lx, lz);
+      world.set(lx, baseY, lz);
+      const depth = world.distanceTo(camera.position);
+      // Escala: encolhe com a distância (clamp) — hierarquia de leitura.
+      const scaleMul =
+        1 - distFalloff * (1 - Math.max(MIN_SCALE_MUL, 1 - depth / SCALE_FAR));
+      const sMul = Math.max(MIN_SCALE_MUL, Math.min(1, scaleMul));
+      e.sprite.scale.set(e.height * e.aspect * sMul, e.height * sMul, 1);
+
+      proj.copy(world).project(camera);
+      e.onScreen = proj.z > -1 && proj.z < 1;
+      e.sx = (proj.x * 0.5 + 0.5) * width;
+      e.sy = (-proj.y * 0.5 + 0.5) * vh;
+      // meia-extensão do quad projetada (metros→px): px = m / mpp.
+      const mpp = (2 * tanHalfFov * depth) / vh; // metros por pixel
+      e.halfH = (e.height * sMul * 0.5) / mpp;
+      e.halfW = (e.height * e.aspect * sMul * 0.5) / mpp;
+      e.mpp = mpp;
+      e.worldX = lx;
+      e.worldY = baseY;
+      e.worldZ = lz;
     }
+
+    // --- pass B: anti-colisão screen-space (offset vertical por prioridade) ---
+    const vis = entries.filter((e) => e.opacity > 0.02 && e.onScreen);
+    // maior prioridade (mais membros) primeiro — ele fica no lugar.
+    vis.sort((a, b) => b.size - a.size);
+    const targetOffset = new Map<LabelEntry, number>();
+    for (const e of vis) targetOffset.set(e, 0);
+    if (antiOverlap) {
+      // Algumas passadas de relaxação resolvem CADEIAS (A empurra B empurra
+      // C): o menor sempre sobe acima do maior com que colide. X não muda com
+      // o offset vertical, então a convergência é rápida (≤13 rótulos).
+      for (let pass = 0; pass < 4; pass++) {
+        let moved = false;
+        for (let a = 0; a < vis.length; a++) {
+          for (let b = a + 1; b < vis.length; b++) {
+            const i = vis[a]; // maior prioridade (fixo)
+            const j = vis[b]; // menor (sobe)
+            const dx = Math.abs(i.sx - j.sx);
+            if (dx >= i.halfW + j.halfW) continue; // não sobrepõem em X
+            const iy = i.sy + (targetOffset.get(i) as number);
+            const jy = j.sy + (targetOffset.get(j) as number);
+            // quer j ACIMA de i (y de tela cresce p/ baixo → menor y = acima)
+            const desiredJy = iy - i.halfH - j.halfH - STACK_MARGIN;
+            if (jy > desiredJy - 0.5) {
+              targetOffset.set(j, desiredJy - j.sy);
+              moved = true;
+            }
+          }
+        }
+        if (!moved) break;
+      }
+    }
+
+    // --- pass C: spring do offset + fade por aglomeração + posição + billboard ---
+    let bestHover = -1;
+    let bestHoverArea = Infinity;
+    for (const e of entries) {
+      const tgt = targetOffset.get(e) ?? 0;
+      // spring crítica leve (px)
+      const k = 1 - Math.exp(-dt / 0.18);
+      e.offsetPx += (tgt - e.offsetPx) * k;
+      // fade por aglomeração: quanto mais empurrado, mais desvanece (câmera
+      // longe empilha muitos rótulos) — sutil (até ~45%).
+      const crowd = Math.min(1, Math.abs(e.offsetPx) / (vh * 0.28));
+      e.crowdFade += (crowd - e.crowdFade) * k;
+
+      const eff = e.opacity * (1 - 0.45 * e.crowdFade);
+      e.material.opacity = eff;
+      e.sprite.visible = eff > 0.012;
+
+      // offset de tela (px, negativo = p/ cima) → deslocamento no mundo pelo
+      // vetor UP da câmera (billboard): sobe na tela em qualquer ângulo.
+      const worldUp = -e.offsetPx * e.mpp;
+      e.sprite.position.set(
+        e.worldX + camUp.x * worldUp,
+        e.worldY + camUp.y * worldUp,
+        e.worldZ + camUp.z * worldUp,
+      );
+      e.sprite.quaternion.copy(camQ);
+
+      // hover screen-space: cursor dentro do rect final (base + offset).
+      if (e.sprite.visible && cursor.current.has) {
+        const fy = e.sy + e.offsetPx;
+        if (
+          Math.abs(cursor.current.x - e.sx) <= e.halfW &&
+          Math.abs(cursor.current.y - fy) <= e.halfH
+        ) {
+          const area = e.halfW * e.halfH;
+          if (area < bestHoverArea) {
+            bestHoverArea = area;
+            bestHover = e.clusterId;
+          }
+        }
+      }
+    }
+    hovered.current = bestHover;
+    if (evaluated) pendingSnap.current = false;
 
     if (import.meta.env.DEV) {
       const w = window as unknown as Record<string, unknown>;
       w.__limiarLabels = {
         active,
-        readBroken: readBroken.current,
-        pendingSnap: pendingSnap.current,
-        formed: entries.map((e) => e.formed),
+        evaluated,
+        hovered: bestHover,
+        formed: entries.map((e) => isClusterFormed(e.clusterId)),
         opacity: entries.map((e) => Number(e.opacity.toFixed(3))),
+        offsetPx: entries.map((e) => Number(e.offsetPx.toFixed(1))),
       };
       w.__limiarLabelsGroup = built.group;
+      // Projeção p/ sondas: clusterId → {x,y} de tela (px).
+      w.__limiarLabelScreen = () =>
+        entries
+          .filter((e) => e.sprite.visible)
+          .map((e) => ({
+            id: e.clusterId,
+            x: Math.round(e.sx),
+            y: Math.round(e.sy + e.offsetPx),
+            hw: Math.round(e.halfW),
+            hh: Math.round(e.halfH),
+          }));
     }
   });
+
+  // Cursor pointer sobre rótulo — priority 2 roda DEPOIS do PersonHover (que
+  // reseta o cursor em priority 0); só força "pointer", nunca limpa (deixa o
+  // PersonHover cuidar quando o cursor não está sobre um rótulo).
+  useFrame(() => {
+    if (hovered.current >= 0 && document.body.style.cursor !== "pointer") {
+      document.body.style.cursor = "pointer";
+    }
+  }, 2);
 
   return <primitive object={built.group} />;
 }

@@ -6,6 +6,7 @@ import { qpNum, qpStr } from "../lib/urlParams";
 import { triggerLegendFlash, useLegend, type LegendFlash } from "./legendStore";
 import { useAppearance } from "./appearanceStore";
 import { useFollow } from "./followStore";
+import { focusCluster } from "../scene/focusStore";
 
 /**
  * Legenda da experiência (M3.5) — a primeira peça da UI REAL do LIMIAR,
@@ -299,6 +300,35 @@ export function Legend() {
                 >
                   {chip.count}
                 </span>
+                {/* ⌖ focar (só nos chips de núcleo): clique curto = flash,
+                    o alvo = entra no modo FOCUS (voo + painel). Discreto. */}
+                {chip.flash.kind === "cluster" && (
+                  <span
+                    role="button"
+                    title="focar neste núcleo"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      focusCluster(Number(chip.flash.id));
+                    }}
+                    style={{
+                      flexShrink: 0,
+                      fontSize: 12,
+                      lineHeight: 1,
+                      cursor: "pointer",
+                      color: "rgba(200, 194, 185, 0.5)",
+                      transform: "translateY(-1px)",
+                      transition: "color 0.25s ease",
+                    }}
+                    onMouseEnter={(ev) =>
+                      (ev.currentTarget.style.color = "rgba(240,235,226,0.95)")
+                    }
+                    onMouseLeave={(ev) =>
+                      (ev.currentTarget.style.color = "rgba(200,194,185,0.5)")
+                    }
+                  >
+                    ⌖
+                  </span>
+                )}
               </button>
             );
           })}
