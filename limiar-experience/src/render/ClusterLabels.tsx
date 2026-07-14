@@ -4,7 +4,8 @@ import * as THREE from "three/webgpu";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { CrowdSim } from "../sim/CrowdSim";
 import type { Content } from "../data/types";
-import { clusterLabelColor } from "../data/palette";
+import { clusterLabelColor, hexToRgb01 } from "../data/palette";
+import { useAppearance } from "../ui/appearanceStore";
 
 /**
  * Palavras 3D nos núcleos (M3.5): quando um núcleo "se forma" sob a gravidade
@@ -87,6 +88,7 @@ interface LabelEntry {
   sprite: THREE.Mesh;
   material: THREE.MeshBasicNodeMaterial;
   texture: THREE.CanvasTexture;
+  clusterId: number;
   /** Centroide do núcleo no espaço UMAP unitário (x, z). */
   centroid: [number, number];
   /** Slot de agente e alvo UMAP unitário (x, z) de cada membro. */
@@ -146,6 +148,7 @@ function buildEntries(content: Content): { group: THREE.Group; entries: LabelEnt
       sprite,
       material,
       texture,
+      clusterId: cluster.id,
       centroid: [cx, cz],
       memberSlots,
       memberTargets,
@@ -184,6 +187,19 @@ export function ClusterLabels({
       }
     };
   }, [built]);
+
+  // Cor dos rótulos (grupo Appearance): derivada do núcleo (default) ou
+  // fixa — só o tint muda (material.color), as texturas ficam intactas.
+  const labelsSeguemNucleo = useAppearance((s) => s.labelsSeguemNucleo);
+  const labelsCor = useAppearance((s) => s.labelsCor);
+  useEffect(() => {
+    for (const e of built.entries) {
+      const [r, g, b] = labelsSeguemNucleo
+        ? clusterLabelColor(e.clusterId)
+        : hexToRgb01(labelsCor);
+      e.material.color.setRGB(r, g, b);
+    }
+  }, [built, labelsSeguemNucleo, labelsCor]);
 
   const inflight = useRef(false);
   const readBroken = useRef(false);

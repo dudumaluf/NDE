@@ -32,8 +32,19 @@ export interface AppearanceState {
   destaqueIntensidade: number;
   /** Segundos que o destaque segura antes do fade-out. */
   destaqueDuracao: number;
+  /** Cor-base dos dormentes (agentes sem história). */
+  dormentes: string;
+  /** Cinza uniforme do colapso (destaque da legenda / fora da lente). */
+  cinzaDestaque: string;
+  /** Fios do grafo: cor das arestas fracas → fortes (mix por peso). */
+  fiosFraca: string;
+  fiosForte: string;
+  /** Palavras 3D dos núcleos: cor derivada do núcleo (default) ou fixa. */
+  labelsSeguemNucleo: boolean;
+  labelsCor: string;
 }
 
+// Defaults = look clássico (hex ≡ floats que estavam hardcoded — paridade).
 export const APPEARANCE_DEFAULTS: AppearanceState = {
   fundo: "#6d6d6d",
   nevoaCor: "#6d6d6d",
@@ -43,6 +54,12 @@ export const APPEARANCE_DEFAULTS: AppearanceState = {
   hsb: { hue: 0, sat: 1, bri: 1 },
   destaqueIntensidade: 1,
   destaqueDuracao: 2,
+  dormentes: "#54524f",
+  cinzaDestaque: "#666562",
+  fiosFraca: "#807c75",
+  fiosForte: "#fcf6e6",
+  labelsSeguemNucleo: true,
+  labelsCor: "#e8e4dc",
 };
 
 export const useAppearance = create<AppearanceState>(() => ({

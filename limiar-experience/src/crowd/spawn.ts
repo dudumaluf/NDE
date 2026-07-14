@@ -54,6 +54,7 @@ export function fillContentAttributes(
   seed: number,
   content: Content,
   demoCls?: DemoClassification | null,
+  dormantBase?: [number, number, number],
 ): void {
   const rng = mulberry32(seed);
   const people = content.manifest.people;
@@ -66,7 +67,7 @@ export function fillContentAttributes(
     attrs.colorScale.setXYZW(i, r, g, b, 0.9 + rng() * 0.1);
   }
   for (let i = n; i < count; i++) {
-    const [r, g, b] = dormantColor(rng());
+    const [r, g, b] = dormantColor(rng(), dormantBase);
     attrs.colorScale.setXYZW(i, r, g, b, 0.78 + rng() * 0.12);
   }
   attrs.colorScale.needsUpdate = true;

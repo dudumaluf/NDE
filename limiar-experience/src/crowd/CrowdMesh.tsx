@@ -15,7 +15,7 @@ import { qpNum } from "../lib/urlParams";
 import { pref, prefBool, prefNum, prefStr } from "../lib/prefs";
 import { useContent } from "../data/contentStore";
 import { computeAgentMeta, computeTargets } from "../data/agentMapping";
-import { applyHsbToColorScale } from "../data/palette";
+import { applyHsbToColorScale, hexToRgb01 } from "../data/palette";
 import {
   DEMO_LENS_KEYS,
   DEMO_LENS_LABELS,
@@ -398,10 +398,19 @@ export function CrowdMesh() {
   // envelope animado (hold pleno → fade suave; ver legendStore).
   const hsb = useAppearance((st) => st.hsb);
   const destaqueIntensidade = useAppearance((st) => st.destaqueIntensidade);
+  const dormentesCor = useAppearance((st) => st.dormentes);
+  const cinzaDestaque = useAppearance((st) => st.cinzaDestaque);
   const paintColors = (flashK: number) => {
     const count = c.grid * c.grid;
     if (content) {
-      fillContentAttributes(attrs, count, c.seed, content, demoCls);
+      fillContentAttributes(
+        attrs,
+        count,
+        c.seed,
+        content,
+        demoCls,
+        hexToRgb01(dormentesCor),
+      );
       if (!isHsbIdentity(hsb)) {
         applyHsbToColorScale(
           attrs.colorScale.array as Float32Array,
@@ -416,6 +425,7 @@ export function CrowdMesh() {
         flash: legendFlash,
         flashK,
         flashIntensity: destaqueIntensidade,
+        mutedGray: hexToRgb01(cinzaDestaque),
       });
     } else {
       fillStaticAttributes(attrs, count, c.seed);
@@ -448,6 +458,8 @@ export function CrowdMesh() {
     legendFlash,
     hsb,
     destaqueIntensidade,
+    dormentesCor,
+    cinzaDestaque,
   ]);
 
   // Parâmetros de spawn mudaram → uniforms da sim e agenda reset GPU.

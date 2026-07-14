@@ -16,6 +16,8 @@ import {
 } from "three/tsl";
 import type { CrowdSim } from "../sim/CrowdSim";
 import type { Content } from "../data/types";
+import { hexToRgb01 } from "../data/palette";
+import { useAppearance } from "../ui/appearanceStore";
 
 type N = any;
 
@@ -52,6 +54,8 @@ export interface WireUniforms {
   setWeightGamma(v: number): void;
   setOnlyFormed(on: boolean): void;
   setCohesionRadius(v: number): void;
+  /** Cores fraca→forte do mix por peso (hex, floats crus — sem conversão). */
+  setColors(weakHex: string, strongHex: string): void;
 }
 
 export interface WiresBuild {
@@ -125,6 +129,10 @@ export function buildWiresObject(sim: CrowdSim, content: Content): WiresBuild {
   const uGamma: N = uniform(1.6);
   const uOnlyFormed: N = uniform(1);
   const uCohesion: N = uniform(3);
+  // Cores em floats CRUS (o colorNode antigo usava literais sem conversão —
+  // setRGB sem colorSpace mantém a paridade). Defaults = look clássico.
+  const uColorWeak: N = uniform(new THREE.Color().setRGB(0.5, 0.485, 0.46));
+  const uColorStrong: N = uniform(new THREE.Color().setRGB(0.99, 0.965, 0.9));
 
   const material = new THREE.LineBasicNodeMaterial({
     transparent: true,
@@ -159,7 +167,7 @@ export function buildWiresObject(sim: CrowdSim, content: Content): WiresBuild {
   const w: N = pow(aWeight, uGamma);
 
   material.positionNode = pSelf.add(vec3(0, 1, 0).mul(uLift));
-  material.colorNode = mix(vec3(0.5, 0.485, 0.46), vec3(0.99, 0.965, 0.9), w);
+  material.colorNode = mix(uColorWeak, uColorStrong, w);
   // CRÍTICO: o alpha PRECISA ser avaliado no vertex stage (varying). No
   // fragment, aAgent/aOther chegam INTERPOLADOS ao longo da linha — int()
   // deles indexaria agentes intermediários aleatórios e o fio esfarela
@@ -217,6 +225,12 @@ export function buildWiresObject(sim: CrowdSim, content: Content): WiresBuild {
       setCohesionRadius: (v) => {
         uCohesion.value = v;
       },
+      setColors: (weakHex, strongHex) => {
+        const [wr, wg, wb] = hexToRgb01(weakHex);
+        const [sr, sg, sb] = hexToRgb01(strongHex);
+        (uColorWeak.value as THREE.Color).setRGB(wr, wg, wb);
+        (uColorStrong.value as THREE.Color).setRGB(sr, sg, sb);
+      },
     },
     edgeCount: edges.length,
     refreshTargets,
@@ -251,6 +265,13 @@ export function CrowdWires({
   targetsVersion: number;
 }) {
   const built = useMemo(() => buildWiresObject(sim, content), [sim, content]);
+
+  // Cores do grupo Appearance (uniform: custo zero por mudança).
+  const fiosFraca = useAppearance((s) => s.fiosFraca);
+  const fiosForte = useAppearance((s) => s.fiosForte);
+  useEffect(() => {
+    built.uniforms.setColors(fiosFraca, fiosForte);
+  }, [built, fiosFraca, fiosForte]);
 
   useEffect(() => {
     built.uniforms.setAlpha(alpha);

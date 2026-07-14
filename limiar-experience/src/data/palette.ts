@@ -24,10 +24,28 @@ export function clusterColor(clusterId: number): [number, number, number] {
 /** Cinza quente dos dormentes — mais escuro que o chão, some na névoa. */
 export const DORMANT_COLOR: [number, number, number] = [0.33, 0.32, 0.31];
 
-/** Variação sutil para dormentes não virarem um bloco uniforme. */
-export function dormantColor(rand: number): [number, number, number] {
+/** Variação sutil para dormentes não virarem um bloco uniforme.
+ *  `base` customizável pelo grupo Appearance (default = look clássico). */
+export function dormantColor(
+  rand: number,
+  base: [number, number, number] = DORMANT_COLOR,
+): [number, number, number] {
   const v = 0.85 + rand * 0.3;
-  return [DORMANT_COLOR[0] * v, DORMANT_COLOR[1] * v, DORMANT_COLOR[2] * v];
+  return [base[0] * v, base[1] * v, base[2] * v];
+}
+
+/**
+ * "#rrggbb" → [r,g,b] 0–1 CRUS (sem conversão de espaço de cor): os buffers
+ * de instância e os colorNode TSL do app trabalham com os mesmos floats que
+ * as paletas daqui produzem — converter para linear mudaria o look.
+ */
+export function hexToRgb01(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  const n = parseInt(
+    h.length === 3 ? h.split("").map((c) => c + c).join("") : h,
+    16,
+  );
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 // --- Paleta das lentes demográficas -----------------------------------------

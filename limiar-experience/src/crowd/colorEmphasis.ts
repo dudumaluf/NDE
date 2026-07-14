@@ -34,6 +34,8 @@ export interface EmphasisOpts {
   flashK?: number;
   /** Slider "destaque: intensidade" (0..1). Default 1. */
   flashIntensity?: number;
+  /** Cinza do colapso (grupo Appearance). Default = FLASH_GRAY clássico. */
+  mutedGray?: [number, number, number];
 }
 
 export function applyColorEmphasis(
@@ -41,11 +43,12 @@ export function applyColorEmphasis(
   count: number,
   content: Content,
   demoCls: DemoClassification | null,
-  { elementLens, flash, flashK = 1, flashIntensity = 1 }: EmphasisOpts,
+  { elementLens, flash, flashK = 1, flashIntensity = 1, mutedGray }: EmphasisOpts,
 ): void {
   const flashOn = flash !== null && flashK > 0 && flashIntensity > 0;
   if (!elementLens && !flashOn) return;
 
+  const gray = mutedGray ?? FLASH_GRAY;
   const people = content.manifest.people;
   const n = Math.min(people.length, count);
   const arr = attrs.colorScale.array as Float32Array;
@@ -77,9 +80,9 @@ export function applyColorEmphasis(
 
     // Camada 2 — flash: cor plena vs cinza uniforme, cruzadas por `collapse`
     // (contínuo: no fim do fade volta exatamente à camada 1, sem pop).
-    const fr = inFlash ? base[0] : FLASH_GRAY[0];
-    const fg = inFlash ? base[1] : FLASH_GRAY[1];
-    const fb = inFlash ? base[2] : FLASH_GRAY[2];
+    const fr = inFlash ? base[0] : gray[0];
+    const fg = inFlash ? base[1] : gray[1];
+    const fb = inFlash ? base[2] : gray[2];
 
     arr[o] = lensC[0] + (fr - lensC[0]) * collapse;
     arr[o + 1] = lensC[1] + (fg - lensC[1]) * collapse;

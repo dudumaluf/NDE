@@ -40,6 +40,31 @@ export function AppearanceControls() {
         max: 1,
         label: "grid alpha",
       },
+      dormentes: {
+        value: pref("Appearance.dormentes", DEF.dormentes),
+        label: "dormant color",
+      },
+      cinzaDestaque: {
+        value: pref("Appearance.cinzaDestaque", DEF.cinzaDestaque),
+        label: "muted gray (highlight)",
+      },
+      fiosFraca: {
+        value: pref("Appearance.fiosFraca", DEF.fiosFraca),
+        label: "wires: weak color",
+      },
+      fiosForte: {
+        value: pref("Appearance.fiosForte", DEF.fiosForte),
+        label: "wires: strong color",
+      },
+      labelsSeguemNucleo: {
+        value: pref("Appearance.labelsSeguemNucleo", DEF.labelsSeguemNucleo),
+        label: "labels follow cluster",
+      },
+      labelsCor: {
+        value: pref("Appearance.labelsCor", DEF.labelsCor),
+        label: "labels color",
+        render: (get) => !get("Appearance.labelsSeguemNucleo"),
+      },
       matiz: {
         value: pref("Appearance.matiz", DEF.hsb.hue),
         min: -180,
@@ -85,6 +110,12 @@ export function AppearanceControls() {
       hsb: { hue: a.matiz, sat: a.saturacao, bri: a.brilho },
       destaqueIntensidade: a.destaqueIntensidade,
       destaqueDuracao: a.destaqueDuracao,
+      dormentes: a.dormentes,
+      cinzaDestaque: a.cinzaDestaque,
+      fiosFraca: a.fiosFraca,
+      fiosForte: a.fiosForte,
+      labelsSeguemNucleo: a.labelsSeguemNucleo,
+      labelsCor: a.labelsCor,
     });
   }, [
     a.fundo,
@@ -98,6 +129,12 @@ export function AppearanceControls() {
     a.brilho,
     a.destaqueIntensidade,
     a.destaqueDuracao,
+    a.dormentes,
+    a.cinzaDestaque,
+    a.fiosFraca,
+    a.fiosForte,
+    a.labelsSeguemNucleo,
+    a.labelsCor,
   ]);
 
   return null;
