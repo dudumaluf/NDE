@@ -30,6 +30,7 @@ import {
 import { useDemoLens } from "../data/demoLensStore";
 import { CrowdWires } from "../render/CrowdWires";
 import { ClusterLabels } from "../render/ClusterLabels";
+import { PersonHover } from "../render/PersonHover";
 import { legendFlashK, setElementLens, useLegend } from "../ui/legendStore";
 import { isHsbIdentity, useAppearance } from "../ui/appearanceStore";
 
@@ -808,6 +809,7 @@ export function CrowdMesh() {
           formRadius={d.formRaio}
         />
       )}
+      {content && <PersonHover sim={sim} content={content} />}
       <mesh ref={markerRef}>
         <sphereGeometry args={[0.06, 16, 16]} />
         <meshBasicMaterial color="#ffffff" />
