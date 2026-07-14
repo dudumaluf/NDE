@@ -37,7 +37,13 @@ import { PersonHover } from "../render/PersonHover";
 import { FollowCamera } from "../render/FollowCamera";
 import { legendFlashK, setElementLens, useLegend } from "../ui/legendStore";
 import { isHsbIdentity, useAppearance } from "../ui/appearanceStore";
-import { getTerrainScroll, heightJS, setTerrainScroll } from "../scene/heightfield";
+import {
+  getTerrainScroll,
+  heightJS,
+  setTerrainScroll,
+  setWorldWrap,
+} from "../scene/heightfield";
+import { DebugAreas } from "../render/DebugAreas";
 import { useFollow } from "../ui/followStore";
 import { positionMirror } from "../sim/positionMirror";
 
@@ -135,6 +141,16 @@ export function CrowdMesh() {
       min: 5,
       max: 45,
       label: "containment radius",
+    },
+    worldWrap: {
+      value: prefBool("wrap", "Simulation.worldWrap", true),
+      label: "world wrap",
+      hint: "the world is a torus: a canonical square area (side = 2× containment radius) where anyone crossing an edge reappears on the opposite side — the containment force turns off. The foundation of the infinite-space illusion",
+    },
+    debugAreas: {
+      value: prefBool("debugAreas", "Simulation.debugAreas", false),
+      label: "debug areas",
+      hint: "wireframe overlays: canonical wrap square, containment circle (wrap off), cluster-core rings, active field circle and the travel heading",
     },
     mouseModo: {
       value: prefStr<MouseMode>("mouse", "Simulation.mouseModo", "atrair", [
@@ -515,6 +531,47 @@ export function CrowdMesh() {
       label: "yield to travelers",
       hint: "asymmetric separation: agents WITH a target (migrating to a cluster) push targetless ones up to this much harder — WebGPU only (the WebGL2 fallback has no separation since M2)",
     },
+    selInertia: {
+      value: prefNum("selInertia", "Active field.selInertia", 0.15),
+      min: 0,
+      max: 1,
+      label: "selected inertia",
+      hint: "how much separation/containment the FOLLOWED person receives back: 0 = immune (walks through like a train), 1 = same as everyone. The others always yield fully — fixes the mid-crowd stutter",
+    },
+    steerOn: {
+      value: prefBool("steer", "Active field.steerOn", true),
+      label: "mouse steering",
+      hint: "during follow the mouse is the rudder: the pointer's direction (ground ray, relative to the person) sets where the journey goes. Point AT the person (deadzone ~1.5 m) to stop",
+    },
+    steerStrength: {
+      value: prefNum("steerK", "Active field.steerStrength", 1),
+      min: 0,
+      max: 2,
+      label: "steer strength",
+      hint: "how sharply the rudder turns the journey heading (treadmill mode) or pushes the person (legacy mode)",
+    },
+    storyField: {
+      value: prefStr("storyField", "Active field.storyField", "off", [
+        "off",
+        "attract",
+        "repel",
+      ]),
+      options: { off: "off", attract: "attract", repel: "repel" },
+      label: "story field",
+      hint: "free-mode field of the agents WITH data over the dormant ones: attract = small gatherings around the witnesses; repel = a legibility halo. Lives in the separation loop — WebGPU only",
+    },
+    storyRadius: {
+      value: prefNum("storyR", "Active field.storyRadius", 2),
+      min: 0.5,
+      max: 6,
+      label: "story field radius",
+    },
+    storyStrength: {
+      value: prefNum("storyF", "Active field.storyStrength", 0.6),
+      min: 0,
+      max: 2,
+      label: "story field strength",
+    },
   });
 
   // --- Formações dos dormentes (2026-07-14, doc 04): moldar a multidão ---
@@ -543,25 +600,21 @@ export function CrowdMesh() {
     },
   });
 
-  // --- Palco/esteira (2026-07-14, doc 04 — EXPERIMENTAL): a ilusão de ---
-  // viagem sem deslocar a pessoa: pino + chão scrollando + corredor em loop.
+  // --- Esteira do follow (2026-07-14b — o comportamento PADRÃO): pino + ---
+  // mundo em movimento (agentes deslocados + chão scrollando + wrap).
+  // OFF = kill-switch (follow antigo que desloca a pessoa, para comparação).
   const st = useControls("Stage (treadmill)", {
     stage: {
-      value: prefBool("stage", "Stage (treadmill).stage", false),
-      label: "story treadmill",
-      hint: "experimental: pins the followed person (walking in place), scrolls the terrain noise underfoot and loops window dormants behind→front. Needs an active follow + automatic states",
+      value: prefBool("stage", "Stage (treadmill).stage", true),
+      label: "follow treadmill (pin)",
+      hint: "THE follow behavior: the followed person walks in place while the WORLD moves — every other agent is displaced against the journey heading (wrapping around), terrain scrolls underfoot, mouse steers. OFF = legacy follow that displaces the person (debug/compare). Needs automatic states",
     },
     stageSpeed: {
       value: prefNum("stageSpeed", "Stage (treadmill).stageSpeed", 0.9),
       min: 0,
       max: 2,
       label: "treadmill speed",
-    },
-    stageWindow: {
-      value: prefNum("stageWin", "Stage (treadmill).stageWindow", 24),
-      min: 8,
-      max: 48,
-      label: "stage window (length)",
+      hint: "journey speed — also the steer speed cap in legacy (no-pin) mode",
     },
   });
 
@@ -744,11 +797,13 @@ export function CrowdMesh() {
    *  corredor fica PARADO no mundo e só re-ancora quando a pessoa
    *  atravessou ~35% dele, saiu pela lateral ou mudou de rumo. */
   const corridorAnchor = useRef({ x: 0, z: 0, hx: 0, hz: 1, valid: false });
-  /** Heading do palco: congelado na ENTRADA do modo (a pessoa para de andar
-   *  — o heading vivo degeneraria; a viagem aponta para onde ela ia). */
+  /** Heading da viagem: nasce do rumo da pessoa na ENTRADA do modo e daí
+   *  em diante o MOUSE é o leme (steering) — suavizado por steerStrength. */
   const stageHeading = useRef(new THREE.Vector2(0, 1));
   const stageWasOn = useRef(false);
   const scrollAccum = useRef(new THREE.Vector2(0, 0));
+  /** Velocidade ATUAL da esteira (rampa suave; 0 no deadzone do leme). */
+  const stageSpeedCur = useRef(0);
   const camera = useThree((state) => state.camera);
 
   /** Direção efetiva do deslocamento: trilha (se a pessoa ANDOU ≥1,2 m na
@@ -791,11 +846,18 @@ export function CrowdMesh() {
       fo.formation === "corridor" && !corridorReady ? "wander" : fo.formation;
     const a = corridorAnchor.current;
     if (mode === "corridor" && !a.valid) {
-      // (Re-)ancora o corredor AQUI: alvos fixos no mundo a partir da
-      // posição/rumo atuais da pessoa — nunca perseguem por frame.
-      effectiveHeading(headingTmp);
-      a.x = followPos.current.x;
-      a.z = followPos.current.z;
+      // (Re-)ancora o corredor AQUI: alvos fixos no MUNDO (ground frame —
+      // posição da pessoa + scroll da esteira) a partir do rumo atual.
+      // Durante a viagem o corredor flui para trás como cenário e re-ancora
+      // à frente quando atravessado (a checagem no useFrame compara no
+      // ground frame) — a sebe "se renova" ao longo da jornada.
+      if (stageWasOn.current) {
+        headingTmp.set(stageHeading.current.x, stageHeading.current.y);
+      } else {
+        effectiveHeading(headingTmp);
+      }
+      a.x = followPos.current.x + scrollAccum.current.x;
+      a.z = followPos.current.z + scrollAccum.current.y;
       a.hx = headingTmp.x;
       a.hz = headingTmp.y;
       a.valid = true;
@@ -900,6 +962,10 @@ export function CrowdMesh() {
       headTrail.current.length = 0;
     }
 
+    // --- wrap universal (mundo-toro): L = 2×contenção, um só lugar ---
+    // (heightfield + sim leem o mesmo uniform via setWorldWrap).
+    setWorldWrap(s.worldWrap ? s.contRaio * 2 : 0);
+
     // --- campo do ativo: uniforms por frame (zero custo de buffer) ---
     const fieldActive = af.fieldOn && followValid.current;
     sim.u.fieldOn.value = fieldActive ? 1 : 0;
@@ -908,6 +974,14 @@ export function CrowdMesh() {
     sim.u.fieldRadius.value = af.fieldRadius;
     sim.u.fieldStrength.value = af.fieldStrength;
     sim.u.yieldWeight.value = af.yieldW;
+    // Inércia do selecionado vale SEMPRE que há follow (campo on ou off).
+    sim.u.selAgent.value = followValid.current ? (following as number) : -1;
+    sim.u.selInertia.value = af.selInertia;
+    // Story field (modo livre): com-história atraem/repelem dormentes.
+    sim.u.storyMode.value =
+      af.storyField === "attract" ? 1 : af.storyField === "repel" ? -1 : 0;
+    sim.u.storyRadius.value = af.storyRadius;
+    sim.u.storyStrength.value = af.storyStrength;
 
     // --- corridor dinâmico: checa a cada ~0,8 s se precisa RE-ANCORAR ---
     // (nunca por frame: alvo que persegue a pessoa vira turba). Re-ancora
@@ -924,8 +998,10 @@ export function CrowdMesh() {
       const a = corridorAnchor.current;
       let stale = !a.valid;
       if (a.valid) {
-        const rx = followPos.current.x - a.x;
-        const rz = followPos.current.z - a.z;
+        // Comparação no GROUND frame: com a esteira, a pessoa "anda" pelo
+        // mundo via scroll (a posição view fica parada no pino).
+        const rx = followPos.current.x + scrollAccum.current.x - a.x;
+        const rz = followPos.current.z + scrollAccum.current.y - a.z;
         const along = rx * a.hx + rz * a.hz;
         const side = Math.abs(rx * -a.hz + rz * a.hx);
         // Rumo NOVO só conta se a pessoa está de fato ANDANDO (trilha ≥
@@ -952,31 +1028,70 @@ export function CrowdMesh() {
       }
     }
 
-    // --- palco/esteira (experimental): pino + scroll do chão ---
+    // --- esteira do follow (PADRÃO desde 2026-07-14b): pino + mundo ---
     // Exige follow ativo E estados automáticos (o walking do pino é forçado
-    // pela state machine). O heading congela na entrada do modo.
+    // pela state machine). O heading nasce do rumo da pessoa na entrada e o
+    // MOUSE vira o leme (steering): apontar para longe = viajar para lá;
+    // apontar NELA (deadzone ~1,5 m) = parar. O mundo responde: todos os
+    // outros agentes recuam (update pass), o chão scrolla no mesmo passo e
+    // o wrap fecha a ilusão (quem sai por trás reaparece na frente).
     const stageActive = st.stage && followValid.current && e.auto;
     if (stageActive && !stageWasOn.current) {
       effectiveHeading(stageHeading.current);
+      stageSpeedCur.current = 0; // a viagem ACELERA do zero — sem tranco
     }
     stageWasOn.current = stageActive;
     sim.u.stageOn.value = stageActive ? 1 : 0;
     sim.u.stageAgent.value = stageActive ? (following as number) : -1;
-    sim.u.stageSpeed.value = st.stageSpeed;
-    sim.u.stageHalfLen.value = st.stageWindow / 2;
-    sim.u.stageHalfWid.value = Math.max(st.stageWindow / 4, 4);
+    // Steering: direção pessoa→mouse no chão (view frame), com deadzone.
+    let steerLen = 0;
+    let steerX = 0;
+    let steerZ = 0;
+    if (af.steerOn && followValid.current && mouseTarget.moved) {
+      steerX = mouseTarget.point.x - followPos.current.x;
+      steerZ = mouseTarget.point.z - followPos.current.z;
+      steerLen = Math.hypot(steerX, steerZ);
+    }
+    const STEER_DEADZONE = 1.5;
     if (stageActive) {
-      sim.u.stageCenter.value.copy(followPos.current);
+      // Leme → heading da esteira (giro suavizado por steer strength).
+      if (steerLen > STEER_DEADZONE) {
+        const k = 1 - Math.exp(-2 * af.steerStrength * dtc);
+        stageHeading.current.x += (steerX / steerLen - stageHeading.current.x) * k;
+        stageHeading.current.y += (steerZ / steerLen - stageHeading.current.y) * k;
+        stageHeading.current.normalize();
+      }
+      // Rampa de velocidade: deadzone (ou leme off sem rumo) → 0 suave.
+      const wantSpeed =
+        af.steerOn && mouseTarget.moved && steerLen <= STEER_DEADZONE
+          ? 0
+          : st.stageSpeed;
+      stageSpeedCur.current +=
+        (wantSpeed - stageSpeedCur.current) * (1 - Math.exp(-dtc / 0.45));
+      sim.u.stageSpeed.value = stageSpeedCur.current;
       (sim.u.stageHeading.value as THREE.Vector2).set(
         stageHeading.current.x,
         stageHeading.current.y,
       );
       // O chão anda para TRÁS do heading: scroll do domínio do noise (e do
-      // grid TSL) avança a stageSpeed — carregados e relevo recuam juntos.
-      scrollAccum.current.x += stageHeading.current.x * st.stageSpeed * dtc;
-      scrollAccum.current.y += stageHeading.current.y * st.stageSpeed * dtc;
+      // grid TSL) avança junto — agentes carregados e relevo recuam juntos;
+      // os ALVOS (ground frame) são subtraídos do scroll na GPU.
+      scrollAccum.current.x += stageHeading.current.x * stageSpeedCur.current * dtc;
+      scrollAccum.current.y += stageHeading.current.y * stageSpeedCur.current * dtc;
       setTerrainScroll(scrollAccum.current.x, scrollAccum.current.y);
+    } else {
+      sim.u.stageSpeed.value = st.stageSpeed;
     }
+    // Steering DIRETO (kill-switch: treadmill OFF durante o follow) — o
+    // leme empurra a própria pessoa (modo legado, para comparação).
+    const legacySteer =
+      !stageActive && af.steerOn && followValid.current && steerLen > 0;
+    sim.u.steerOn.value = legacySteer ? 1 : 0;
+    sim.u.steerStrength.value = af.steerStrength;
+    (sim.u.steerDir.value as THREE.Vector2).set(
+      legacySteer && steerLen > STEER_DEADZONE ? steerX / steerLen : 0,
+      legacySteer && steerLen > STEER_DEADZONE ? steerZ / steerLen : 0,
+    );
     if (import.meta.env.DEV) {
       const w = window as unknown as Record<string, unknown>;
       w.__limiarSim = {
@@ -998,6 +1113,10 @@ export function CrowdMesh() {
         scroll: { ...getTerrainScroll() },
         heading: [stageHeading.current.x, stageHeading.current.y],
         followPos: followValid.current ? followPos.current.toArray() : null,
+        wrapLen: s.worldWrap ? s.contRaio * 2 : 0,
+        stageSpeed: stageActive ? stageSpeedCur.current : 0,
+        steerOn: af.steerOn ? 1 : 0,
+        storyMode: sim.u.storyMode.value,
       };
       w.__limiarReadPositions = async (n: number) => {
         const buf = await gl.getArrayBufferAsync(sim.positions.value);
@@ -1112,6 +1231,20 @@ export function CrowdMesh() {
         <PersonHover sim={sim} content={content} personScale={c.escala} />
       )}
       {content && <FollowCamera sim={sim} content={content} />}
+      <DebugAreas
+        visible={s.debugAreas}
+        content={content}
+        mapScale={d.mapScale}
+        formRadius={d.formRaio}
+        containRadius={s.contRaio}
+        worldWrap={s.worldWrap}
+        fieldOn={af.fieldOn}
+        fieldRadius={af.fieldRadius}
+        followPos={followPos}
+        followValid={followValid}
+        stageHeading={stageHeading}
+        stageActive={stageWasOn}
+      />
       <mesh ref={markerRef}>
         <sphereGeometry args={[0.06, 16, 16]} />
         <meshBasicMaterial color="#ffffff" />

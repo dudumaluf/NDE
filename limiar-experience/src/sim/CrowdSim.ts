@@ -4,7 +4,6 @@ import {
   Fn,
   If,
   Loop,
-  dot,
   exp,
   float,
   hash,
@@ -27,7 +26,7 @@ import {
 } from "three/tsl";
 import { vat } from "../vat/runtime";
 import { detectClipRoles, type ClipRoles } from "../vat/clipRoles";
-import { heightTSL } from "../scene/heightfield";
+import { heightTSL, terrainU, wrapDeltaTSL } from "../scene/heightfield";
 import { mouseTarget } from "./mouseTarget";
 
 type N = any;
@@ -60,11 +59,31 @@ type N = any;
  *                zero buffer novo, idêntico nos 2 backends. Migrantes
  *                (com alvo) ganham peso assimétrico na separação
  *                (yieldWeight — só WebGPU, onde a separação existe).
- *   palco      — 2026-07-14 (experimental): esteira da história. Pessoa
- *                seguida PINADA (teto de velocidade →0 + walking forçado
- *                no state pass, fase a stageSpeed); dormentes da janela
- *                local recuam a stageSpeed com wrap modular (loop de
- *                cenário); o chão scrolla junto (heightfield scroll).
+ *   story field— 2026-07-14b: campo dos COM-HISTÓRIA sobre os dormentes,
+ *                polaridade attract/repel (ajuntamentos ao redor das
+ *                testemunhas OU halo de legibilidade). Vive no loop de
+ *                separação (lê agentMeta[j].x do vizinho) — só WebGPU.
+ *   inércia    — 2026-07-14b (fix do stutter do follow): a separação e a
+ *                contenção RECEBIDAS pelo agente selecionado são escaladas
+ *                por selInertia (0 = imune, atravessa como um trem; 1 =
+ *                igual a todos). No WebGL2 (sem separação) só a contenção.
+ *   esteira    — 2026-07-14b (o comportamento PADRÃO do follow, correção do
+ *                Dudu): pessoa seguida PINADA (teto de velocidade →0 +
+ *                walking forçado no state pass, fase a stageSpeed) e o
+ *                MUNDO se move: TODOS os outros agentes recuam a
+ *                stageSpeed contra o heading (deslocamento direto de
+ *                posição — a física deles continua normal por cima); o
+ *                chão scrolla junto (heightfield scroll) e os ALVOS vivem
+ *                no ground frame (o seek subtrai o scroll — formações
+ *                ancoradas no mundo são carregadas e wrappam como todos).
+ *                O steering do mouse (CrowdMesh) gira o heading da esteira.
+ *   wrap       — 2026-07-14b (mundo-toro, doc 03 §14.8): com wrapLen > 0
+ *                (uniform compartilhado com o heightfield) a contenção
+ *                radial DESLIGA e as posições wrappam por módulo na área
+ *                canônica [−L/2, L/2)² — os 2 backends (aritmética local).
+ *                Deltas de seek/mouse/campo usam o caminho toroidal;
+ *                separação/vizinhança NÃO é toroidal (limitação documentada
+ *                — na borda, vizinhos do outro lado não empurram).
  *
  * Máquina de estados POR AGENTE (pass próprio, buildStatePass): lê a
  * velocidade REAL e a distância ao alvo e escreve `states` (vec4: clipA,
@@ -202,18 +221,33 @@ export class CrowdSim {
      *  separação desde o M2): vizinho COM alvo (migrando) empurra × mais
      *  forte quem NÃO tem alvo — abre caminho. 1 = simétrico (neutro). */
     yieldWeight: uniform(1),
-    /** Palco/esteira (experimental, doc 04): pino da pessoa seguida +
-     *  dormentes da janela em loop modular. Nasce off — wiring no leva. */
+    /** Agente SELECIONADO (seguido) — alvo da inércia; −1 = ninguém.
+     *  Separado do fieldAgent: a inércia vale mesmo com o campo desligado. */
+    selAgent: uniform(-1),
+    /** Inércia do selecionado (fix do stutter, 2026-07-14b): escala a
+     *  separação E a contenção RECEBIDAS por ele. 0 = imune (trem);
+     *  1 = igual a todos. Separação só existe no WebGPU. */
+    selInertia: uniform(0.15),
+    /** Campo dos com-história sobre os DORMENTES (modo livre): −1 repele
+     *  (halo de legibilidade), 0 off, +1 atrai (ajuntamentos). Vive no
+     *  loop de separação — só WebGPU (documentado). */
+    storyMode: uniform(0),
+    storyRadius: uniform(2),
+    storyStrength: uniform(0.6),
+    /** Steering DIRETO do seguido (modo legado, treadmill OFF): força de
+     *  seek na direção do leme + teto de velocidade próprio (stageSpeed).
+     *  No modo padrão (pino+esteira) o leme age via stageHeading. */
+    steerOn: uniform(0),
+    steerDir: uniform(new THREE.Vector2(0, 0)),
+    steerStrength: uniform(1),
+    /** Esteira do follow (padrão desde 2026-07-14b; kill-switch no leva):
+     *  pino da pessoa seguida + o MUNDO inteiro recua a stageSpeed. */
     stageOn: uniform(0),
     stageAgent: uniform(-1),
-    stageCenter: uniform(new THREE.Vector3()),
-    /** Direção do "andar" do palco (unit, XZ) — CPU normaliza. */
+    /** Direção do "andar" da viagem (unit, XZ) — CPU normaliza/suaviza. */
     stageHeading: uniform(new THREE.Vector2(0, 1)),
-    /** Velocidade da esteira (unidades/s) — também o passo visual do pino. */
+    /** Velocidade ATUAL da esteira (CPU suaviza; 0 no deadzone do leme). */
     stageSpeed: uniform(0.9),
-    /** Janela do palco: meia-extensão ao longo do heading e lateral. */
-    stageHalfLen: uniform(12),
-    stageHalfWid: uniform(6),
   };
 
   private resetPass: N;
@@ -370,35 +404,30 @@ export class CrowdSim {
         ? this.agentMeta.element(instanceIndex)
         : textureLoad(this.agentMetaTexture, texUv);
 
-      // --- palco/esteira (experimental, doc 04): janela local do palco ---
-      // Dormente dentro da caixa orientada pelo heading é CARREGADO: alvos
-      // suspensos (seekGate×0 abaixo), wander atenuado, posição recua a
-      // stageSpeed e faz wrap modular (sai atrás → reaparece à frente). A
-      // pessoa seguida é o PINO: velocidade→0 e heading girando ao heading
-      // do palco — a animação de andar é forçada no state pass; o CHÃO é
-      // que anda (scroll do heightfield, alimentado pelo CrowdMesh).
+      // --- esteira do follow (padrão, 2026-07-14b) + mundo-toro ---
+      // Pessoa seguida é o PINO: velocidade→0 e heading girando ao heading
+      // da viagem — a animação de andar é forçada no state pass; o MUNDO
+      // anda: todos os outros recuam a stageSpeed (deslocamento direto na
+      // integração, mais abaixo) e o chão scrolla junto (CrowdMesh).
       const stageDir: N = u.stageHeading;
-      const stagePerp: N = vec2(stageDir.y.negate(), stageDir.x);
-      const relStage: N = p.xz.sub(u.stageCenter.xz);
-      const alongS: N = dot(relStage, stageDir);
-      const sideS: N = dot(relStage, stagePerp);
-      const inWindow: N = select(
-        alongS
-          .abs()
-          .lessThan(u.stageHalfLen)
-          .and(sideS.abs().lessThan(u.stageHalfWid)),
-        float(1),
-        float(0),
-      );
-      const stageCarry: N = u.stageOn.mul(float(1).sub(meta.x)).mul(inWindow);
       const isPinned: N = u.stageOn.mul(
         select(fi.equal(u.stageAgent), float(1), float(0)),
       );
+      const isSel: N = select(fi.equal(u.selAgent), float(1), float(0));
+      // Wrap universal: período L compartilhado com o heightfield (0 = off;
+      // wrapDeltaTSL degenera em identidade — dá para aplicar sempre).
+      const L: N = terrainU.wrapLen;
+      const wrap2 = (d: N): N =>
+        vec2(wrapDeltaTSL(d.x, L), wrapDeltaTSL(d.y, L));
+      // Ground frame → view frame: alvos são ancorados no MUNDO; a esteira
+      // desloca o mundo −scroll, então o alvo aparece em tgt − scroll (e
+      // wrappa). Formações inteiras são carregadas e loopam como todos.
+      const scroll: N = vec2(terrainU.scrollX, terrainU.scrollZ);
 
-      const seekGate: N = tgt.w
-        .mul(smoothstep(0.0, 0.05, u.seekWeight))
-        .mul(float(1).sub(stageCarry));
-      const toTgt: N = tgt.xz.sub(p.xz);
+      const seekGate: N = tgt.w.mul(smoothstep(0.0, 0.05, u.seekWeight));
+      // Delta TOROIDAL do seek: um agente que wrappa perto da borda busca o
+      // alvo pelo menor caminho no toro — nunca atravessa o mapa de volta.
+      const toTgt: N = wrap2(tgt.xz.sub(scroll).sub(p.xz));
       const tDist: N = length(toTgt).add(1e-5);
       const arrive: N = smoothstep(float(0), u.seekArrive, tDist);
       const nearT: N = float(1).sub(arrive).mul(seekGate);
@@ -442,13 +471,17 @@ export class CrowdSim {
 
       // Grupos: com-história (meta.x=1) usa os pesos base; dormentes (0)
       // ganham multiplicadores próprios — mais lentos/contemplativos.
-      // Carregados pelo palco não vagam (são cenário passando).
+      // Steering direto (modo legado): o leme sobrepõe o wander DELE.
+      const steerGate: N = u.steerOn
+        .mul(isSel)
+        .mul(float(1).sub(isPinned))
+        .toVar();
       const wanderAtten: N = float(1).sub(nearT.mul(0.85));
       const wanderMul: N = u.wanderWeight
         .mul(wanderAtten)
         .mul(mix(u.dormantWanderMul, float(1), meta.x))
         .mul(pauseEff)
-        .mul(float(1).sub(stageCarry));
+        .mul(float(1).sub(steerGate));
       const acc: N = wander.mul(wanderMul).toVar();
 
       // --- separação: vizinhos empurram (evitação de sobreposição) ---
@@ -466,7 +499,16 @@ export class CrowdSim {
           .mul(float(1).sub(tgt.w))
           .mul(seekG)
           .toVar();
+        // Story field (2026-07-14b): vizinho COM história atrai/repele os
+        // DORMENTES no raio próprio. O gate do self sai do loop (toVar —
+        // lição do yieldGain); a leitura de agentMeta[j] só acontece no
+        // branch (dormentes, modo ligado, dist < raio). Só WebGPU.
+        const storyGate: N = u.storyMode
+          .abs()
+          .mul(float(1).sub(meta.x))
+          .toVar();
         const sep: N = vec2(0, 0).toVar();
+        const story: N = vec2(0, 0).toVar();
         Loop({ start: int(0), end: int(u.count), type: "int" }, ({ i: j }: any) => {
           If(j.notEqual(selfI), () => {
             const q: N = this.positions.element(j);
@@ -481,14 +523,43 @@ export class CrowdSim {
               );
               sep.addAssign(push.mul(boost));
             });
+            If(storyGate.greaterThan(0.5).and(dist.lessThan(u.storyRadius)), () => {
+              // d aponta PARA LONGE do vizinho; o sinal entra depois do
+              // loop (storyMode: +1 atrai → −story; −1 repele → +story).
+              const fall: N = smoothstep(
+                u.storyRadius,
+                u.storyRadius.mul(0.25),
+                dist,
+              );
+              story.addAssign(
+                d.div(dist).mul(fall).mul(this.agentMeta.element(j).x),
+              );
+            });
           });
         });
         const sepLen: N = length(sep).add(1e-5);
         const sepCapped: N = sep.div(sepLen).mul(min(sepLen, float(2.5)));
-        acc.addAssign(sepCapped.mul(u.sepWeight));
+        // Inércia do selecionado (fix do stutter): ele recebe a separação
+        // escalada — os inativos cedem, ele quase não desvia.
+        acc.addAssign(
+          sepCapped.mul(u.sepWeight).mul(mix(float(1), u.selInertia, isSel)),
+        );
+        // Story field: força FRACA (capped) — alvos/formações dominam.
+        const storyLen: N = length(story).add(1e-5);
+        acc.addAssign(
+          story
+            .div(storyLen)
+            .mul(min(storyLen, float(1.5)))
+            .mul(u.storyStrength)
+            .mul(u.storyMode.negate()),
+        );
       }
 
       // --- contenção: banda suave no limiar do Campo ---
+      // Com o wrap universal ligado a contenção DESLIGA (o toro é a regra
+      // do mundo); sem wrap, o selecionado recebe a contenção pela mesma
+      // inércia da separação (senão a borda o rebate — metade do vaivém).
+      const wrapOn: N = select(L.greaterThan(0.5), float(1), float(0));
       const centerDist: N = length(p.xz).add(1e-5);
       const inward: N = p.xz.div(centerDist).negate();
       const contain: N = smoothstep(
@@ -496,10 +567,16 @@ export class CrowdSim {
         u.containRadius,
         centerDist,
       );
-      acc.addAssign(inward.mul(contain).mul(3));
+      acc.addAssign(
+        inward
+          .mul(contain)
+          .mul(3)
+          .mul(float(1).sub(wrapOn))
+          .mul(mix(float(1), u.selInertia, isSel)),
+      );
 
-      // --- mouse: atrai/repele dentro do raio ---
-      const toMouse: N = u.mousePos.xz.sub(p.xz);
+      // --- mouse: atrai/repele dentro do raio (delta toroidal no wrap) ---
+      const toMouse: N = wrap2(u.mousePos.xz.sub(p.xz));
       const mDist: N = length(toMouse).add(1e-5);
       const mFall: N = smoothstep(u.mouseRadius, u.mouseRadius.mul(0.15), mDist);
       acc.addAssign(
@@ -510,8 +587,9 @@ export class CrowdSim {
       // Força radial suave (forte no corpo, zero no raio) empurrando só XZ.
       // Por uniform: mesmo custo/comportamento nos DOIS backends. O próprio
       // agente do campo é excluído (fieldAgent); quem TEM alvo também desvia
-      // (campo é presença física, não hierarquia).
-      const fromField: N = p.xz.sub(u.fieldPos.xz);
+      // (campo é presença física, não hierarquia). Delta toroidal: o campo
+      // atravessa a costura do wrap junto com a pessoa.
+      const fromField: N = wrap2(p.xz.sub(u.fieldPos.xz));
       const fDist: N = length(fromField).add(1e-5);
       const fFall: N = smoothstep(u.fieldRadius, u.fieldRadius.mul(0.2), fDist);
       const fGate: N = u.fieldOn.mul(
@@ -522,9 +600,18 @@ export class CrowdSim {
       );
 
       // --- seek (M3), parte 2: a força em si (arrival zera no alvo) ---
+      // Steering direto (legado) sobrepõe a gravidade DELE.
       acc.addAssign(
-        toTgt.div(tDist).mul(arrive).mul(u.seekWeight).mul(seekGate),
+        toTgt
+          .div(tDist)
+          .mul(arrive)
+          .mul(u.seekWeight)
+          .mul(seekGate)
+          .mul(float(1).sub(steerGate)),
       );
+
+      // --- steering direto (modo legado, treadmill OFF): o leme empurra ---
+      acc.addAssign(u.steerDir.mul(u.steerStrength).mul(2).mul(steerGate));
 
       // --- integração com drag e teto de velocidade ---
       // O damping do arrival soma ao drag base: quem chegou perde inércia.
@@ -542,29 +629,33 @@ export class CrowdSim {
       const wave: N = float(1).add(
         u.waveGain.mul(seekGate).mul(smoothstep(u.waveNear, u.waveFar, tDist)),
       );
-      // Pino do palco: teto de velocidade →0 na pessoa seguida (a animação
-      // de andar é forçada no state pass; o mundo é que se move).
+      // Pino da esteira: teto de velocidade →0 na pessoa seguida (a animação
+      // de andar é forçada no state pass; o mundo é que se move). Steering
+      // direto (legado): teto próprio = stageSpeed (a velocidade da viagem).
       const speedCap: N = u.maxSpeed
         .mul(mix(u.dormantSpeedMul, float(1), meta.x))
         .mul(wave)
+        .mul(mix(float(1), u.stageSpeed.div(u.maxSpeed.max(1e-4)), steerGate))
         .mul(float(1).sub(isPinned.mul(0.999)));
       vel2.assign(vel2.mul(min(float(1), speedCap.div(speed))));
 
       // Forças/velocidades vivem em XZ; o y é DERIVADO da superfície
       // (heightfield compartilhado com o chão — M4f). Fios e render herdam.
       const newPos: N = p.xz.add(vel2.mul(dt)).toVar();
-      // Esteira: carregados recuam a stageSpeed CONTRA o heading do palco,
-      // por deslocamento DIRETO de posição (não velocidade — a máquina de
-      // estados os vê parados: em pé, deslizando junto com o chão que
-      // scrolla). Wrap modular: saiu pela borda de trás da janela local →
-      // reaparece na frente (1 teste basta: o passo por frame ≪ janela).
-      If(stageCarry.greaterThan(0.5), () => {
-        newPos.subAssign(stageDir.mul(u.stageSpeed.mul(dt)));
-        const alongNew: N = dot(newPos.sub(u.stageCenter.xz), stageDir);
-        If(alongNew.lessThan(u.stageHalfLen.negate()), () => {
-          newPos.addAssign(stageDir.mul(u.stageHalfLen.mul(2)));
-        });
-      });
+      // Esteira UNIVERSAL do follow: TODOS menos o pino recuam a stageSpeed
+      // CONTRA o heading da viagem, por deslocamento DIRETO de posição (não
+      // velocidade — a máquina de estados vê cada um pela física própria:
+      // quem está parado no mundo desliza em pé, quem anda, anda por cima).
+      newPos.subAssign(
+        stageDir.mul(
+          u.stageSpeed.mul(dt).mul(u.stageOn).mul(float(1).sub(isPinned)),
+        ),
+      );
+      // Wrap universal (mundo-toro): posição por módulo na área canônica
+      // [−L/2, L/2)² — quem sai por uma borda reaparece na oposta com
+      // velocidade/estado/fase intactos (é só aritmética de posição).
+      // wrapDeltaTSL é identidade com L=0 — aplica sempre, sem branch.
+      newPos.assign(wrap2(newPos));
       this.positions
         .element(instanceIndex)
         .assign(vec3(newPos.x, heightTSL(newPos.x, newPos.y), newPos.y));
@@ -634,7 +725,16 @@ export class CrowdSim {
       });
 
       // --- contexto do alvo (assentamento) ---
-      const tDist: N = length(tgt.xz.sub(p.xz));
+      // MESMO caminho do update: alvo no ground frame (subtrai o scroll da
+      // esteira) e delta toroidal — um assentado carregado pela esteira
+      // continua "perto do alvo" e não desassenta ao wrappar.
+      const Ls: N = terrainU.wrapLen;
+      const tDist: N = length(
+        vec2(
+          wrapDeltaTSL(tgt.x.sub(terrainU.scrollX).sub(p.x), Ls),
+          wrapDeltaTSL(tgt.z.sub(terrainU.scrollZ).sub(p.z), Ls),
+        ),
+      );
       const seekOn: N = tgt.w.mul(smoothstep(0.0, 0.05, u.seekWeight));
       const settleR: N = u.seekArrive.mul(1.5);
 
@@ -683,14 +783,15 @@ export class CrowdSim {
         desired.assign(settleState);
       });
 
-      // Pino do palco (doc 04): a pessoa seguida tem velocidade ~0 (teto no
-      // update pass) mas a ILUSÃO exige que ela ANDE — deixar a máquina ver
-      // v≈0 e ir a idle quebraria a esteira. Força o estado walking; a fase
-      // avança por stageSpeed lá embaixo (passo casado com o chão que anda).
+      // Pino da esteira: a pessoa seguida tem velocidade ~0 (teto no update
+      // pass) mas a ILUSÃO exige que ela ANDE — deixar a máquina ver v≈0 e
+      // ir a idle quebraria a esteira. Força walking ENQUANTO a esteira
+      // anda; no deadzone do leme (stageSpeed→0, "apontar nela para parar")
+      // a física fala de novo: v≈0 → idle, honesto.
       const isPinned: N = u.stageOn.mul(
         select(fi.equal(u.stageAgent), float(1), float(0)),
       );
-      If(isPinned.greaterThan(0.5), () => {
+      If(isPinned.greaterThan(0.5).and(u.stageSpeed.greaterThan(0.05)), () => {
         desired.assign(1);
       });
 

@@ -6,6 +6,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { CrowdSim } from "../sim/CrowdSim";
 import type { Content } from "../data/types";
 import { positionMirror } from "../sim/positionMirror";
+import { getWorldWrapLen } from "../scene/heightfield";
 import { useHover } from "../ui/hoverStore";
 import { startFollow, stopFollow, useFollow } from "../ui/followStore";
 import { prefNum } from "../lib/prefs";
@@ -216,6 +217,28 @@ export function FollowCamera({
     }
     // Espelho ainda esquentando (boot com ?follow=): controls segue dono.
     if (!positionMirror.getPosSmooth(following, sample)) return;
+
+    // Wrap universal (mundo-toro): se a PESSOA seguida wrappou (só no modo
+    // legado sem pino — no padrão ela é pinada e nunca cruza a borda), o
+    // rig INTEIRO desloca pelo mesmo múltiplo de L — câmera, âncora e
+    // pessoa suavizada atravessam a costura juntas, sem chicote.
+    // (não no retarget: personSmooth ainda é da pessoa ANTERIOR — a troca
+    // A→B viaja pela spring, não por costura)
+    const wrapL = getWorldWrapLen();
+    if (wrapL > 0 && seeded.current && !retarget.current) {
+      const sx = Math.round((sample.x - personSmooth.x) / wrapL) * wrapL;
+      const sz = Math.round((sample.z - personSmooth.z) / wrapL) * wrapL;
+      if (sx !== 0 || sz !== 0) {
+        personSmooth.x += sx;
+        personSmooth.z += sz;
+        anchor.x += sx;
+        anchor.z += sz;
+        camera.position.x += sx;
+        camera.position.z += sz;
+        controls.target.x += sx;
+        controls.target.z += sz;
+      }
+    }
 
     if (!seeded.current || retarget.current) {
       // DESCARTA o resíduo de damping de um arrasto anterior sem aplicá-lo:
