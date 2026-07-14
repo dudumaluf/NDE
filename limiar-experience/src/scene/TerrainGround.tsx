@@ -14,6 +14,7 @@ import {
   select,
   transformNormalToView,
   uniform,
+  vec2,
   vec3,
   vertexStage,
 } from "three/tsl";
@@ -26,6 +27,7 @@ import {
   TERRAIN_PRESETS,
   commitTerrain,
   heightTSL,
+  terrainU,
 } from "./heightfield";
 
 type N = any;
@@ -182,8 +184,12 @@ export function TerrainGround() {
     material.normalNode = transformNormalToView(nObj).normalize();
 
     // Grid anti-aliased (fract/fwidth) na área do gridHelper antigo.
+    // As LINHAS vivem no mesmo domínio scrollado do noise (palco/esteira:
+    // o chão desliza sob os pés); a JANELA (inside) fica fixa no mundo —
+    // como uma esteira vista por uma moldura parada.
     const xz: N = positionWorld.xz;
-    const coord: N = xz.div(GRID_CELL);
+    const scrolled: N = xz.add(vec2(terrainU.scrollX, terrainU.scrollZ));
+    const coord: N = scrolled.div(GRID_CELL);
     const g2: N = coord.sub(0.5).fract().sub(0.5).abs().div(fwidth(coord));
     const line: N = float(1).sub(min(min(g2.x, g2.y), float(1)));
     const inside: N = select(

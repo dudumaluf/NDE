@@ -95,7 +95,28 @@ export const terrainU = {
   seed: uniform(TERRAIN_DEFAULTS.seed),
   flatR: uniform(TERRAIN_DEFAULTS.flattenRadius),
   flatBand: uniform(TERRAIN_DEFAULTS.flattenBand),
+  /** Scroll do palco (esteira, doc 04): desloca o DOMÍNIO do noise (warp +
+   *  fbm) — o flatten (anfiteatro) fica ancorado no mundo. O CrowdMesh
+   *  avança por frame na direção do heading do palco; h(x,z) vira
+   *  h(x+scroll) nos DOIS lados (TSL e JS — paridade obrigatória). */
+  scrollX: uniform(0),
+  scrollZ: uniform(0),
 };
+
+/** Espelho JS do scroll (heightJS lê daqui — mesma paridade dos uniforms). */
+const scrollJS = { x: 0, z: 0 };
+
+/** Avança/zera o scroll do palco nos DOIS lados (GPU + JS) de uma vez. */
+export function setTerrainScroll(x: number, z: number): void {
+  terrainU.scrollX.value = x;
+  terrainU.scrollZ.value = z;
+  scrollJS.x = x;
+  scrollJS.z = z;
+}
+
+export function getTerrainScroll(): { x: number; z: number } {
+  return scrollJS;
+}
 
 /** Escreve params → uniforms + store (chamado pelo grupo Terrain, Scene). */
 export function commitTerrain(p: TerrainParams): void {
@@ -161,11 +182,16 @@ export function heightJS(
   if (amp === 0) return 0;
   const seed = Math.round(p.seed);
 
+  // Scroll do palco: desloca o DOMÍNIO do noise (o flatten usa o x/z do
+  // mundo, mais abaixo — o anfiteatro não anda com a esteira).
+  const xs = x + scrollJS.x;
+  const zs = z + scrollJS.z;
+
   // domain warp: um vnoise por eixo em meia frequência
-  const wx = vnoiseJS(x * p.scale * 0.5, z * p.scale * 0.5, seed * 8 + 101);
-  const wz = vnoiseJS(x * p.scale * 0.5, z * p.scale * 0.5, seed * 8 + 202);
-  const xq = x + wx * p.warp * WARP_DIST;
-  const zq = z + wz * p.warp * WARP_DIST;
+  const wx = vnoiseJS(xs * p.scale * 0.5, zs * p.scale * 0.5, seed * 8 + 101);
+  const wz = vnoiseJS(xs * p.scale * 0.5, zs * p.scale * 0.5, seed * 8 + 202);
+  const xq = xs + wx * p.warp * WARP_DIST;
+  const zq = zs + wz * p.warp * WARP_DIST;
 
   // fbm com gate fracionário por oitava
   let sum = 0;
@@ -244,18 +270,22 @@ export const heightTSL = /* @__PURE__ */ Fn(([x, z]: N[]) => {
   const u = terrainU;
   const seed: N = u.seed.round().toInt().toUint().mul(uint(8));
 
+  // Scroll do palco (paridade com heightJS): noise anda, flatten fica.
+  const xs: N = x.add(u.scrollX);
+  const zs: N = z.add(u.scrollZ);
+
   const wx: N = vnoiseTSL(
-    x.mul(u.scale).mul(0.5),
-    z.mul(u.scale).mul(0.5),
+    xs.mul(u.scale).mul(0.5),
+    zs.mul(u.scale).mul(0.5),
     seed.add(uint(101)),
   );
   const wz: N = vnoiseTSL(
-    x.mul(u.scale).mul(0.5),
-    z.mul(u.scale).mul(0.5),
+    xs.mul(u.scale).mul(0.5),
+    zs.mul(u.scale).mul(0.5),
     seed.add(uint(202)),
   );
-  const xq: N = x.add(wx.mul(u.warp).mul(WARP_DIST));
-  const zq: N = z.add(wz.mul(u.warp).mul(WARP_DIST));
+  const xq: N = xs.add(wx.mul(u.warp).mul(WARP_DIST));
+  const zq: N = zs.add(wz.mul(u.warp).mul(WARP_DIST));
 
   const sum = float(0).toVar();
   const ampSum = float(0).toVar();

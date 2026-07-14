@@ -58,6 +58,146 @@ export function computeTargets(
   }
 }
 
+/** Formações dos dormentes (2026-07-14, doc 04): o que os sem-história
+ *  fazem enquanto os ativos migram. */
+export type DormantFormation = "wander" | "circle" | "corridor" | "clear";
+
+export const DORMANT_FORMATIONS: readonly DormantFormation[] = [
+  "wander",
+  "circle",
+  "corridor",
+  "clear",
+];
+
+export interface DormantTargetParams {
+  /** Raio de contenção do Campo (círculo/clear ancoram nele). */
+  containRadius: number;
+  /** Espaçamento entre dormentes na formação (slider do leva). */
+  spacing: number;
+  /** Corridor: posição da pessoa seguida (positionMirror) — null cai em wander. */
+  followPos: { x: number; z: number } | null;
+  /** Corridor: heading estimado (unit XZ) do deslocamento da pessoa. */
+  followHeading: { x: number; z: number } | null;
+  /** Corridor: comprimento do corredor (~24 default). */
+  corridorLength: number;
+}
+
+/** rng determinístico barato por slot (jitter estável das formações). */
+function slotJitter(slot: number, k: number): number {
+  const r = mulberry32(slot * 7 + k * 131071)();
+  return r * 2 - 1;
+}
+
+/**
+ * Escreve alvos nos slots DORMENTES (índices ≥ peopleCount) — as pessoas
+ * reais não são tocadas (targets delas pertencem a computeTargets/lentes).
+ * Retorna sem escrever nada em modo `wander` além de zerar w (comportamento
+ * atual: dormente sem alvo vaga). Os dormentes ASSENTAM ao chegar pela
+ * state machine existente (alvo ativo + perto + devagar = estado 3/4).
+ *
+ *  - `circle`: anel grandão (containRadius×0,92) em 2 fileiras intercaladas
+ *    com jitter estável por slot — a multidão vira moldura enquanto os
+ *    ativos migram aos núcleos.
+ *  - `corridor`: duas fileiras ladeando o CAMINHO da pessoa seguida (final
+ *    de maratona) — linhas paralelas ao heading estimado, à frente dela.
+ *  - `clear`: recuam à borda máxima da contenção (foco total no cenário).
+ */
+export function computeDormantTargets(
+  mode: DormantFormation,
+  peopleCount: number,
+  agentCount: number,
+  out: Float32Array,
+  {
+    containRadius,
+    spacing,
+    followPos,
+    followHeading,
+    corridorLength,
+  }: DormantTargetParams,
+): void {
+  const nDormant = agentCount - peopleCount;
+  if (nDormant <= 0) return;
+
+  if (
+    mode === "wander" ||
+    (mode === "corridor" && (!followPos || !followHeading))
+  ) {
+    // Sem alvo: zera só o w (posição antiga é irrelevante com w=0).
+    for (let i = peopleCount; i < agentCount; i++) out[i * 4 + 3] = 0;
+    return;
+  }
+
+  if (mode === "circle" || mode === "clear") {
+    // Anel: circle = moldura interna (0,92×contain, 2 fileiras); clear =
+    // borda máxima (a contenção segura — foco no que sobrou no centro).
+    const baseR = mode === "circle" ? containRadius * 0.92 : containRadius;
+    const rowGap = Math.max(spacing, 0.4);
+    for (let i = peopleCount; i < agentCount; i++) {
+      const k = i - peopleCount;
+      const row = k % 2;
+      const idxInRow = (k - row) / 2;
+      const nInRow = Math.ceil(nDormant / 2);
+      const angle =
+        (idxInRow / Math.max(nInRow, 1)) * Math.PI * 2 +
+        row * (Math.PI / Math.max(nInRow, 1)) +
+        slotJitter(i, 1) * 0.02;
+      const r = baseR - row * rowGap + slotJitter(i, 2) * rowGap * 0.35;
+      out[i * 4 + 0] = Math.cos(angle) * r;
+      out[i * 4 + 1] = 0;
+      out[i * 4 + 2] = Math.sin(angle) * r;
+      out[i * 4 + 3] = 1;
+    }
+    return;
+  }
+
+  // corridor: fileiras paralelas à direção de deslocamento da pessoa
+  // seguida — 3 CAMADAS por lado (sebe de maratona: uma linha fina de 20
+  // sumia no meio da multidão), começando um pouco atrás dela e se
+  // estendendo à frente. Excedente espera no anel da borda.
+  const hx = followHeading!.x;
+  const hz = followHeading!.z;
+  const px = followPos!.x;
+  const pz = followPos!.z;
+  // perpendicular (esquerda da direção de andar)
+  const lx = -hz;
+  const lz = hx;
+  const halfWidth = Math.max(spacing * 1.6, 1.2);
+  const step = Math.max(spacing, 0.4);
+  const layerGap = Math.max(spacing * 0.8, 0.7);
+  const layers = 3;
+  const slotsPerRow = Math.max(1, Math.floor(corridorLength / step));
+  const capacity = slotsPerRow * 2 * layers;
+
+  for (let i = peopleCount; i < agentCount; i++) {
+    const k = i - peopleCount;
+    if (k >= capacity) {
+      // Excedente: espera na borda (fora do corredor, sem apinhar).
+      const angle =
+        ((k - capacity) / Math.max(nDormant - capacity, 1)) * Math.PI * 2;
+      out[i * 4 + 0] = Math.cos(angle) * containRadius;
+      out[i * 4 + 1] = 0;
+      out[i * 4 + 2] = Math.sin(angle) * containRadius;
+      out[i * 4 + 3] = 1;
+      continue;
+    }
+    const sideSign = k % 2 === 0 ? 1 : -1;
+    const pairIdx = (k - (k % 2)) / 2;
+    const layer = Math.floor(pairIdx / slotsPerRow);
+    const idxInRow = pairIdx % slotsPerRow;
+    // começa 15% atrás da pessoa — a fileira "abraça" quem passa; camadas
+    // externas intercalam meio passo (tijolos, não grade).
+    const along =
+      (idxInRow + 0.5 + layer * 0.5) * step - corridorLength * 0.15;
+    const jA = slotJitter(i, 3) * step * 0.25;
+    const jW = slotJitter(i, 4) * 0.3;
+    const width = halfWidth + layer * layerGap;
+    out[i * 4 + 0] = px + hx * (along + jA) + lx * sideSign * (width + jW);
+    out[i * 4 + 1] = 0;
+    out[i * 4 + 2] = pz + hz * (along + jA) + lz * sideSign * (width + jW);
+    out[i * 4 + 3] = 1;
+  }
+}
+
 /** Regra do Vocabulary: quem TEM `element` pode assentar no clipe designado. */
 export interface SettleRule {
   /** Key de elemento da taxonomy (dados em PT — ex.: `transformacao`). */

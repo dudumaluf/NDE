@@ -4,6 +4,7 @@ import {
   Fn,
   If,
   Loop,
+  dot,
   exp,
   float,
   hash,
@@ -54,6 +55,16 @@ type N = any;
  *   onda       — na gravidade, quem está LONGE do alvo ganha teto de
  *                velocidade maior (chega "correndo", assenta por último) —
  *                formação rápida E legível (doc 04 §5.5).
+ *   campo      — 2026-07-14: repulsão radial da pessoa ATIVA (seguida no
+ *                clique) por uniforms (fieldPos/Radius/Strength/Agent) —
+ *                zero buffer novo, idêntico nos 2 backends. Migrantes
+ *                (com alvo) ganham peso assimétrico na separação
+ *                (yieldWeight — só WebGPU, onde a separação existe).
+ *   palco      — 2026-07-14 (experimental): esteira da história. Pessoa
+ *                seguida PINADA (teto de velocidade →0 + walking forçado
+ *                no state pass, fase a stageSpeed); dormentes da janela
+ *                local recuam a stageSpeed com wrap modular (loop de
+ *                cenário); o chão scrolla junto (heightfield scroll).
  *
  * Máquina de estados POR AGENTE (pass próprio, buildStatePass): lê a
  * velocidade REAL e a distância ao alvo e escreve `states` (vec4: clipA,
@@ -176,6 +187,33 @@ export class CrowdSim {
     /** Pausas orgânicas do wander (0 = ninguém para; design 0.45 no leva). */
     pauseAmount: uniform(0),
     pauseEvolve: uniform(0.05),
+
+    // --- campo do ativo + palco (2026-07-14, doc 04) ---
+    /** Campo de repulsão da pessoa SEGUIDA: os outros desviam em vez de
+     *  atravessar/apinhar. Por UNIFORM (zero buffer novo — igual nos 2
+     *  backends); o CrowdMesh alimenta fieldPos por frame do espelho. */
+    fieldOn: uniform(0),
+    fieldPos: uniform(new THREE.Vector3()),
+    fieldRadius: uniform(2.5),
+    fieldStrength: uniform(1.2),
+    /** Índice da pessoa seguida (excluída do próprio campo); −1 = ninguém. */
+    fieldAgent: uniform(-1),
+    /** Separação ASSIMÉTRICA (só no caminho WebGPU — o fallback não tem
+     *  separação desde o M2): vizinho COM alvo (migrando) empurra × mais
+     *  forte quem NÃO tem alvo — abre caminho. 1 = simétrico (neutro). */
+    yieldWeight: uniform(1),
+    /** Palco/esteira (experimental, doc 04): pino da pessoa seguida +
+     *  dormentes da janela em loop modular. Nasce off — wiring no leva. */
+    stageOn: uniform(0),
+    stageAgent: uniform(-1),
+    stageCenter: uniform(new THREE.Vector3()),
+    /** Direção do "andar" do palco (unit, XZ) — CPU normaliza. */
+    stageHeading: uniform(new THREE.Vector2(0, 1)),
+    /** Velocidade da esteira (unidades/s) — também o passo visual do pino. */
+    stageSpeed: uniform(0.9),
+    /** Janela do palco: meia-extensão ao longo do heading e lateral. */
+    stageHalfLen: uniform(12),
+    stageHalfWid: uniform(6),
   };
 
   private resetPass: N;
@@ -331,7 +369,35 @@ export class CrowdSim {
       const meta: N = withSeparation
         ? this.agentMeta.element(instanceIndex)
         : textureLoad(this.agentMetaTexture, texUv);
-      const seekGate: N = tgt.w.mul(smoothstep(0.0, 0.05, u.seekWeight));
+
+      // --- palco/esteira (experimental, doc 04): janela local do palco ---
+      // Dormente dentro da caixa orientada pelo heading é CARREGADO: alvos
+      // suspensos (seekGate×0 abaixo), wander atenuado, posição recua a
+      // stageSpeed e faz wrap modular (sai atrás → reaparece à frente). A
+      // pessoa seguida é o PINO: velocidade→0 e heading girando ao heading
+      // do palco — a animação de andar é forçada no state pass; o CHÃO é
+      // que anda (scroll do heightfield, alimentado pelo CrowdMesh).
+      const stageDir: N = u.stageHeading;
+      const stagePerp: N = vec2(stageDir.y.negate(), stageDir.x);
+      const relStage: N = p.xz.sub(u.stageCenter.xz);
+      const alongS: N = dot(relStage, stageDir);
+      const sideS: N = dot(relStage, stagePerp);
+      const inWindow: N = select(
+        alongS
+          .abs()
+          .lessThan(u.stageHalfLen)
+          .and(sideS.abs().lessThan(u.stageHalfWid)),
+        float(1),
+        float(0),
+      );
+      const stageCarry: N = u.stageOn.mul(float(1).sub(meta.x)).mul(inWindow);
+      const isPinned: N = u.stageOn.mul(
+        select(fi.equal(u.stageAgent), float(1), float(0)),
+      );
+
+      const seekGate: N = tgt.w
+        .mul(smoothstep(0.0, 0.05, u.seekWeight))
+        .mul(float(1).sub(stageCarry));
       const toTgt: N = tgt.xz.sub(p.xz);
       const tDist: N = length(toTgt).add(1e-5);
       const arrive: N = smoothstep(float(0), u.seekArrive, tDist);
@@ -376,15 +442,30 @@ export class CrowdSim {
 
       // Grupos: com-história (meta.x=1) usa os pesos base; dormentes (0)
       // ganham multiplicadores próprios — mais lentos/contemplativos.
+      // Carregados pelo palco não vagam (são cenário passando).
       const wanderAtten: N = float(1).sub(nearT.mul(0.85));
       const wanderMul: N = u.wanderWeight
         .mul(wanderAtten)
         .mul(mix(u.dormantWanderMul, float(1), meta.x))
-        .mul(pauseEff);
+        .mul(pauseEff)
+        .mul(float(1).sub(stageCarry));
       const acc: N = wander.mul(wanderMul).toVar();
 
       // --- separação: vizinhos empurram (evitação de sobreposição) ---
       if (withSeparation) {
+        // Peso ASSIMÉTRICO (campo dos ativos, doc 04): vizinho COM alvo
+        // (migrando ao núcleo) empurra até yieldWeight× mais forte quem NÃO
+        // tem alvo — os dormentes abrem caminho. Só age com a gravidade
+        // ativa (senão ninguém está migrando); yieldWeight=1 é neutro.
+        // Custa uma leitura extra de targets[j] no loop O(N²) — medido.
+        // toVar() OBRIGATÓRIO: sem ele o TSL inlina a expressão (que lê
+        // targets[self]) em CADA iteração do loop — 40→23 fps medido.
+        const seekG: N = smoothstep(0.0, 0.05, u.seekWeight);
+        const yieldGain: N = u.yieldWeight
+          .sub(1)
+          .mul(float(1).sub(tgt.w))
+          .mul(seekG)
+          .toVar();
         const sep: N = vec2(0, 0).toVar();
         Loop({ start: int(0), end: int(u.count), type: "int" }, ({ i: j }: any) => {
           If(j.notEqual(selfI), () => {
@@ -395,7 +476,10 @@ export class CrowdSim {
               const push: N = d
                 .div(dist)
                 .mul(u.sepRadius.sub(dist).div(u.sepRadius).pow(2));
-              sep.addAssign(push);
+              const boost: N = float(1).add(
+                yieldGain.mul(this.targets.element(j).w),
+              );
+              sep.addAssign(push.mul(boost));
             });
           });
         });
@@ -422,6 +506,21 @@ export class CrowdSim {
         toMouse.div(mDist).mul(mFall).mul(u.mouseMode).mul(u.mouseWeight),
       );
 
+      // --- campo do ativo (doc 04): a pessoa seguida abre espaço ---
+      // Força radial suave (forte no corpo, zero no raio) empurrando só XZ.
+      // Por uniform: mesmo custo/comportamento nos DOIS backends. O próprio
+      // agente do campo é excluído (fieldAgent); quem TEM alvo também desvia
+      // (campo é presença física, não hierarquia).
+      const fromField: N = p.xz.sub(u.fieldPos.xz);
+      const fDist: N = length(fromField).add(1e-5);
+      const fFall: N = smoothstep(u.fieldRadius, u.fieldRadius.mul(0.2), fDist);
+      const fGate: N = u.fieldOn.mul(
+        select(fi.equal(u.fieldAgent), float(0), float(1)),
+      );
+      acc.addAssign(
+        fromField.div(fDist).mul(fFall).mul(u.fieldStrength).mul(fGate),
+      );
+
       // --- seek (M3), parte 2: a força em si (arrival zera no alvo) ---
       acc.addAssign(
         toTgt.div(tDist).mul(arrive).mul(u.seekWeight).mul(seekGate),
@@ -443,26 +542,43 @@ export class CrowdSim {
       const wave: N = float(1).add(
         u.waveGain.mul(seekGate).mul(smoothstep(u.waveNear, u.waveFar, tDist)),
       );
+      // Pino do palco: teto de velocidade →0 na pessoa seguida (a animação
+      // de andar é forçada no state pass; o mundo é que se move).
       const speedCap: N = u.maxSpeed
         .mul(mix(u.dormantSpeedMul, float(1), meta.x))
-        .mul(wave);
+        .mul(wave)
+        .mul(float(1).sub(isPinned.mul(0.999)));
       vel2.assign(vel2.mul(min(float(1), speedCap.div(speed))));
 
       // Forças/velocidades vivem em XZ; o y é DERIVADO da superfície
       // (heightfield compartilhado com o chão — M4f). Fios e render herdam.
-      const newPos: N = p.xz.add(vel2.mul(dt));
+      const newPos: N = p.xz.add(vel2.mul(dt)).toVar();
+      // Esteira: carregados recuam a stageSpeed CONTRA o heading do palco,
+      // por deslocamento DIRETO de posição (não velocidade — a máquina de
+      // estados os vê parados: em pé, deslizando junto com o chão que
+      // scrolla). Wrap modular: saiu pela borda de trás da janela local →
+      // reaparece na frente (1 teste basta: o passo por frame ≪ janela).
+      If(stageCarry.greaterThan(0.5), () => {
+        newPos.subAssign(stageDir.mul(u.stageSpeed.mul(dt)));
+        const alongNew: N = dot(newPos.sub(u.stageCenter.xz), stageDir);
+        If(alongNew.lessThan(u.stageHalfLen.negate()), () => {
+          newPos.addAssign(stageDir.mul(u.stageHalfLen.mul(2)));
+        });
+      });
       this.positions
         .element(instanceIndex)
         .assign(vec3(newPos.x, heightTSL(newPos.x, newPos.y), newPos.y));
       this.velocities.element(instanceIndex).assign(vec3(vel2.x, 0, vel2.y));
 
       // --- direção suavizada (só gira quando há movimento real) ---
+      // Pino do palco: gira ao heading do palco mesmo com velocidade ~0
+      // (a pessoa "anda" para onde a viagem aponta).
       const h: N = this.headings.element(instanceIndex).toVar();
       const spd: N = length(vel2);
       const turnK: N = float(1).sub(exp(u.turnRate.negate().mul(dt)));
-      const targetDir: N = vel2.div(spd.add(1e-5));
+      const targetDir: N = mix(vel2.div(spd.add(1e-5)), stageDir, isPinned);
       const blended: N = normalize(mix(h, targetDir, turnK).add(vec2(1e-6, 0)));
-      const gate: N = smoothstep(0.02, 0.08, spd);
+      const gate: N = mix(smoothstep(0.02, 0.08, spd), float(1), isPinned);
       this.headings
         .element(instanceIndex)
         .assign(normalize(mix(h, blended, gate).add(vec2(1e-6, 0))));
@@ -567,6 +683,17 @@ export class CrowdSim {
         desired.assign(settleState);
       });
 
+      // Pino do palco (doc 04): a pessoa seguida tem velocidade ~0 (teto no
+      // update pass) mas a ILUSÃO exige que ela ANDE — deixar a máquina ver
+      // v≈0 e ir a idle quebraria a esteira. Força o estado walking; a fase
+      // avança por stageSpeed lá embaixo (passo casado com o chão que anda).
+      const isPinned: N = u.stageOn.mul(
+        select(fi.equal(u.stageAgent), float(1), float(0)),
+      );
+      If(isPinned.greaterThan(0.5), () => {
+        desired.assign(1);
+      });
+
       // --- transição (respeitando o dwell anti-flicker) ---
       const desiredClip: N = select(
         desired.equal(0),
@@ -606,12 +733,15 @@ export class CrowdSim {
       )
         .sub(1)
         .mul(u.perAgentOn);
+      // Pino do palco: velocidade real ~0, mas o passo anda a stageSpeed —
+      // a cadência dos pés casa com o chão que scrolla (nada patina).
       const ph: N = this.phases.element(instanceIndex);
       this.phases
         .element(instanceIndex)
         .assign(
           ph
             .add(speed.mul(u.dt).mul(u.phasePerUnit).mul(runBoost))
+            .add(u.stageSpeed.mul(u.dt).mul(u.phasePerUnit).mul(isPinned))
             .add(u.dt.mul(float(vat().fps)).mul(stateMult))
             .mod(vat().framesPerClip),
         );

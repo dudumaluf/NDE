@@ -15,8 +15,11 @@ import { qpNum } from "../lib/urlParams";
 import { pref, prefBool, prefNum, prefStr } from "../lib/prefs";
 import { useContent } from "../data/contentStore";
 import {
+  DORMANT_FORMATIONS,
   computeAgentMeta,
+  computeDormantTargets,
   computeTargets,
+  type DormantFormation,
   type SettleRule,
 } from "../data/agentMapping";
 import { applyHsbToColorScale, hexToRgb01 } from "../data/palette";
@@ -34,11 +37,16 @@ import { PersonHover } from "../render/PersonHover";
 import { FollowCamera } from "../render/FollowCamera";
 import { legendFlashK, setElementLens, useLegend } from "../ui/legendStore";
 import { isHsbIdentity, useAppearance } from "../ui/appearanceStore";
-import { heightJS } from "../scene/heightfield";
+import { getTerrainScroll, heightJS, setTerrainScroll } from "../scene/heightfield";
+import { useFollow } from "../ui/followStore";
+import { positionMirror } from "../sim/positionMirror";
 
 const NO_LENS = "nenhuma";
 
 const MAX_GRID = 64; // 4096 pessoas — teto do protótipo
+
+/** Comprimento do corredor de dormentes (formação corridor, doc 04). */
+const CORRIDOR_LENGTH = 24;
 
 function isWebGPU(gl: unknown): boolean {
   return Boolean(
@@ -479,6 +487,84 @@ export function CrowdMesh() {
     [dlensOptions],
   );
 
+  // --- Campo do ativo (2026-07-14, doc 04): quem está ativo abre espaço ---
+  // Opção com sliders, não comportamento fixo — o Dudu gosta do caos vivo
+  // (NYC); o campo existe para as cenas em que a legibilidade vence.
+  const af = useControls("Active field", {
+    fieldOn: {
+      value: prefBool("field", "Active field.fieldOn", false),
+      label: "field (follow)",
+      hint: "the followed person radiates a soft repulsion — others step aside instead of crowding through",
+    },
+    fieldRadius: {
+      value: prefNum("fieldR", "Active field.fieldRadius", 2.5),
+      min: 0.5,
+      max: 8,
+      label: "field radius",
+    },
+    fieldStrength: {
+      value: prefNum("fieldF", "Active field.fieldStrength", 1.2),
+      min: 0,
+      max: 4,
+      label: "field strength",
+    },
+    yieldW: {
+      value: prefNum("yield", "Active field.yieldW", 2),
+      min: 1,
+      max: 3,
+      label: "yield to travelers",
+      hint: "asymmetric separation: agents WITH a target (migrating to a cluster) push targetless ones up to this much harder — WebGPU only (the WebGL2 fallback has no separation since M2)",
+    },
+  });
+
+  // --- Formações dos dormentes (2026-07-14, doc 04): moldar a multidão ---
+  const fo = useControls("Formations", {
+    formation: {
+      value: prefStr<DormantFormation>(
+        "formation",
+        "Formations.formation",
+        "wander",
+        DORMANT_FORMATIONS,
+      ),
+      options: {
+        wander: "wander",
+        circle: "circle",
+        corridor: "corridor",
+        clear: "clear",
+      } as Record<string, DormantFormation>,
+      label: "dormant formation",
+      hint: "what the story-less crowd does: wander (loose), circle (big ring around everything), corridor (two rows flanking the FOLLOWED person's path — needs an active follow, falls back to wander), clear (recede to the rim)",
+    },
+    spacing: {
+      value: prefNum("formSpacing", "Formations.spacing", 1.2),
+      min: 0.4,
+      max: 4,
+      label: "formation spacing",
+    },
+  });
+
+  // --- Palco/esteira (2026-07-14, doc 04 — EXPERIMENTAL): a ilusão de ---
+  // viagem sem deslocar a pessoa: pino + chão scrollando + corredor em loop.
+  const st = useControls("Stage (treadmill)", {
+    stage: {
+      value: prefBool("stage", "Stage (treadmill).stage", false),
+      label: "story treadmill",
+      hint: "experimental: pins the followed person (walking in place), scrolls the terrain noise underfoot and loops window dormants behind→front. Needs an active follow + automatic states",
+    },
+    stageSpeed: {
+      value: prefNum("stageSpeed", "Stage (treadmill).stageSpeed", 0.9),
+      min: 0,
+      max: 2,
+      label: "treadmill speed",
+    },
+    stageWindow: {
+      value: prefNum("stageWin", "Stage (treadmill).stageWindow", 24),
+      min: 8,
+      max: 48,
+      label: "stage window (length)",
+    },
+  });
+
   // Exclusão mútua: ativar uma lente desativa a outra (a que MUDOU vence).
   // Na carga com as duas na URL, a demográfica ganha (checada primeiro).
   const prevLens = useRef(NO_LENS);
@@ -641,10 +727,90 @@ export function CrowdMesh() {
     sim.commitAgentMeta();
   }, [content, sim, e.pesoIdle, e.pesoRezar, effPray, vocabRules]);
 
+  // --- follow: pessoa seguida + heading estimado (campo/corredor/palco) ---
+  const following = useFollow((fs) => fs.following);
+  const followPos = useRef(new THREE.Vector3());
+  const followValid = useRef(false);
+  /** Trilha da pessoa seguida (~1 amostra/250 ms, janela 2 s): o heading é
+   *  o DESLOCAMENTO na janela — jitter de separação/readback não acumula
+   *  deslocamento (random walk), caminhada real acumula. (Um EMA de deltas
+   *  por frame girava com o jitter da pessoa ASSENTADA e o corredor
+   *  re-ancorava em loop — bug pego na sonda, 2026-07-14.) */
+  const headTrail = useRef<{ t: number; x: number; z: number }[]>([]);
+  const trailFor = useRef<number | null>(null);
+  const corridorClock = useRef(0);
+  /** Âncora do corredor: os alvos NÃO seguem a pessoa por frame (alvo que
+   *  foge vira perseguição — turba, não corredor; bug pego na sonda). O
+   *  corredor fica PARADO no mundo e só re-ancora quando a pessoa
+   *  atravessou ~35% dele, saiu pela lateral ou mudou de rumo. */
+  const corridorAnchor = useRef({ x: 0, z: 0, hx: 0, hz: 1, valid: false });
+  /** Heading do palco: congelado na ENTRADA do modo (a pessoa para de andar
+   *  — o heading vivo degeneraria; a viagem aponta para onde ela ia). */
+  const stageHeading = useRef(new THREE.Vector2(0, 1));
+  const stageWasOn = useRef(false);
+  const scrollAccum = useRef(new THREE.Vector2(0, 0));
+  const camera = useThree((state) => state.camera);
+
+  /** Direção efetiva do deslocamento: trilha (se a pessoa ANDOU ≥1,2 m na
+   *  janela de ~2 s — o empurra-empurra da multidão desloca <1 m e NÃO pode
+   *  contar: heading de deriva re-ancorava o corredor em loop, sonda
+   *  2026-07-14) senão câmera→pessoa (parada/assentada ganha corredor à
+   *  frente do olhar). */
+  const effectiveHeading = (out: THREE.Vector2): void => {
+    const trail = headTrail.current;
+    if (trail.length >= 2) {
+      const dx = trail[trail.length - 1].x - trail[0].x;
+      const dz = trail[trail.length - 1].z - trail[0].z;
+      const len = Math.hypot(dx, dz);
+      if (len > 1.2) {
+        out.set(dx / len, dz / len);
+        return;
+      }
+    }
+    const dx = followPos.current.x - camera.position.x;
+    const dz = followPos.current.z - camera.position.z;
+    const len = Math.hypot(dx, dz);
+    if (len > 1e-3) out.set(dx / len, dz / len);
+    else out.set(0, 1);
+  };
+
   // Alvos dos dados (gravidade/lentes) — 46 escritas por mudança, nada por
   // frame. Lente demográfica ativa vence a lente de elemento (exclusão mútua
   // no efeito acima garante que só uma esteja ligada). targetsVersion avisa
   // os fios (modo "só núcleos formados" lê os alvos como atributo).
+  // Por cima dos alvos das PESSOAS, a formação dos DORMENTES (slots ≥
+  // people.length até o grid visível): computeDormantTargets escreve só
+  // esses slots. Corridor é dinâmico (recomputado a ~0,8 s no useFrame).
+  const headingTmp = useMemo(() => new THREE.Vector2(), []);
+  const applyDormantTargets = () => {
+    if (!content) return;
+    const agentCount = c.grid * c.grid;
+    const peopleCount = Math.min(content.manifest.people.length, agentCount);
+    const corridorReady = following !== null && followValid.current;
+    const mode: DormantFormation =
+      fo.formation === "corridor" && !corridorReady ? "wander" : fo.formation;
+    const a = corridorAnchor.current;
+    if (mode === "corridor" && !a.valid) {
+      // (Re-)ancora o corredor AQUI: alvos fixos no mundo a partir da
+      // posição/rumo atuais da pessoa — nunca perseguem por frame.
+      effectiveHeading(headingTmp);
+      a.x = followPos.current.x;
+      a.z = followPos.current.z;
+      a.hx = headingTmp.x;
+      a.hz = headingTmp.y;
+      a.valid = true;
+    }
+    computeDormantTargets(mode, peopleCount, agentCount, sim.targetsArray, {
+      containRadius: s.contRaio,
+      spacing: fo.spacing,
+      followPos: mode === "corridor" ? { x: a.x, z: a.z } : null,
+      followHeading: mode === "corridor" ? { x: a.hx, z: a.hz } : null,
+      corridorLength: CORRIDOR_LENGTH,
+    });
+  };
+  const applyDormantRef = useRef(applyDormantTargets);
+  applyDormantRef.current = applyDormantTargets;
+
   const [targetsVersion, setTargetsVersion] = useState(0);
   useEffect(() => {
     if (!content) return;
@@ -660,9 +826,23 @@ export function CrowdMesh() {
         lens: d.lente === NO_LENS ? null : d.lente,
       });
     }
+    corridorAnchor.current.valid = false; // formação/follow mudou → re-ancora
+    applyDormantRef.current();
     sim.commitTargets();
     setTargetsVersion((v) => v + 1);
-  }, [content, sim, demoCls, d.mapScale, d.lente, s.contRaio]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    content,
+    sim,
+    demoCls,
+    d.mapScale,
+    d.lente,
+    s.contRaio,
+    c.grid,
+    fo.formation,
+    fo.spacing,
+    following,
+  ]);
 
   useFrame((_, delta) => {
     mouseTarget.mode = s.mouseModo;
@@ -691,8 +871,112 @@ export function CrowdMesh() {
     sim.u.dormantWanderMul.value = e.dormWander;
     // Gravidade: lente ativa (elemento OU demográfica) força o seek mesmo com
     // o toggle desligado — aplicar uma lente sem gravidade não teria efeito.
-    const seekOn = content && (d.gravidade || d.lente !== NO_LENS || demoCls);
+    // Formação ativa idem (os dormentes precisam do seek para FORMAR).
+    const formationSeek =
+      fo.formation !== "wander" &&
+      !(fo.formation === "corridor" && following === null);
+    const seekOn =
+      content && (d.gravidade || d.lente !== NO_LENS || demoCls || formationSeek);
     sim.u.seekWeight.value = seekOn ? d.gravForca : 0;
+
+    // --- pessoa seguida: posição do espelho + trilha p/ heading ---
+    const dtc = Math.min(delta, 1 / 20); // mesmo clamp do dt da sim
+    followValid.current =
+      following !== null &&
+      positionMirror.getPosSmooth(following, followPos.current);
+    if (following !== trailFor.current) {
+      // Troca de pessoa: a trilha da anterior não é rumo da nova.
+      trailFor.current = following;
+      headTrail.current.length = 0;
+    }
+    if (followValid.current) {
+      const trail = headTrail.current;
+      const now = performance.now();
+      if (trail.length === 0 || now - trail[trail.length - 1].t >= 250) {
+        trail.push({ t: now, x: followPos.current.x, z: followPos.current.z });
+        while (trail.length > 0 && now - trail[0].t > 2000) trail.shift();
+      }
+    } else {
+      headTrail.current.length = 0;
+    }
+
+    // --- campo do ativo: uniforms por frame (zero custo de buffer) ---
+    const fieldActive = af.fieldOn && followValid.current;
+    sim.u.fieldOn.value = fieldActive ? 1 : 0;
+    sim.u.fieldAgent.value = fieldActive ? (following as number) : -1;
+    if (fieldActive) sim.u.fieldPos.value.copy(followPos.current);
+    sim.u.fieldRadius.value = af.fieldRadius;
+    sim.u.fieldStrength.value = af.fieldStrength;
+    sim.u.yieldWeight.value = af.yieldW;
+
+    // --- corridor dinâmico: checa a cada ~0,8 s se precisa RE-ANCORAR ---
+    // (nunca por frame: alvo que persegue a pessoa vira turba). Re-ancora
+    // quando ela atravessou ~35% do corredor, saiu pela lateral ou o rumo
+    // virou de verdade (>~70°).
+    corridorClock.current += delta;
+    if (
+      fo.formation === "corridor" &&
+      followValid.current &&
+      content &&
+      corridorClock.current >= 0.8
+    ) {
+      corridorClock.current = 0;
+      const a = corridorAnchor.current;
+      let stale = !a.valid;
+      if (a.valid) {
+        const rx = followPos.current.x - a.x;
+        const rz = followPos.current.z - a.z;
+        const along = rx * a.hx + rz * a.hz;
+        const side = Math.abs(rx * -a.hz + rz * a.hx);
+        // Rumo NOVO só conta se a pessoa está de fato ANDANDO (trilha ≥
+        // 1,2 m/2 s) — o fallback câmera→pessoa gira com a órbita e não
+        // pode re-ancorar sozinho um corredor já de pé.
+        const trail = headTrail.current;
+        let turned = false;
+        if (trail.length >= 2) {
+          const tx = trail[trail.length - 1].x - trail[0].x;
+          const tz = trail[trail.length - 1].z - trail[0].z;
+          const tl = Math.hypot(tx, tz);
+          turned = tl > 1.2 && (tx / tl) * a.hx + (tz / tl) * a.hz < 0.35;
+        }
+        stale =
+          Math.abs(along) > CORRIDOR_LENGTH * 0.35 ||
+          side > CORRIDOR_LENGTH * 0.3 ||
+          turned;
+      }
+      if (stale) {
+        a.valid = false;
+        applyDormantRef.current();
+        sim.commitTargets();
+        setTargetsVersion((tv) => tv + 1);
+      }
+    }
+
+    // --- palco/esteira (experimental): pino + scroll do chão ---
+    // Exige follow ativo E estados automáticos (o walking do pino é forçado
+    // pela state machine). O heading congela na entrada do modo.
+    const stageActive = st.stage && followValid.current && e.auto;
+    if (stageActive && !stageWasOn.current) {
+      effectiveHeading(stageHeading.current);
+    }
+    stageWasOn.current = stageActive;
+    sim.u.stageOn.value = stageActive ? 1 : 0;
+    sim.u.stageAgent.value = stageActive ? (following as number) : -1;
+    sim.u.stageSpeed.value = st.stageSpeed;
+    sim.u.stageHalfLen.value = st.stageWindow / 2;
+    sim.u.stageHalfWid.value = Math.max(st.stageWindow / 4, 4);
+    if (stageActive) {
+      sim.u.stageCenter.value.copy(followPos.current);
+      (sim.u.stageHeading.value as THREE.Vector2).set(
+        stageHeading.current.x,
+        stageHeading.current.y,
+      );
+      // O chão anda para TRÁS do heading: scroll do domínio do noise (e do
+      // grid TSL) avança a stageSpeed — carregados e relevo recuam juntos.
+      scrollAccum.current.x += stageHeading.current.x * st.stageSpeed * dtc;
+      scrollAccum.current.y += stageHeading.current.y * st.stageSpeed * dtc;
+      setTerrainScroll(scrollAccum.current.x, scrollAccum.current.y);
+    }
     if (import.meta.env.DEV) {
       const w = window as unknown as Record<string, unknown>;
       w.__limiarSim = {
@@ -703,6 +987,17 @@ export function CrowdMesh() {
         tgt0: Array.from(sim.targetsArray.slice(0, 4)),
         tgt45: Array.from(sim.targetsArray.slice(45 * 4, 45 * 4 + 4)),
         tgtVersion: (sim.targets.value as THREE.BufferAttribute).version,
+      };
+      // Sondas das mecânicas de 2026-07-14 (campo/formações/palco).
+      w.__limiarReadTargets = (i0: number, n: number) =>
+        Array.from(sim.targetsArray.slice(i0 * 4, (i0 + n) * 4));
+      w.__limiarStageState = {
+        formation: fo.formation,
+        fieldOn: fieldActive ? 1 : 0,
+        stageOn: stageActive ? 1 : 0,
+        scroll: { ...getTerrainScroll() },
+        heading: [stageHeading.current.x, stageHeading.current.y],
+        followPos: followValid.current ? followPos.current.toArray() : null,
       };
       w.__limiarReadPositions = async (n: number) => {
         const buf = await gl.getArrayBufferAsync(sim.positions.value);
