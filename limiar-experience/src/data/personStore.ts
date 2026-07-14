@@ -44,6 +44,17 @@ export interface PersonElement {
   quotes: PersonElementQuote[];
 }
 
+/**
+ * Bloco `audio` do export (Voz v1): nomes dos arquivos de corte.
+ * `beats[i]` alinha 1:1 POR POSIÇÃO com o array `beats` da pessoa;
+ * `quotes[key][j]` alinha por posição com `elements[key].quotes[j]`.
+ */
+export interface PersonAudio {
+  beats: { file: string }[];
+  quotes?: Record<string, string[]>;
+  whisper?: string;
+}
+
 export interface PersonDetail {
   id: string;
   display_name: string;
@@ -57,6 +68,8 @@ export interface PersonDetail {
   beats: PersonBeat[];
   /** Elementos com quotes (t_norm) — o modo "elemento" da timeline lê daqui. */
   elements?: PersonElement[];
+  /** Arquivos de corte de áudio (ver src/audio/cuts.ts). */
+  audio?: PersonAudio;
   timeline_norm: { total_s: number };
 }
 
@@ -65,7 +78,7 @@ export interface PersonStoreState {
   person: PersonDetail | null;
   /** id em exibição (para descartar respostas atrasadas de outra pessoa). */
   personId: string | null;
-  /** beat_index selecionado na timeline (v1 visual; áudio na próxima etapa). */
+  /** beat_index selecionado na timeline (Voz v1: clique também toca o corte). */
   activeBeat: number | null;
 }
 

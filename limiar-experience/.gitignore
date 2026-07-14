@@ -8,5 +8,7 @@ shots/
 public/vat/*/
 # cópia do acervo/export (npm run sync-content) — nunca versionar
 public/content/
+# staging local do audio-sync (opus re-encodado; default é /tmp/limiar-opus)
+.audio-opus/
 .vercel
 .env*

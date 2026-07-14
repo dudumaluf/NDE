@@ -36,11 +36,29 @@ Detalhes que importam:
   existe e o `sync-content` copia os JSONs frescos) e só o `dist/` (~31 MB)
   sobe. Deploy por git/CI não funcionaria hoje: `public/content/` e
   `public/vat/*/` são gitignorados e não existem no servidor.
-- **O áudio (2,7 GB) fica fora por ora** — o app online mostra a multidão,
-  núcleos, lentes e fios com os dados reais, mas sem os cortes de voz
-  (decisão do M4: streaming direto vs cópia parcial).
 - O link com o projeto Vercel vive em `.vercel/` (gitignorado). Em máquina
   nova: `npx vercel link --yes --project limiar-prototipo` uma vez.
+
+## Áudio (a voz — Voz v1)
+
+Os cortes de voz NÃO são servidos pelo Vercel: vivem no bucket público
+`audio-cortes` do Supabase (projeto NDE `knqseuknuihqwlkfgesi`), re-encodados
+de mp3 96k para **Opus mono 32 kbps** (~1/3 do tamanho; pipeline em
+`scripts/audio-sync.mjs` — idempotente, re-rodável após cada lote do acervo;
+exige abrir a policy temporária de escrita antes, ver doc 03 §14.8).
+
+Resolução da BASE de URL dos cortes (em `src/audio/cuts.ts`):
+
+1. `?audio=<base>` (query param — testes/overrides pontuais);
+2. `VITE_AUDIO_BASE` (`.env`/`.env.local` — ambiente de build);
+3. default: `https://knqseuknuihqwlkfgesi.supabase.co/storage/v1/object/public/audio-cortes`.
+
+O app baixa `<base>/_index.json` (gerado pelo audio-sync) UMA vez para saber
+quais cortes existem — ponto sem corte vira "sem áudio ainda" no hover, sem
+404 no console. Clique num ponto da timeline do follow toca o corte
+(crossfade na troca, ESC para, mute à direita dos modos da timeline).
+Formato Opus/Ogg: Chrome/Edge/Firefox ok; Safari só ≥ 17.4 (macOS 14.4+) —
+limitação aceita do protótipo.
 
 ## Estado atual — M0 ✔ · morph seamless ✔ · M1 (multidão) ✔ · M2 (simulação) ✔
 

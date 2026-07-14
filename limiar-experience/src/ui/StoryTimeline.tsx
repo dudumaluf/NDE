@@ -13,6 +13,16 @@ import { useLegend } from "./legendStore";
 import { cssColor, demoRampColor } from "../data/palette";
 import { computeStations } from "./timelineStations";
 import { prefStr } from "../lib/prefs";
+import {
+  beatCut,
+  ensureAudioIndex,
+  quoteCut,
+  setPlaying,
+  toggleMuted,
+  useAudioIndex,
+  type Cut,
+} from "../audio/cuts";
+import * as player from "../audio/player";
 
 /**
  * Timeline da história (M4e; redesenhada 2026-07-14 com o feedback do Dudu:
@@ -38,8 +48,17 @@ import { prefStr } from "../lib/prefs";
  *     com crossfade (padrão BottomPhrase da Legend).
  *
  * Mantidos: linha SVG com leve atração ao mouse (eco do menu cables, mais
- * sutil), pontos coloridos por valência (fria→quente), anel na virada,
- * clique seleciona o beat (v1 visual; áudio é a próxima etapa).
+ * sutil), pontos coloridos por valência (fria→quente), anel na virada.
+ *
+ * VOZ v1 (2026-07-14, doc 04 §4.2): clicar num ponto TOCA o corte real da
+ * pessoa (estação/momento → corte do beat; ponto de elemento → corte da
+ * quote, ou o do beat que a contém se a quote não subiu). Enquanto toca, o
+ * ponto pulsa discretamente e ganha um ANEL DE PROGRESSO que se preenche
+ * (SVG puro — nada de player chunky). Clicar de novo para; trocar de ponto
+ * crossfada (player singleton, fades ~120 ms); ESC/sair do follow para o
+ * áudio. Ponto sem corte no bucket = sem pulso + "sem áudio ainda" no hover
+ * (estado vazio honesto, decidido pelo _index.json do bucket — ver
+ * src/audio/cuts.ts). Mute minúsculo à direita dos modos.
  */
 
 const FONT_STACK =
@@ -90,6 +109,8 @@ interface TimelineDot {
   info: string;
   /** beat_index selecionável no clique (quote usa o beat que a contém). */
   beatIndex: number | null;
+  /** Corte de áudio deste ponto (null = "sem áudio ainda", honesto). */
+  cut: Cut | null;
 }
 
 /** Linha acima da timeline: resumo no hover com crossfade (padrão Legend). */
@@ -146,6 +167,9 @@ export function StoryTimeline() {
   const person = usePerson((s) => s.person);
   const activeBeat = usePerson((s) => s.activeBeat);
   const elementLens = useLegend((s) => s.elementLens);
+  const audioIndex = useAudioIndex((s) => s.index);
+  const playing = useAudioIndex((s) => s.playing);
+  const muted = useAudioIndex((s) => s.muted);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
 
   // Modo do filtro: controle leva (grupo Scene, path estável p/ prefs) que os
@@ -159,12 +183,19 @@ export function StoryTimeline() {
     },
   }));
 
-  // Entrar/sair do follow carrega/limpa a pessoa (fetch com cache).
+  // Entrar/sair do follow carrega/limpa a pessoa (fetch com cache) — e o
+  // áudio segue a mesma regra: trocar/sair de pessoa cala a voz (ESC solta o
+  // follow no FollowCamera, o cleanup daqui faz o resto).
   useEffect(() => {
     if (following !== null && content) {
       const p = content.manifest.people[following];
       if (p) loadPerson(p.id);
-      return () => clearPerson();
+      ensureAudioIndex();
+      return () => {
+        clearPerson();
+        void player.stop();
+        setPlaying(null);
+      };
     }
   }, [following, content]);
 
@@ -224,6 +255,7 @@ export function StoryTimeline() {
           isVirada: st.isVirada,
           info: (e?.label ? `${e.label} — ` : "") + st.beat.summary,
           beatIndex: st.beat.beat_index,
+          cut: beatCut(person, st.beat.beat_index, audioIndex),
         };
       });
     }
@@ -241,6 +273,7 @@ export function StoryTimeline() {
           isVirada: person.arc.virada === b.beat_index,
           info: (e?.label ? `${e.label} — ` : "") + b.summary,
           beatIndex: b.beat_index,
+          cut: beatCut(person, b.beat_index, audioIndex),
         };
       });
     }
@@ -248,25 +281,35 @@ export function StoryTimeline() {
     // "element": as quotes (com t_norm) do elemento da lente ativa nesta
     // história — os pontos onde AQUELE elemento acontece. Pessoa sem o
     // elemento = linha vazia (honesto: ela não conta sobre isso).
+    // O índice ORIGINAL da quote (pré-ordenação) é o que casa com os
+    // arquivos q_<key>_<i> do bucket — guardado antes do sort.
     const el = person.elements?.find((e) => e.key === elementLens);
-    const quotes = [...(el?.quotes ?? [])].sort((a, b) => a.t_norm - b.t_norm);
+    const quotes = (el?.quotes ?? [])
+      .map((q, qi) => ({ q, qi }))
+      .sort((a, b) => a.q.t_norm - b.q.t_norm);
     const containing = (t: number): PersonBeat | undefined =>
       person.beats.find((b) => t >= b.t_norm && t <= b.t_norm_end) ??
       [...person.beats].sort(
         (a, b) => Math.abs(a.t_norm - t) - Math.abs(b.t_norm - t),
       )[0];
-    return quotes.map((q, i) => ({
-      key: `q:${i}`,
-      x: xOf(q.t_norm),
-      color: ELEMENT_DOT,
-      r: 3.2,
-      label: null,
-      labelRow: 0,
-      isVirada: false,
-      info: `“${q.text}”`,
-      beatIndex: containing(q.t_norm)?.beat_index ?? null,
-    }));
-  }, [person, shownMode, elementLens, emotion]);
+    return quotes.map(({ q, qi }, i) => {
+      const beatIndex = containing(q.t_norm)?.beat_index ?? null;
+      return {
+        key: `q:${i}`,
+        x: xOf(q.t_norm),
+        color: ELEMENT_DOT,
+        r: 3.2,
+        label: null,
+        labelRow: 0,
+        isVirada: false,
+        info: `“${q.text}”`,
+        beatIndex,
+        cut: elementLens
+          ? quoteCut(person, elementLens, qi, beatIndex, audioIndex)
+          : null,
+      };
+    });
+  }, [person, shownMode, elementLens, emotion, audioIndex]);
 
   // --- linha atraída pelo mouse (eco do menu cables), mais sutil que a v1 ---
   const svgRef = useRef<SVGSVGElement>(null);
@@ -297,6 +340,8 @@ export function StoryTimeline() {
         pathRef.current.setAttribute("d", "M" + pts.join(" L"));
       }
       const svg = svgRef.current;
+      const now = performance.now();
+      const audio = player.state();
       if (svg) {
         svg.querySelectorAll<SVGElement>("[data-dot]").forEach((el) => {
           const x = Number(el.dataset.x);
@@ -307,11 +352,50 @@ export function StoryTimeline() {
           el.setAttribute("y1", (y - 3).toFixed(2));
           el.setAttribute("y2", (y + 3).toFixed(2));
         });
+        // Voz: pulso discreto (respiração de opacidade do halo) + anel de
+        // progresso que se preenche — imperativos como a onda, zero re-render.
+        svg.querySelectorAll<SVGElement>("[data-halo]").forEach((el) => {
+          el.setAttribute(
+            "opacity",
+            (0.16 + 0.1 * Math.sin((now / 1000) * Math.PI * 2 * 1.1)).toFixed(3),
+          );
+        });
+        svg.querySelectorAll<SVGElement>("[data-ring]").forEach((el) => {
+          const x = Number(el.dataset.x);
+          const y = yAt(x);
+          const c = Number(el.dataset.c);
+          const k = audio?.duration ? audio.progress : 0;
+          el.setAttribute("stroke-dashoffset", (c * (1 - k)).toFixed(2));
+          el.setAttribute("transform", `rotate(-90 ${x} ${y.toFixed(2)})`);
+        });
+      }
+      // Gancho dev p/ o próximo marco (cair na morte) e a sonda headless:
+      // o beat tocando agora + posição no corte.
+      if (import.meta.env.DEV) {
+        const pl = useAudioIndex.getState().playing;
+        (window as unknown as Record<string, unknown>).__limiarAudioBeat =
+          audio && pl && audio.playing
+            ? {
+                personId: pl.personId,
+                beatIndex: pl.beatIndex,
+                file: pl.file,
+                url: audio.url,
+                t: audio.t,
+                duration: audio.duration,
+                progress: audio.progress,
+              }
+            : null;
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      // Sair do follow desmonta o loop ANTES do stop() assíncrono terminar —
+      // o gancho dev precisa zerar aqui, senão fica preso no último frame.
+      if (import.meta.env.DEV)
+        (window as unknown as Record<string, unknown>).__limiarAudioBeat = null;
+    };
   }, [person]);
 
   if (following === null || !person || !content) return null;
@@ -325,7 +409,8 @@ export function StoryTimeline() {
   const hoveredDot =
     hoverKey !== null ? dots.find((d) => d.key === hoverKey) : undefined;
   const infoText = hoveredDot
-    ? hoveredDot.info
+    ? hoveredDot.info +
+      (hoveredDot.cut === null && audioIndex !== null ? " · sem áudio ainda" : "")
     : hoverKey === "in" && person.arc.entrada
       ? person.arc.entrada.resumo
       : hoverKey === "out" && person.arc.saida
@@ -333,6 +418,38 @@ export function StoryTimeline() {
         : activeBeat !== null
           ? (dots.find((d) => d.beatIndex === activeBeat)?.info ?? null)
           : null;
+
+  // Clique = consumo (Voz v1): toca/para/troca o corte. A última chamada
+  // vence dentro do player; aqui só decidimos a intenção.
+  const onDotClick = (d: TimelineDot) => {
+    if (d.beatIndex === null) return;
+    const isPlayingThis = playing !== null && d.cut !== null && playing.url === d.cut.url;
+    if (isPlayingThis) {
+      void player.stop();
+      setPlaying(null);
+      setActiveBeat(null);
+      return;
+    }
+    setActiveBeat(d.beatIndex);
+    if (!d.cut) {
+      // Sem corte no bucket: seleção visual apenas (e silêncio honesto).
+      void player.stop();
+      setPlaying(null);
+      return;
+    }
+    const cut = d.cut;
+    setPlaying(cut);
+    void player
+      .play(cut.url, {
+        onEnd: () => {
+          if (useAudioIndex.getState().playing?.url === cut.url) setPlaying(null);
+        },
+      })
+      .then((ok) => {
+        if (!ok && useAudioIndex.getState().playing?.url === cut.url)
+          setPlaying(null);
+      });
+  };
 
   const modeButton = (m: TimelineMode, label: string) => (
     <button
@@ -407,7 +524,7 @@ export function StoryTimeline() {
         <div
           style={{
             display: "flex",
-            alignItems: "baseline",
+            alignItems: "center",
             gap: 14,
             pointerEvents: "auto",
           }}
@@ -415,6 +532,42 @@ export function StoryTimeline() {
           {modeButton("stations", "estações")}
           {modeButton("all", "momentos")}
           {elementLabel && modeButton("element", elementLabel)}
+          {/* mute minúsculo (PT, discreto — a UI do visitante) */}
+          <button
+            onClick={() => toggleMuted()}
+            title={muted ? "ativar o som" : "silenciar"}
+            aria-label={muted ? "ativar o som" : "silenciar"}
+            style={{
+              all: "unset",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              opacity: muted ? 0.42 : 0.75,
+              transition: "opacity 0.25s ease",
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M4 9.5v5h3.5L13 19V5L7.5 9.5H4z"
+                fill="rgba(235, 230, 222, 0.9)"
+              />
+              {muted ? (
+                <path
+                  d="M16 9l5 6M21 9l-5 6"
+                  stroke="rgba(235, 230, 222, 0.9)"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              ) : (
+                <path
+                  d="M16 8.5a5 5 0 010 7M18.4 6.5a8 8 0 010 11"
+                  stroke="rgba(235, 230, 222, 0.9)"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              )}
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -514,6 +667,10 @@ export function StoryTimeline() {
             const active =
               d.beatIndex !== null && activeBeat === d.beatIndex;
             const hovered = hoverKey === d.key;
+            const isPlaying =
+              playing !== null && d.cut !== null && playing.url === d.cut.url;
+            const ringR = d.r + 3.6;
+            const ringC = 2 * Math.PI * ringR;
             return (
               <g key={d.key}>
                 {d.isVirada && (
@@ -528,6 +685,20 @@ export function StoryTimeline() {
                     strokeWidth="0.8"
                   />
                 )}
+                {/* voz: halo que respira enquanto o corte toca */}
+                {isPlaying && (
+                  <circle
+                    data-dot
+                    data-halo
+                    data-x={d.x}
+                    cx={d.x}
+                    cy={LINE_Y}
+                    r={d.r + 2.4}
+                    fill={d.color}
+                    opacity={0.2}
+                    pointerEvents="none"
+                  />
+                )}
                 <circle
                   data-dot
                   data-x={d.x}
@@ -537,10 +708,31 @@ export function StoryTimeline() {
                   fill={d.color}
                   style={{ transition: "r 0.18s ease" }}
                 />
+                {/* voz: o ponto vira um anel que se preenche (progresso) */}
+                {isPlaying && (
+                  <circle
+                    data-ring
+                    data-x={d.x}
+                    data-c={ringC.toFixed(2)}
+                    cx={d.x}
+                    cy={LINE_Y}
+                    r={ringR}
+                    fill="none"
+                    stroke={d.color}
+                    strokeWidth="1.1"
+                    strokeLinecap="round"
+                    strokeDasharray={ringC.toFixed(2)}
+                    strokeDashoffset={ringC.toFixed(2)}
+                    transform={`rotate(-90 ${d.x} ${LINE_Y})`}
+                    opacity={0.85}
+                    pointerEvents="none"
+                  />
+                )}
                 {/* alvo de clique generoso (o ponto é pequeno) */}
                 <circle
                   data-dot
                   data-x={d.x}
+                  data-dot-click={d.key}
                   cx={d.x}
                   cy={LINE_Y}
                   r={10}
@@ -551,12 +743,7 @@ export function StoryTimeline() {
                   onMouseLeave={() =>
                     setHoverKey((h) => (h === d.key ? null : h))
                   }
-                  onClick={() => {
-                    if (d.beatIndex === null) return;
-                    setActiveBeat(
-                      activeBeat === d.beatIndex ? null : d.beatIndex,
-                    );
-                  }}
+                  onClick={() => onDotClick(d)}
                 />
                 {d.label && (
                   <text
