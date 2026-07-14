@@ -489,3 +489,68 @@ heightfield — mesma h(x,z), re-mapeada em coordenadas cilíndricas no
 positionNode do chão + curvatura no update pass da sim; o wrap modular
 dos dormentes generaliza para instâncias de cenário (objetos em loop por
 módulo+offset). Ver doc 04 §5.10.
+
+### 14.8 A voz — pipeline Opus→Supabase e o player da timeline (Voz v1, 2026-07-14)
+
+O áudio saiu do "pendente desde o M3" e entrou no ar. Doc 04 §4.2 item 4
+tem o UX; aqui, os fatos técnicos e o ritual de operação.
+
+**Mapeamento JSON→arquivo (fonte da verdade, verificado nas 86 pessoas):**
+em `people/<id>.json`, o bloco `audio` referencia os cortes de
+`acervo/export/audio/<id>/`:
+
+- `audio.beats[i].file` alinha **1:1 por posição** com `beats[i]`
+  (0 descasamentos em 86; nome = `beat_{beat_index:03d}_{type}.mp3` — o
+  índice do NOME é o `beat_index`, que pula números quando um beat não
+  ganhou corte);
+- `audio.quotes[key][j]` alinha por posição com `elements[key].quotes[j]`
+  (4181 arquivos, 0 descasamentos; nome = `q_{key}_{j}.mp3`). Atenção:
+  68 elementos têm quotes fora de ordem de `t_norm` — quem ordena para
+  desenhar (timeline) precisa guardar o índice ORIGINAL para resolver o
+  arquivo;
+- `audio.whisper` = `whisper.mp3` (reservado para a Sintonia §5.1).
+- O disco pode ter ÓRFÃOS de exports antigos (9 beats de silvana-pires no
+  lote 4) — por isso o sync varre os JSONs, nunca o `ls`.
+
+**Compressão** (`scripts/audio-sync.mjs`): mp3 96 kbps mono → **Opus mono
+32 kbps VBR `-application audio`** (~34% do tamanho; 4,65 GB → 1,58 GB nos
+6.644 cortes). Escolha medida em 4 cortes de fala (asdr vs original):
+32k audio-mode SDR 16,2–18,3 dB · 24k audio-mode 14,9–16,2 dB · os modos
+`voip` pontuam MUITO pior neste material já comprimido (7–11 dB) — e como
+a org está no plano Pro (100 GB), os ~0,4 GB extras do 32k não custam
+nada. Staging fora do repo (`/tmp/limiar-opus` — em `~/Documents` o
+iCloud evictaria milhares de arquivos pequenos), escrita atômica
+(tmp+rename), ~6 workers ffmpeg = ~25 min o corpus inteiro.
+
+**Hospedagem**: bucket público `audio-cortes` no projeto Supabase NDE
+(`knqseuknuihqwlkfgesi`, org no plano Pro). Leitura pública pelo endpoint
+`/storage/v1/object/public/audio-cortes/<pessoa>/<corte>.opus` (bucket
+`public=true` + policy `voz anon read audio-cortes`). **Escrita fica
+FECHADA**: o upload usa a anon key com policies TEMPORÁRIAS
+(`voz TEMP anon insert/update audio-cortes` em `storage.objects`), abertas
+via MCP/SQL antes do sync e DERRUBADAS ao final — ritual de re-sync após
+um lote novo do acervo:
+
+1. `create policy "voz TEMP anon insert audio-cortes" on storage.objects
+   for insert to anon with check (bucket_id = 'audio-cortes');` (+ a
+   gêmea de update) — via MCP `execute_sql`;
+2. `node scripts/audio-sync.mjs --upload` (idempotente: comprime só o que
+   falta no staging, sobe só o que falta no bucket, regenera o
+   `_index.json` global no root do bucket);
+3. `drop policy` das duas TEMP (a de leitura fica). Validar com
+   `curl -I` num corte (200 + content-type audio/ogg).
+
+**Player no app** (`src/audio/`): `player.ts` = um `Audio()` singleton com
+fades de ~120 ms por rampa de volume em rAF (sem WebAudio) e guarda de
+token ("a última chamada vence" — cliques rápidos nunca sobrepõem vozes);
+`cuts.ts` = resolução de URL (base: `?audio=` > `VITE_AUDIO_BASE` >
+bucket; ver README do app) + disponibilidade via `_index.json` (1 fetch;
+ponto sem corte = "sem áudio ainda", sem 404) + zustand do que toca.
+Anel de progresso e pulso são atualizados IMPERATIVAMENTE no rAF da onda
+da timeline (zero re-render por frame — padrão da atração ao mouse).
+Opus/Ogg toca em Chrome/Edge/Firefox; Safari só ≥ 17.4 — aceito no
+protótipo. Sonda: `scripts/voz-probe.mjs` (clique real no SVG headless
+com `--autoplay-policy=no-user-gesture-required`, valida URL contra o
+mapeamento, t avançando, troca/para/ESC, screenshots `shots/voz-*.png`).
+Gancho dev p/ o próximo marco: `window.__limiarAudioBeat` = {personId,
+beatIndex, file, url, t, duration, progress} enquanto toca.

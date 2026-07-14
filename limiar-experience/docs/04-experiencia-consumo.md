@@ -175,12 +175,40 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
      linha acima com crossfade (padrão da frase da Legenda). Atração da
      linha ao mouse mantida, mais sutil (é o charme, não o protagonista).
    - Anel na virada, cores por valência (fria→quente) e clique-seleciona
-     continuam. **v1 é visual** — tocar o corte de áudio do beat é a
-     próxima etapa (Supabase, §5.2).
+     continuam. ~~v1 é visual~~ → **a voz entrou** (Voz v1, 2026-07-14,
+     item 4 abaixo).
 
-Pendências assumidas: áudio (a Sintonia §5.1 e o corte por beat), e o
-espelho de posições (doc 03 §14.6) como limite conhecido — se a latência
-de readback incomodar em multidões maiores, o upgrade é picking GPU.
+4. **A voz entra — clique consome o corte (Voz v1, 2026-07-14).** Todo
+   ponto da timeline agora TOCA o áudio real da pessoa: estação/momento →
+   o corte do beat; ponto de elemento → o corte da própria quote (se
+   existir no bucket; senão o corte do beat que a contém). A gramática do
+   consumo:
+
+   - **Um som por vez** (o mesmo princípio da Legenda desvanecer no
+     follow): player singleton com fades de ~120 ms — trocar de ponto
+     crossfada, clicar no ponto ativo para, ESC/sair do follow cala a voz.
+   - **O ponto é o player**: enquanto toca, o ponto pulsa discretamente
+     (halo que respira) e ganha um **anel de progresso** que se preenche
+     ao redor (SVG fino — nada de barra chunky; estética da Legenda).
+     Nenhuma UI nova além de um **mute minúsculo** à direita dos
+     texto-botões de modo (PT, discreto: "silenciar").
+   - **Estados vazios honestos**: ponto sem corte no bucket não pulsa e o
+     hover diz "sem áudio ainda" — decidido por um `_index.json` que o
+     app baixa uma vez (nada de 404 no console, nada de play que falha).
+   - **Custo/hospedagem**: os cortes saíram do deploy (4,4 GB de mp3
+     ficariam fora do Vercel) e vivem no Supabase Storage (projeto NDE,
+     bucket público `audio-cortes`), re-encodados em **Opus mono
+     32 kbps** → **1,58 GB** os 6.644 cortes do corpus de 86. Org no
+     plano Pro (100 GB inclusos) — folga de sobra para os próximos lotes;
+     pipeline idempotente re-rodável por lote (doc 03 §14.8).
+   - Semente do próximo marco: o app expõe `window.__limiarAudioBeat`
+     (dev) com o beat tocando + posição no corte — é o gancho que o
+     "cair na morte" (beat de evento_morte dirigindo a cena) vai ler.
+
+Pendências assumidas: a Sintonia (§5.1, hover-rádio com os whispers — os
+arquivos já estão no bucket), o Coro (§5.2) e o espelho de posições (doc 03
+§14.6) como limite conhecido — se a latência de readback incomodar em
+multidões maiores, o upgrade é picking GPU.
 
 ## 5. As mecânicas novas (batizadas em 2026-07-10 e 2026-07-12)
 
