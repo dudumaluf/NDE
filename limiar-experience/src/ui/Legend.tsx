@@ -5,6 +5,7 @@ import { clusterColor, cssColor, desaturate } from "../data/palette";
 import { qpNum, qpStr } from "../lib/urlParams";
 import { triggerLegendFlash, useLegend, type LegendFlash } from "./legendStore";
 import { useAppearance } from "./appearanceStore";
+import { useFollow } from "./followStore";
 
 /**
  * Legenda da experiência (M3.5) — a primeira peça da UI REAL do LIMIAR,
@@ -164,6 +165,9 @@ export function Legend() {
   const flash = useLegend((s) => s.flash);
   // Duração do destaque vem do grupo Aparência (slider "destaque: duração").
   const destaqueDuracao = useAppearance((s) => s.destaqueDuracao);
+  // Uma voz por vez (doc 04 §1.1): em follow, a timeline da história fala —
+  // a legenda desvanece (continua montada; volta ao sair, sem re-fade-in).
+  const inFollow = useFollow((s) => s.following !== null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60);
@@ -215,9 +219,10 @@ export function Legend() {
           border: "1px solid rgba(255, 252, 245, 0.07)",
           boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
           fontFamily: FONT_STACK,
-          opacity: mounted ? 1 : 0,
+          opacity: mounted && !inFollow ? 1 : 0,
           transform: mounted ? "translateY(0)" : "translateY(10px)",
           transition: "opacity 0.6s ease, transform 0.6s ease",
+          pointerEvents: inFollow ? "none" : "auto",
           zIndex: 30,
         }}
       >
@@ -299,7 +304,8 @@ export function Legend() {
           })}
         </div>
       </div>
-      <BottomPhrase phrase={model.phrase} />
+      {/* a frase do bottom também cede o palco à timeline durante o follow */}
+      <BottomPhrase phrase={inFollow ? null : model.phrase} />
     </>
   );
 }

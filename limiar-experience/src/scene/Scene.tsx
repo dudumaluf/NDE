@@ -68,6 +68,7 @@ export function Scene() {
         rotation-x={-Math.PI / 2}
         onPointerMove={(e) => {
           mouseTarget.point.copy(e.point);
+          mouseTarget.moved = true;
         }}
       >
         <circleGeometry args={[80, 64]} />

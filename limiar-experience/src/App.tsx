@@ -7,6 +7,7 @@ import { PostFX } from "./render/post/PostFX";
 import { qpBool, qpStr } from "./lib/urlParams";
 import { useContent } from "./data/contentStore";
 import { Legend } from "./ui/Legend";
+import { StoryTimeline } from "./ui/StoryTimeline";
 import { AppearanceControls } from "./ui/AppearanceControls";
 import { PrefsControls } from "./ui/PrefsControls";
 
@@ -121,6 +122,7 @@ export default function App() {
         {fps !== null ? ` · ${fps.toFixed(0)} fps` : ""}
       </div>
       <Legend />
+      <StoryTimeline />
       {content && (
         <div
           style={{

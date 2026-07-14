@@ -117,7 +117,7 @@ export function PersonHover({
     let hovered = -1;
     if (forced >= 0 && forced < people.length) {
       hovered = positionMirror.getPos(forced, tmp) ? forced : -1;
-    } else if (positionMirror.ready) {
+    } else if (positionMirror.ready && mouseTarget.moved) {
       let best = HOVER_RADIUS * HOVER_RADIUS;
       const mx = mouseTarget.point.x;
       const mz = mouseTarget.point.z;
