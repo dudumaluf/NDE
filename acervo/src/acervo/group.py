@@ -102,7 +102,12 @@ def parse_title(title: str) -> dict:
 
 def is_testimony(title: str) -> bool:
     """Filtro 'é depoimento?' — vídeos institucionais ficam de fora."""
-    return re.search(r"\b(?:eqm|nde)s?\b", norm(title)) is not None
+    t = norm(title)
+    return (
+        re.search(r"\b(?:eqm|nde)s?\b", t) is not None
+        or re.search(r"experiencia (?:de )?quase[ -]morte|near[ -]death experience", t)
+        is not None
+    )
 
 
 def _name_key(name: str) -> str:

@@ -59,6 +59,12 @@ def fetch_audio_and_meta(video_id: str, dest_dir: Path, audio_format: str = "m4a
         "outtmpl": str(dest_dir / "audio.%(ext)s"),
         "writethumbnail": True,
         "noplaylist": True,
+        # anti-throttle/timeouts do googlevideo (lote 5: 4 vídeos travavam
+        # com "read operation timed out"): chunks re-abrem a conexão
+        "socket_timeout": 30,
+        "retries": 15,
+        "fragment_retries": 15,
+        "http_chunk_size": 10 * 1024 * 1024,
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
