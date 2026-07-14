@@ -554,3 +554,92 @@ com `--autoplay-policy=no-user-gesture-required`, valida URL contra o
 mapeamento, t avançando, troca/para/ESC, screenshots `shots/voz-*.png`).
 Gancho dev p/ o próximo marco: `window.__limiarAudioBeat` = {personId,
 beatIndex, file, url, t, duration, progress} enquanto toca.
+
+### 14.9 Mundo-toro, esteira universal, leme e story field (2026-07-14b)
+
+O adendo do Dudu virou **um sistema só**: o follow padrão pina a pessoa e
+move o mundo; o mundo é um toro; o mouse é o leme. Fatos técnicos:
+
+**Wrap universal (mundo-toro).** Um período `L` compartilhado
+(`terrainU.wrapLen`, uniform lido pela sim E pelo heightfield;
+`setWorldWrap(L)` escreve GPU+JS) define a área canônica `[−L/2, L/2)²`
+(L = 2× contenção). No update pass (os **dois** backends — é aritmética
+local, sem vizinhos) a posição final passa por `wrapDeltaTSL` por eixo
+(`d − L·floor(d/L + 0,5)`); com wrap ON a **contenção radial desliga**.
+`wrapDeltaTSL` degenera em identidade com L=0 → aplica-se sempre, sem
+branch. **Deltas toroidais**: seek, mouse e campo do ativo usam
+`wrap2(delta)` — quem wrappa perto da borda busca o alvo/foge do campo
+pelo **menor caminho no toro**, nunca atravessa o mapa de volta.
+**Limitação documentada:** separação/vizinhança NÃO é toroidal (o loop
+O(N²) lê posições cruas — na costura, vizinhos do outro lado não empurram;
+invisível na prática). Sonda `coh-probe.mjs`: 45+ eventos de wrap, todos
+dentro de ½L, salto wrappado ~0,06 m (≈ passo normal) e estado preservado
+(taxa de troca no wrap = taxa base da state machine — o wrap só mexe em
+posição).
+
+**Tiling do noise (heightfield, paridade TSL+JS obrigatória).** Com wrap
+ON cada escala do value-noise é **tileada** no período L:
+`P = floor(L·freq + 0,5)` células por volta, frequência quantizada `P/L`
+para P inteiro; o wrap acontece no **índice da lattice** (cada canto por
+`wrapIdx = i − P·floor(i/P)`), então `h(x+L) = h(x)` EXATO na costura. O
+flatten (anfiteatro) passa a viver no domínio scrollado+wrappado (viaja com
+o mundo e repete por tile). `floor(v+0,5)`, nunca `round()` — half é
+implementation-defined na GPU; paridade primeiro. Com amplitude 0 (default)
+o custo existe mas o resultado é 0 (o `select` da GPU avalia os dois ramos).
+
+**Esteira universal (o follow padrão, kill-switch `stage`).** O pino
+(velocidade→0 + walking forçado enquanto a esteira anda; no deadzone do
+leme volta a idle, honesto) é o mesmo do M6; o que mudou: **todos os
+outros agentes** recuam `stageSpeed×dt` contra o `stageHeading` por
+deslocamento direto de posição no update pass (`(1−isPinned)`), e o
+`setTerrainScroll` avança no MESMO passo (u.dt = dtc, mesma velocidade →
+agentes e relevo em lockstep, sem deriva). Os alvos vivem no **ground
+frame**: o seek e a coesão dos fios subtraem o scroll (`tgt − scroll`)
+antes do delta toroidal — formações inteiras são carregadas e wrappam como
+todos. A janela local do palco (stageHalfLen/Wid) saiu — é o mundo inteiro
+agora.
+
+**Inércia do selecionado (fix do stutter).** `selInertia` (0–1, default
+0,15) escala a separação (WebGPU) E a contenção (dois backends)
+**recebidas** pelo agente seguido (`mix(1, selInertia, isSel)`) — os
+inativos cedem por inteiro, ele quase não desvia. `selAgent` é uniform
+separado do `fieldAgent` (a inércia vale com o campo on OU off). Sonda:
+seguido assentado em multidão densa (sep 3,5), com campo+inércia vs sem —
+reversões laterais e RMS do jitter caem (medido 8,0→4,0 mm, 3→1 reversões
+num run; WebGL2 sem separação só relata — a inércia da separação é inerte,
+só campo/contenção agem).
+
+**Leme (steering).** CPU calcula por frame `mouse − posição da pessoa` no
+chão; fora da deadzone (~1,5 m) gira o `stageHeading` (suavizado por
+`steer strength`) e ativa a esteira; dentro da deadzone `stageSpeed→0`
+(rampa suave). No kill-switch (treadmill OFF) o leme vira força direta
+(`steerDir` uniform: seek na direção + teto de velocidade próprio) que
+sobrepõe wander/gravidade só do seguido. Sonda: o rumo responde ao
+ponteiro (dot cai), o mundo scrolla ~2 m em 2,5 s, apontar no lado oposto
+inverte o rumo e apontar na pessoa para a viagem.
+
+**Story field (modo livre).** No loop de separação (WebGPU), além do
+`targets[j].w` do yield, lê-se `agentMeta[j].x` (flag com-história) do
+vizinho — o gate do self sai via `toVar()` (lição do yieldGain: inlinar
+re-avalia por iteração) e o fetch só ocorre no branch (dormente, modo on,
+dist < raio). Força radial atrai (`−story`) ou repele (`+story`) SÓ os
+dormentes, vinda dos com-história no `story field radius`; capped e fraca
+(alvos vencem). Uniform `storyMode` (−1/0/+1). Custo do fetch extra:
+dentro do ruído a 4096 (medido story off≈on). WebGL2: sem separação, sem
+story field.
+
+**FollowCamera (mudança mínima, sonda re-rodada).** Se a pessoa seguida
+wrappa (só no modo legado sem pino — no padrão ela é pinada e nunca cruza
+a borda), o rig inteiro (câmera+âncora+pessoa suavizada+target) desloca
+pelo mesmo múltiplo de L num frame — atravessa a costura sem chicote. Não
+age no retarget (a troca A→B viaja pela spring). `follow-probe` verde nos
+2 backends (lock ≤1,8 mm, sem snap, ESC limpo).
+
+**Debug areas (`?debugAreas=1`, `src/render/DebugAreas.tsx`).** Overlays
+Line/LineLoop→**Line** (o WebGPU do three NÃO suporta LineLoop — erro por
+frame derrubava a 2 fps; medido): quadrado da área canônica (segue o
+grid/relevo), círculo de contenção (só wrap OFF), anéis dos núcleos (raio
+de formação nos centroides UMAP×mapScale, no ground frame — fluem e
+wrappam), círculo do campo do ativo e seta do rumo da viagem. <20 objetos,
+posições por frame (barato). É a área canônica mostrada como o palco de
+tudo.

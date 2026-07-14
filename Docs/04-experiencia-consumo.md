@@ -452,6 +452,22 @@ irradia uma abertura.
   (`yield to travelers`, 1–3, default 2): a multidão **abre alas** para
   quem foi chamado. Só existe no WebGPU (o fallback WebGL2 não tem
   separação desde o M2 — limitação conhecida, doc 03 §10).
+- **Inércia do selecionado** (`selected inertia`, 0–1, default 0,15): a
+  separação e a contenção **recebidas** pela pessoa seguida são escaladas
+  por esse fator — 0 = ela atravessa a multidão como um trem (imune), 1 =
+  cede como todos. Os inativos sempre cedem por inteiro: a assimetria mata
+  o *stutter* do relato do Dudu (a pessoa seguida batendo nos da frente e
+  indo de um lado pro outro, quicando na contenção). A separação é WebGPU;
+  a contenção vale nos dois backends (e some quando o wrap universal está
+  ligado — §5.10).
+- **Story field** (`story field`, off/attract/repel, para o **modo livre**):
+  as testemunhas (com-história) irradiam um campo sobre os dormentes —
+  **attract** junta pequenos ajuntamentos ao redor de quem tem relato
+  (bonito no Campo em repouso), **repel** abre um halo de legibilidade em
+  torno de quem carrega história. Vive no loop de separação (lê o flag
+  com-história do vizinho) — WebGPU; força fraca de propósito, os alvos das
+  formações e a gravidade sempre vencem (não teleguia ninguém). Limitação
+  WebGL2: sem separação, sem story field (como o yield).
 
 **Formações dos dormentes** (grupo "Formations"): o que os sem-história
 fazem enquanto os ativos migram — dropdown dinâmico, para moldar a cena
@@ -483,8 +499,8 @@ escolhe *onde*; o Vocabulary escolherá *como*.
 ### 5.10 O Palco: cenas de história e a ilusão da viagem (2026-07-14 — roadmap M6 "cenas de história")
 
 A visão completa do Dudu para o **consumo de uma história** dentro do
-Campo — registrada por inteiro aqui; a fundação técnica (esteira) já está
-no ar atrás do toggle `story treadmill`.
+Campo. A gramática de palco virou o **comportamento padrão do follow**
+(2026-07-14b) — não é mais um modo experimental à parte.
 
 **A referência dele:** uma experiência anterior em que **o personagem
 nunca se movia — o ambiente fazia TODO o movimento**. A pessoa anda no
@@ -492,22 +508,43 @@ lugar; o mundo viaja por ela. É a gramática de palco que ele quer para as
 cenas de história: a câmera nunca larga a pessoa, e ainda assim ela
 atravessa mundos.
 
-**A esteira (fundação, no ar):** durante o follow, com o palco ligado —
+**A regra universal da área (o fundamento da ilusão de espaço infinito).**
+O mundo é um **toro**: uma área quadrada canônica (lado = 2× o raio de
+contenção, centrada na origem, desenhada pelo próprio grid) onde **qualquer
+agente** que cruza uma borda reaparece do lado oposto. É o que fecha a
+ilusão — tudo acontece sempre dentro da mesma área otimizada, e ainda assim
+o espaço parece não ter fim. No **modo livre** (ninguém seguido) todos
+vagam nessa área e loopam; a contenção radial desliga (o toro é a regra).
+
+**O mouse é o leme da jornada.** Ouvindo uma história, o trajeto está
+sempre *indo a algum lugar*: a direção do ponteiro no chão (relativa à
+pessoa) decide para onde a viagem segue. Apontar longe = viajar para lá;
+apontar **na própria pessoa** (deadzone) = parar. O leme não desloca a
+pessoa — ele gira o rumo da **esteira**.
+
+**A esteira (o follow padrão):** ao seguir alguém —
 
 1. a pessoa seguida é **pinada** (velocidade→0) mas segue **andando** no
    lugar (a state machine força walking; a cadência do passo casa com a
    velocidade da esteira — os pés não patinam no chão que anda);
-2. o **terreno scrolla** sob os pés: o domínio do noise do heightfield (e
-   as linhas do grid) desliza na direção contrária ao andar — GPU e CPU em
-   paridade (sim, chão, fios e marker leem a MESMA altura deslocada); o
-   anfiteatro (flatten central) fica ancorado no mundo;
-3. os **dormentes da janela do palco** (caixa local orientada pelo rumo da
-   viagem) viram **cenário em loop**: recuam à velocidade da esteira e,
-   ao sair pela borda de trás, **reaparecem na frente** (wrap modular no
-   espaço local do palco) — com a formação `corridor` ativa, é a sebe de
-   maratona passando para sempre;
-4. os alvos/cluster dos carregados ficam **suspensos** durante o palco
-   (seek×0 dentro da janela) — a história pausa o mapa.
+2. o **mundo inteiro se move**: TODOS os outros agentes são deslocados na
+   contra-direção do leme (a física própria deles continua por cima do
+   deslocamento) e **wrappam** na área canônica — a multidão que sai por
+   trás reaparece na frente, como um cenário sem fim;
+3. o **terreno scrolla** no mesmo passo: o domínio do noise do heightfield
+   (e as linhas do grid) desliza junto — GPU e CPU em paridade (sim, chão,
+   fios e marker leem a MESMA altura deslocada); com o wrap ligado o noise
+   é **tileado** no período da área (o chão combina na costura — sem
+   degrau) e o anfiteatro viaja com o mundo;
+4. as **formações** (corredor/círculo) são ancoradas no mundo: elas fluem
+   para trás junto com todos e wrappam igual — a sebe de maratona passando
+   para sempre. Os alvos vivem no *ground frame* (o seek desconta o scroll
+   e usa o menor caminho no toro) — ninguém atravessa o mapa de volta.
+
+**Kill-switch:** o toggle `follow treadmill` desligado volta ao follow
+antigo (que desloca a pessoa) para debug/comparação — mas o padrão é o
+pino com o mundo em movimento. O steering, nesse modo legado, empurra a
+própria pessoa (leme direto).
 
 **Aonde isso vai (M6 — "cenas de história"):** a esteira é o chassi de um
 **modo palco por trecho narrativo**, dirigido pelos beats (arco emocional
@@ -533,13 +570,17 @@ do acervo):
 
 - **Dados:** beats com `t_norm` + valência (já no export); elementos por
   beat para escolher a vinheta.
-- **Custo:** a fundação é ~zero (uniforms + wrap no update pass); bend
-  cilíndrico e vinhetas são o investimento do M6.
-- **Entra em:** fundação **no ar** (experimental, `?stage=1`); cenas
-  completas = **M6 "cenas de história"** (aditivo à tabela do §11).
-- **Riscos vigiados:** kitsch (§10.2 — na dúvida, menos) e artefatos de
-  borda da janela (aceitos na fundação; resolvidos por fade/névoa nas
-  cenas reais).
+- **Custo:** a fundação é ~zero (uniforms + wrap no update pass — medido
+  igual com wrap on/off); bend cilíndrico e vinhetas são o investimento
+  do M6.
+- **Entra em:** **no ar como padrão do follow** (pino + mundo em
+  movimento + wrap universal + leme; `debug areas` mostra a área canônica
+  como o palco de tudo); cenas completas por beat = **M6 "cenas de
+  história"** (aditivo à tabela do §11).
+- **Riscos vigiados:** kitsch (§10.2 — na dúvida, menos); vizinhança na
+  costura do wrap não é toroidal (na borda os vizinhos do outro lado não
+  empurram — invisível na prática); heightfield tileado só combina perfeito
+  com o wrap ligado.
 
 ## 6. O loop de descoberta (fechado)
 
