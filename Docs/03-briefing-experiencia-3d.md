@@ -408,3 +408,84 @@ Raycast do mouse continua na malha CPU flat; o y real vem do `heightJS`
 (marker/labels). FPS 60→60 nos dois backends com terreno ligado. Grupo
 "Terrain" no leva com presets (só mudam params); `?terrain=<preset>`,
 `?terrainAmp=`, `?terrainOn=`. Amplitude default 0 = paridade visual total.
+
+### 14.7 Campo do ativo, formações e o palco/esteira (2026-07-14)
+
+As 3 mecânicas de multidão do doc 04 §5.9/§5.10 — fatos técnicos:
+
+**Campo de repulsão por UNIFORM vs separação assimétrica** — dois
+mecanismos deliberadamente diferentes para "ativos abrem espaço":
+
+- **Pessoa seguida** (1 ativo): força radial suave (smoothstep até o
+  raio, empurra só XZ) por **uniforms** (`fieldPos/Radius/Strength/
+  Agent`) alimentados por frame do positionMirror no CrowdMesh. Uniform =
+  zero custo de buffer e **funciona idêntico no WebGL2/TF** (nenhum
+  storage novo no pass — o orçamento de 3 varyings do update fica
+  intacto). O próprio agente é excluído por índice (`fieldAgent`).
+- **Migrantes** (N ativos): impossível por uniform (N posições) — entra
+  no loop de separação O(N²) que JÁ lê os vizinhos: peso assimétrico
+  `1 + (yieldWeight−1)×(1−temAlvo(self))×temAlvo(j)×seekGate` lendo
+  `targets[j].w`. Só WebGPU (o fallback não tem separação desde o M2).
+  **Armadilha de custo pega na medição:** a parte invariante do peso
+  (`yieldGain`, que lê `targets[self]`) TEM de sair do loop via
+  `toVar()` — inlinada, o TSL re-avalia a expressão inteira em CADA
+  iteração: 40→23 fps em 4096 agentes; com toVar, 40→39-42 (≈grátis).
+
+**Formações = padrões de ALVOS, não força nova** — `computeDormantTargets`
+(`agentMapping.ts`) escreve os slots dormentes (≥ people.length até o
+grid visível) na MESMA infra de targets do M3; a state machine existente
+assenta quem chega (idle/rezar). `circle`/`clear` = anéis estáveis
+(jitter mulberry32 por slot); `corridor` = 3 camadas por lado ao longo do
+rumo da pessoa seguida. Formação ativa força o seek como as lentes (sem
+gravidade ligada não haveria efeito). **Aprendizados de sonda:**
+(a) heading por EMA de deltas por frame GIRA com o jitter de
+readback/separação da pessoa assentada — o rumo vem de uma **trilha**
+(1 amostra/250 ms, janela 2 s) e só conta com deslocamento real ≥1,2 m;
+(b) alvo que persegue a pessoa por frame vira turba — o corredor é
+**ancorado no mundo** e re-ancora só quando ela atravessa ~35% do
+comprimento, sai pela lateral ou vira o rumo (checado a cada 0,8 s);
+(c) anel a 0,92×contenção briga pouco com a força de contenção (equilíbrio
+~1 m aquém do alvo, dentro do settleR — assentam; medido dist média
+0,84 m, 100% assentados/rezando após 60 s).
+
+**Palco/esteira (experimental)** — a ilusão de viagem sem deslocar a
+pessoa, 3 peças sincronizadas pela MESMA velocidade (`stageSpeed`):
+
+1. **Pino**: teto de velocidade ×0,001 no agente seguido (update pass) +
+   **walking forçado no state pass** (deixar a state machine ver v≈0
+   levaria a idle e quebraria a ilusão) com a fase avançando
+   `stageSpeed×phasePerUnit` — o passo casa com o chão que anda (nada
+   patina). Heading do pino gira suave ao rumo do palco.
+2. **Scroll do heightfield**: uniforms `scrollX/scrollZ` deslocam o
+   DOMÍNIO do noise (warp+fbm) e as linhas do grid TSL — o flatten
+   (anfiteatro) fica ancorado no mundo. **Paridade TSL+JS obrigatória**:
+   `setTerrainScroll()` escreve GPU e espelho JS juntos; sim, chão, fios
+   e marker leem a mesma altura deslocada. O scroll acumula
+   (`heading×speed×dt` com o MESMO clamp de dt da sim) e não zera ao
+   sair — o mundo "fica onde a viagem chegou", sem salto.
+3. **Wrap modular dos dormentes**: na janela local do palco (caixa
+   orientada pelo rumo, `stageHalfLen/Wid`), dormente recua por
+   **deslocamento direto de posição** (não velocidade — a state machine
+   os vê parados: em pé, deslizando com o chão) e ao cruzar a borda de
+   trás soma `2×halfLen` no eixo do rumo (1 teste basta: passo/frame ≪
+   janela). Alvos/wander suspensos na janela (`stageCarry` gateia
+   seekGate e wanderMul); separação/contenção seguem vivas.
+
+Exige follow + estados automáticos (per-agent); heading congelado na
+entrada do modo (a pessoa pinada não gera mais rumo). Sondas novas:
+`scripts/field-probe.mjs` (vizinhos no raio com/sem campo),
+`scripts/formation-probe.mjs` (churn de alvos + convergência + estados),
+`scripts/stage-probe.mjs` (Δscroll em 3 s ≈ speed×3, pino ~0 m,
+stateId=1). Medidos: scroll Δ3,08 m/3 s @ speed 0,9 (o extra é o clamp de
+dt), pino desloca 0,003-0,005 m/3 s, walking forçado OK nos 2 backends.
+Artefatos ACEITOS na fundação (doc 04 §5.10): pop no wrap se a borda de
+trás está em quadro; corredor + campo ligados ao mesmo tempo curvam as
+sebes (raio do campo > meia-largura do corredor); durante o pre-roll do
+`?simT` o palco fica off (espelho ainda não leu — engata ao vivo).
+
+**Plano registrado (M6):** o *bend* cilíndrico do chão (plano→cilindro
+envolvendo a câmera, túnel de luz em alta velocidade) é evolução do
+heightfield — mesma h(x,z), re-mapeada em coordenadas cilíndricas no
+positionNode do chão + curvatura no update pass da sim; o wrap modular
+dos dormentes generaliza para instâncias de cenário (objetos em loop por
+módulo+offset). Ver doc 04 §5.10.

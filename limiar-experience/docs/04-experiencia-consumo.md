@@ -400,6 +400,119 @@ preenchida por inferência. O buraco no dado também é dado.
 - **Entra em:** M6, junto das Lentes completas; debug possível no M3+
   (o dropdown de lentes já existe).
 
+### 5.9 Formações da multidão e o Campo do ativo (2026-07-14)
+
+Duas mecânicas para o Dudu **moldar a multidão ao vivo** — nascidas da
+tensão entre o §1.1 (organismo legível) e o gosto dele pelo **caos vivo de
+uma calçada de NYC**: gente que se esbarra, atravessa, apinha. A resposta
+não é escolher um lado — é dar ao criador o dial. Por isso as duas são
+**opções com sliders, nunca comportamento fixo**; o caos continua sendo o
+estado natural do Campo.
+
+**O Campo do ativo** (grupo "Active field" do painel): quem está **ativo**
+irradia uma abertura.
+
+- **Pessoa seguida** (clique/follow): repulsão radial suave (raio e força
+  tweakáveis, defaults 2,5 m / 1,2) — os não-ativos **desviam** dela em
+  vez de atravessá-la ou apinhar em volta. Presença física, não
+  hierarquia: até quem tem alvo desvia. Funciona nos dois backends
+  (uniform, sem custo de buffer). Medido: vizinhos a <3 m da pessoa caem
+  de ~31 para ~12 (WebGPU) e ~32 para ~5 (WebGL2 — sem separação
+  re-empurrando, o círculo fica mais limpo).
+- **Migrantes** (com alvo, a caminho do núcleo): peso **assimétrico** na
+  separação — quem viaja empurra até N× mais forte quem só vaga
+  (`yield to travelers`, 1–3, default 2): a multidão **abre alas** para
+  quem foi chamado. Só existe no WebGPU (o fallback WebGL2 não tem
+  separação desde o M2 — limitação conhecida, doc 03 §10).
+
+**Formações dos dormentes** (grupo "Formations"): o que os sem-história
+fazem enquanto os ativos migram — dropdown dinâmico, para moldar a cena
+ao vivo:
+
+- `wander` — o estado natural (caos vivo, default);
+- `circle` — anel grandão na borda (0,92× contenção, 2 fileiras
+  intercaladas, jitter estável por slot): a multidão vira **moldura** e
+  testemunha enquanto os núcleos se formam no miolo;
+- `corridor` — duas sebes de 3 camadas ladeando o **caminho da pessoa
+  seguida** (final de maratona). Exige follow ativo (sem ele cai em
+  wander). O corredor é **ancorado no mundo** e só re-ancora quando a
+  pessoa atravessou ~35% dele ou mudou de rumo de verdade — alvo que
+  persegue por frame vira turba, não corredor (aprendido na sonda);
+- `clear` — todos recuam ao anel da contenção máxima: **palco vazio**,
+  foco total no que sobrou no centro (cenário, núcleos, uma pessoa).
+
+Chegando na formação eles **assentam sozinhos** pela máquina de estados
+existente (§5.5) — idle/rezar pelo sorteio de sempre. Animação PRÓPRIA de
+formação (postura de espectador, aplauso, reverência…) virá pelo
+Vocabulary (doc 06) quando o VAT Studio assar os clipes — a formação já
+escolhe *onde*; o Vocabulary escolherá *como*.
+
+- **Dados:** nenhum novo — alvos calculados na CPU (mesma via do M3).
+- **Custo:** ~zero (46+dormentes escritas por mudança; corridor recomputa
+  a cada ~0,8 s).
+- **Entra em:** já no ar (painel debug); coreografia por beat = M6 (§5.10).
+
+### 5.10 O Palco: cenas de história e a ilusão da viagem (2026-07-14 — roadmap M6 "cenas de história")
+
+A visão completa do Dudu para o **consumo de uma história** dentro do
+Campo — registrada por inteiro aqui; a fundação técnica (esteira) já está
+no ar atrás do toggle `story treadmill`.
+
+**A referência dele:** uma experiência anterior em que **o personagem
+nunca se movia — o ambiente fazia TODO o movimento**. A pessoa anda no
+lugar; o mundo viaja por ela. É a gramática de palco que ele quer para as
+cenas de história: a câmera nunca larga a pessoa, e ainda assim ela
+atravessa mundos.
+
+**A esteira (fundação, no ar):** durante o follow, com o palco ligado —
+
+1. a pessoa seguida é **pinada** (velocidade→0) mas segue **andando** no
+   lugar (a state machine força walking; a cadência do passo casa com a
+   velocidade da esteira — os pés não patinam no chão que anda);
+2. o **terreno scrolla** sob os pés: o domínio do noise do heightfield (e
+   as linhas do grid) desliza na direção contrária ao andar — GPU e CPU em
+   paridade (sim, chão, fios e marker leem a MESMA altura deslocada); o
+   anfiteatro (flatten central) fica ancorado no mundo;
+3. os **dormentes da janela do palco** (caixa local orientada pelo rumo da
+   viagem) viram **cenário em loop**: recuam à velocidade da esteira e,
+   ao sair pela borda de trás, **reaparecem na frente** (wrap modular no
+   espaço local do palco) — com a formação `corridor` ativa, é a sebe de
+   maratona passando para sempre;
+4. os alvos/cluster dos carregados ficam **suspensos** durante o palco
+   (seek×0 dentro da janela) — a história pausa o mapa.
+
+**Aonde isso vai (M6 — "cenas de história"):** a esteira é o chassi de um
+**modo palco por trecho narrativo**, dirigido pelos beats (arco emocional
+do acervo):
+
+- **objetos e instâncias passando em loop** (módulo+offset, o mesmo wrap
+  dos dormentes): pedras, árvores, ruínas, portais — cenário infinito
+  barato por instancing;
+- **partículas** em fluxo contrário ao andar (poeira, pétalas, neve,
+  fagulhas — vocabulário O(elementos), §8);
+- **o chão dá *bend***: o plano dobra progressivamente em cilindro
+  envolvendo a câmera — em alta velocidade a viagem vira **túnel de luz**
+  (o túnel dos relatos SEM asset de túnel: é o próprio mundo dobrando).
+  Evolução natural do heightfield (mesma função de altura, re-mapeada em
+  coordenadas cilíndricas no positionNode);
+- **trocas de ambiente por trecho da história**: limbo/almas no evento da
+  morte, campos de flores, cidades, outras dimensões, seres de luz — cada
+  beat pode trocar terreno/névoa/cor/população do palco (as vinhetas por
+  elemento do §8, agora encadeadas pela timeline);
+- **estados da multidão por momento narrativo**: formação/caos/ausência
+  (§5.9) viram direção de cena — o corredor na travessia, o clear no
+  vazio, o wander no retorno ao mundo.
+
+- **Dados:** beats com `t_norm` + valência (já no export); elementos por
+  beat para escolher a vinheta.
+- **Custo:** a fundação é ~zero (uniforms + wrap no update pass); bend
+  cilíndrico e vinhetas são o investimento do M6.
+- **Entra em:** fundação **no ar** (experimental, `?stage=1`); cenas
+  completas = **M6 "cenas de história"** (aditivo à tabela do §11).
+- **Riscos vigiados:** kitsch (§10.2 — na dúvida, menos) e artefatos de
+  borda da janela (aceitos na fundação; resolvidos por fade/névoa nas
+  cenas reais).
+
 ## 6. O loop de descoberta (fechado)
 
 ```
