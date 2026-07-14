@@ -203,7 +203,7 @@ def transcribe(
 
 @app.command()
 def group() -> None:
-    """Agrupa vídeos transcritos em PESSOAS (padrão 'N/M – ... EQM de Nome')."""
+    """Agrupa vídeos transcritos em PESSOAS (padrão 'N/M – ... EQM de/do/da Nome')."""
     from . import people as ppl
     from .group import group_videos
 
@@ -215,7 +215,9 @@ def group() -> None:
         "SELECT id, title, duration_s FROM videos "
         "WHERE status IN ('transcribed','extracted','reviewed','exported')"
     ).fetchall()
-    groups = group_videos([dict(r) for r in rows])
+    # pessoas já materializadas ancoram os próprios slugs (nunca re-slugificar)
+    existing = {p.id: {s.video_id for s in p.sources} for p in ppl.list_people(cfg)}
+    groups = group_videos([dict(r) for r in rows], existing)
 
     table = Table(title="pessoas agrupadas")
     table.add_column("slug")
