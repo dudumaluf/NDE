@@ -154,12 +154,16 @@ export class CrowdSim {
     dwell: uniform(0.35),
     /** Playback extra do passo no estado correndo (walk como corrida). */
     runBoost: uniform(1.35),
-    /** Papéis de clipe (índices globais — ver clipRoles.ts). */
+    /** Playback × dos estados parado (0) e assentado/rezando (3/4) —
+     *  grupo Vocabulary (doc 06). 1 = velocidade natural do clipe. */
+    idlePlayback: uniform(1),
+    settlePlayback: uniform(1),
+    /** Papéis de clipe (índices globais — ver clipRoles.ts/Vocabulary).
+     *  O gesto de ASSENTAR não tem uniform: vem por agente no meta.y. */
     clipIdle: uniform(0),
     clipIdle2: uniform(0),
     clipWalk: uniform(0),
     clipRun: uniform(0),
-    clipRezar: uniform(0),
     /** Onda de chegada: ganho do teto de velocidade por distância ao alvo.
      *  Default 0 (neutro) — o valor de design (0.9) entra pelo leva. */
     waveGain: uniform(0),
@@ -191,9 +195,13 @@ export class CrowdSim {
     this.states = instancedArray(maxCount, "vec4");
     this.agentMeta = instancedArray(maxCount, "vec4");
     this.agentMetaArray = this.agentMeta.value.array as Float32Array;
-    // Default seguro: todo mundo "com-história" (multiplicadores neutros) —
-    // sem computeAgentMeta o comportamento é idêntico ao pré-M3.6.
-    for (let i = 0; i < maxCount; i++) this.agentMetaArray[i * 4] = 1;
+    // Default seguro: todo mundo "com-história" (multiplicadores neutros) e
+    // gesto de assentar = idle próprio (y = −1) — sem computeAgentMeta o
+    // comportamento é idêntico ao pré-M3.6.
+    for (let i = 0; i < maxCount; i++) {
+      this.agentMetaArray[i * 4] = 1;
+      this.agentMetaArray[i * 4 + 1] = -1;
+    }
 
     this.texSide = Math.ceil(Math.sqrt(maxCount));
     this.targetsTexture = this.makeMirrorTexture(this.targetsArray);
@@ -204,7 +212,6 @@ export class CrowdSim {
     this.u.clipIdle2.value = this.clipRoles.idle2;
     this.u.clipWalk.value = this.clipRoles.walk;
     this.u.clipRun.value = this.clipRoles.run;
-    this.u.clipRezar.value = this.clipRoles.rezar;
     // Com clipe de corrida REAL (VAT futura do Studio), o walk não precisa
     // de playback extra — o clipe já corre.
     if (this.clipRoles.hasRunClip) this.u.runBoost.value = 1;
@@ -537,13 +544,15 @@ export class CrowdSim {
         .or(tDist.greaterThan(settleR.mul(1.6)))
         .or(speed.greaterThan(u.v0.mul(3)));
 
-      // Sorteio ponderado ESTÁVEL por agente (seed = índice): quem carrega
-      // `transformacao` tende a rezar (peso extra já veio no meta.y).
-      const rnd: N = hash(fi.add(5 * 4096));
-      const praying: N = rnd.lessThan(meta.y);
-      const settleState: N = select(praying, float(4), float(3));
+      // Gesto de assentamento decidido na CPU (agentMapping/Vocabulary):
+      // meta.y = −1 → idle próprio do agente (estado 3); ≥0 → índice GLOBAL
+      // do clipe-gesto (estado 4: rezar ou regra elemento→clipe). O sorteio
+      // ponderado saiu do shader — regras novas nunca mais tocam a GPU.
+      const gesture: N = meta.y;
+      const isGesture: N = gesture.greaterThanEqual(0);
+      const settleState: N = select(isGesture, float(4), float(3));
       const idleClip: N = this.idleVariant(fi);
-      const settleClip: N = select(praying, u.clipRezar, idleClip);
+      const settleClip: N = select(isGesture, gesture, idleClip);
 
       const desired: N = loco.toVar();
       If(settled.and(exitSettle.not()).or(enterSettle), () => {
@@ -579,12 +588,23 @@ export class CrowdSim {
         u.runBoost,
         select(stateId.equal(2), float(1), float(0)).mul(u.perAgentOn),
       );
+      // Playback × por estado (Vocabulary): o clock global anda a fps
+      // frames/s; somar (mult−1)×fps na FASE faz o frame efetivo andar a
+      // mult×fps — sem buffer novo, sem tocar o sampler.
+      const stateMult: N = select(
+        stateId.greaterThanEqual(3),
+        u.settlePlayback,
+        select(stateId.equal(0), u.idlePlayback, float(1)),
+      )
+        .sub(1)
+        .mul(u.perAgentOn);
       const ph: N = this.phases.element(instanceIndex);
       this.phases
         .element(instanceIndex)
         .assign(
           ph
             .add(speed.mul(u.dt).mul(u.phasePerUnit).mul(runBoost))
+            .add(u.dt.mul(float(vat().fps)).mul(stateMult))
             .mod(vat().framesPerClip),
         );
 

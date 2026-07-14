@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
 import { useFrame, useThree } from "@react-three/fiber";
 import { button, useControls } from "leva";
-import { vat } from "../vat/runtime";
+import { clipInfo, totalClipCount, vat } from "../vat/runtime";
 import { buildCrowdGeometry } from "../vat/vatGeometry";
 import { useVatTextures } from "../vat/useVatTextures";
 import { vatPlayer } from "../vat/VatClipPlayer";
@@ -14,7 +14,11 @@ import { applyColorEmphasis } from "./colorEmphasis";
 import { qpNum } from "../lib/urlParams";
 import { pref, prefBool, prefNum, prefStr } from "../lib/prefs";
 import { useContent } from "../data/contentStore";
-import { computeAgentMeta, computeTargets } from "../data/agentMapping";
+import {
+  computeAgentMeta,
+  computeTargets,
+  type SettleRule,
+} from "../data/agentMapping";
 import { applyHsbToColorScale, hexToRgb01 } from "../data/palette";
 import {
   DEMO_LENS_KEYS,
@@ -236,6 +240,139 @@ export function CrowdMesh() {
       label: "dormant: wander ×",
     },
   });
+
+  // --- Vocabulary (M4b, doc 06): guarda-roupa de animações ---
+  // Papéis remapeáveis por dropdown (todos os clipes globais A ++ B),
+  // playback × por estado e regras elemento→clipe (o dado escolhe o gesto).
+  // Precedência dos papéis: painel (≥0) > role do descriptor > nome.
+  const clipOptions = useMemo(() => {
+    const opts: Record<string, number> = { auto: -1 };
+    for (let i = 0; i < totalClipCount(); i++) {
+      const info = clipInfo(i);
+      if (info) opts[`${info.vatName} · ${info.name}`] = i;
+    }
+    return opts;
+  }, []);
+  const clipOptionsNoAuto = useMemo(() => {
+    const opts: Record<string, number> = {};
+    for (const [k, val] of Object.entries(clipOptions))
+      if (val >= 0) opts[k] = val;
+    return opts;
+  }, [clipOptions]);
+  const ruleElementOptions = useMemo(() => {
+    const opts: Record<string, string> = { off: "off" };
+    if (content) for (const el of content.taxonomy.elementos) opts[el.key] = el.key;
+    return opts;
+  }, [content]);
+  // Valores salvos de outra sessão podem apontar clipes que não existem na
+  // VAT atual (?vat= trocada) — `allowed` derruba esses para a fábrica.
+  const clipIdxAllowed = useMemo(() => Object.values(clipOptions), [clipOptions]);
+  const [v] = useControls(
+    "Vocabulary",
+    () => ({
+      roleIdle: {
+        value: pref("Vocabulary.roleIdle", -1, clipIdxAllowed),
+        options: clipOptions,
+        label: "idle",
+      },
+      roleIdle2: {
+        value: pref("Vocabulary.roleIdle2", -1, clipIdxAllowed),
+        options: clipOptions,
+        label: "idle 2",
+      },
+      roleWalk: {
+        value: pref("Vocabulary.roleWalk", -1, clipIdxAllowed),
+        options: clipOptions,
+        label: "walk",
+      },
+      roleRun: {
+        value: pref("Vocabulary.roleRun", -1, clipIdxAllowed),
+        options: clipOptions,
+        label: "run",
+      },
+      rolePray: {
+        value: pref("Vocabulary.rolePray", -1, clipIdxAllowed),
+        options: clipOptions,
+        label: "pray",
+      },
+      idlePlayback: {
+        value: pref("Vocabulary.idlePlayback", 1),
+        min: 0.3,
+        max: 2,
+        label: "idle playback ×",
+      },
+      settlePlayback: {
+        value: pref("Vocabulary.settlePlayback", 1),
+        min: 0.3,
+        max: 2,
+        label: "settle playback ×",
+      },
+      runBoost: {
+        value: pref("Vocabulary.runBoost", 1.35),
+        min: 1,
+        max: 2,
+        label: "run boost ×",
+      },
+      rule1El: {
+        value: pref("Vocabulary.rule1El", "off"),
+        options: ruleElementOptions,
+        label: "rule 1: element",
+      },
+      rule1Clip: {
+        value: pref("Vocabulary.rule1Clip", 0, clipIdxAllowed),
+        options: clipOptionsNoAuto,
+        label: "rule 1: clip",
+      },
+      rule1W: {
+        value: pref("Vocabulary.rule1W", 0),
+        min: 0,
+        max: 4,
+        label: "rule 1: weight",
+      },
+      rule2El: {
+        value: pref("Vocabulary.rule2El", "off"),
+        options: ruleElementOptions,
+        label: "rule 2: element",
+      },
+      rule2Clip: {
+        value: pref("Vocabulary.rule2Clip", 0, clipIdxAllowed),
+        options: clipOptionsNoAuto,
+        label: "rule 2: clip",
+      },
+      rule2W: {
+        value: pref("Vocabulary.rule2W", 0),
+        min: 0,
+        max: 4,
+        label: "rule 2: weight",
+      },
+    }),
+    [clipOptions, clipOptionsNoAuto, ruleElementOptions],
+  );
+
+  // Papéis efetivos: override do painel (≥0) senão a detecção (clipRoles).
+  const effIdle = v.roleIdle >= 0 ? v.roleIdle : sim.clipRoles.idle;
+  const effIdle2 = v.roleIdle2 >= 0 ? v.roleIdle2 : sim.clipRoles.idle2;
+  const effWalk = v.roleWalk >= 0 ? v.roleWalk : sim.clipRoles.walk;
+  const effRun = v.roleRun >= 0 ? v.roleRun : sim.clipRoles.run;
+  const effPray = v.rolePray >= 0 ? v.rolePray : sim.clipRoles.rezar;
+  useEffect(() => {
+    sim.u.clipIdle.value = effIdle;
+    sim.u.clipIdle2.value = effIdle2;
+    sim.u.clipWalk.value = effWalk;
+    sim.u.clipRun.value = effRun;
+    // Run com clipe PRÓPRIO (≠ walk) dispensa o boost de playback do walk.
+    sim.u.runBoost.value = effRun !== effWalk ? 1 : v.runBoost;
+  }, [sim, effIdle, effIdle2, effWalk, effRun, v.runBoost]);
+
+  // Regras elemento→clipe ativas (element escolhido E peso > 0).
+  const vocabRules = useMemo<SettleRule[]>(() => {
+    const rules: SettleRule[] = [];
+    if (v.rule1El !== "off" && v.rule1W > 0)
+      rules.push({ element: v.rule1El, clip: v.rule1Clip, weight: v.rule1W });
+    if (v.rule2El !== "off" && v.rule2W > 0)
+      rules.push({ element: v.rule2El, clip: v.rule2Clip, weight: v.rule2W });
+    return rules;
+  }, [v.rule1El, v.rule1Clip, v.rule1W, v.rule2El, v.rule2Clip, v.rule2W]);
 
   // --- M3: o Campo dirigido pelos dados reais (só aparece com content/) ---
   // Rótulo "none" para NO_LENS; as keys dos elementos são dados (ficam PT).
@@ -487,16 +624,19 @@ export function CrowdMesh() {
     if (meshRef.current) meshRef.current.count = drawCount;
   }, [drawCount]);
 
-  // Meta por agente (com-história vs dormente + prob. de rezar ao assentar,
-  // com peso extra p/ quem tem `transformacao`) — CPU escreve, nada por frame.
+  // Meta por agente (com-história vs dormente + GESTO de assentamento
+  // sorteado na CPU — idle próprio, rezar ou regra elemento→clipe do
+  // Vocabulary) — CPU escreve, nada por frame.
   useEffect(() => {
     computeAgentMeta(content, MAX_GRID * MAX_GRID, sim.agentMetaArray, {
       pesoIdle: e.pesoIdle,
       pesoRezar: e.pesoRezar,
       boostTransformacao: 2,
+      prayClip: effPray,
+      rules: vocabRules,
     });
     sim.commitAgentMeta();
-  }, [content, sim, e.pesoIdle, e.pesoRezar]);
+  }, [content, sim, e.pesoIdle, e.pesoRezar, effPray, vocabRules]);
 
   // Alvos dos dados (gravidade/lentes) — 46 escritas por mudança, nada por
   // frame. Lente demográfica ativa vence a lente de elemento (exclusão mútua
@@ -540,6 +680,8 @@ export function CrowdMesh() {
     sim.u.v1.value = e.v1;
     sim.u.hyst.value = e.histerese;
     sim.u.stateFade.value = e.fadeEstado;
+    sim.u.idlePlayback.value = v.idlePlayback;
+    sim.u.settlePlayback.value = v.settlePlayback;
     sim.u.waveGain.value = e.onda;
     sim.u.pauseAmount.value = e.pausas;
     sim.u.dormantSpeedMul.value = e.dormVel;

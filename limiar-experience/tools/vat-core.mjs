@@ -775,6 +775,9 @@ export function selectClips(files, model, selection, warn = console.warn) {
       // offset Y manual da UI (unidades da FONTE, ex.: +0,05 = 5 cm num
       // personagem de 1,8 m) — escape hatch por clipe, soma ao aterramento
       yOffsetSrc: Number(sel.yOffset) || 0,
+      // papel funcional declarado na UI (idle/walk/run/pray) — vai para o
+      // descriptor e vence a detecção por nome no app (src/vat/clipRoles.ts)
+      role: ["idle", "walk", "run", "pray"].includes(sel.role) ? sel.role : undefined,
     });
   }
 
@@ -1070,6 +1073,8 @@ export function writeOutput({
     clips: entries.map((e, i) => ({
       name: e.name,
       mode: e.mode,
+      // Papel funcional declarado (Studio) — precedência sobre o nome.
+      ...(e.role ? { role: e.role } : {}),
       rowStart: i * frames,
       rowEnd: (i + 1) * frames,
       sourceDuration: +e.clip.duration.toFixed(6),

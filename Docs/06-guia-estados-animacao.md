@@ -72,8 +72,9 @@ Detalhes que valem saber:
 
 ### Como os clipes são encontrados (importante para o VAT Studio)
 
-Os papéis são detectados **pelo NOME do clipe** no descriptor da VAT
-(pt/en, case-insensitive):
+A **precedência** é: dropdown do grupo Vocabulary (painel) > `role`
+declarado no descriptor (dropdown "papel" no VAT Studio) > **NOME do
+clipe** (regex pt/en, case-insensitive):
 
 | Papel | Regex de detecção | Fallback se não achar |
 |---|---|---|
@@ -83,10 +84,36 @@ Os papéis são detectados **pelo NOME do clipe** no descriptor da VAT
 | run | `/corr\|run/` | = walk (com boost 1,35×) |
 | pray | `/rez\|pray\|ajoelh\|kneel/` | = idle |
 
-> **Receita no Studio:** nomeie os clipes com essas palavras ("Idle",
-> "Walk", "Run", "Pray"…) e a máquina de estados os adota sem tocar em
-> código. Clipes extras (dança, morrer, levantar) ficam acessíveis pelos
-> botões de States (seamless morph) e pelos one-shots do M4.
+> **Receita no Studio:** marque o papel no dropdown da linha do clipe (ou
+> apenas nomeie com essas palavras — "Idle", "Walk", "Run", "Pray") e a
+> máquina de estados o adota sem tocar em código. Clipes extras (dança,
+> morrer, levantar) ficam acessíveis pelos botões de States (seamless
+> morph), pelos one-shots do M4 e pelas regras do Vocabulary (abaixo).
+
+---
+
+## Vocabulary — o guarda-roupa de animações (M4b)
+
+O grupo **Vocabulary** do painel deixa remapear os papéis e ligar clipes
+aos DADOS sem tocar em código:
+
+- **5 dropdowns de papel** (`idle`, `idle 2`, `walk`, `run`, `pray`) com
+  TODOS os clipes carregados (`?vat=` e `?vatB=` juntos, rótulo
+  `textura · clipe`). Default `auto` = a detecção acima. Escolher um clipe
+  de outra textura funciona: os índices são globais (A ++ B).
+- **`idle playback ×` / `settle playback ×`** — velocidade do clipe nos
+  estados parado e assentado/rezando (0,3–2×). `run boost ×` é o playback
+  extra do walk no estado correndo — ignorado quando run tem clipe próprio
+  (≠ walk).
+- **2 regras `elemento → clipe (peso)`** — a liberdade dos dados: quem TEM
+  o elemento entra no sorteio de assentamento com o clipe designado.
+  Exemplos: `transformacao → rezar` com peso 2 (dobra a chance de ajoelhar);
+  `fora_do_corpo → <gesto da vatB>` com peso 3. Peso 0 = regra inerte.
+
+> **Técnica (mudou no M4b):** o sorteio do gesto de chegada saiu do shader
+> e mora na CPU (`agentMapping.computeAgentMeta` → `meta.y`: −1 = idle
+> próprio, ≥0 = índice global do clipe-gesto). Estável por agente (a mesma
+> pessoa sempre escolhe igual), e regras novas nunca mais tocam a GPU.
 
 ---
 

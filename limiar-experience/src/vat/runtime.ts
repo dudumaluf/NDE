@@ -18,9 +18,14 @@ import { qpStr } from "../lib/urlParams";
  * já endereça qualquer linha da textura — inclusive as de B.
  */
 
+/** Papel funcional declarado no bake (Studio/vat.json) — ver clipRoles.ts. */
+export type DeclaredClipRole = "idle" | "walk" | "run" | "pray";
+
 export interface VatClipInfo {
   name: string;
   loop: boolean;
+  /** Papel declarado no descriptor (vence a detecção por nome). */
+  role?: DeclaredClipRole | null;
 }
 
 /** Trajetória da raiz removida pelo "andar no lugar" (tools/vat-bake). */
@@ -91,10 +96,18 @@ interface VatBakeDescriptor {
   basis: string;
   bakeOffset: [number, number, number];
   meshHash?: string;
-  clips: { name: string; mode: "loop" | "oneshot" }[];
+  clips: { name: string; mode: "loop" | "oneshot"; role?: string }[];
   files: { positions: string; normals: string; indices?: string };
   normalization?: { scale: number; translate: [number, number, number] };
   rootMotion?: VatRootMotion[];
+}
+
+const CLIP_ROLES: readonly DeclaredClipRole[] = ["idle", "walk", "run", "pray"];
+
+function parseRole(v: string | undefined): DeclaredClipRole | null {
+  return CLIP_ROLES.includes(v as DeclaredClipRole)
+    ? (v as DeclaredClipRole)
+    : null;
 }
 
 const legacy: ActiveVat = {
@@ -232,7 +245,11 @@ export async function initVat(): Promise<void> {
           framesPerClip: desc.framesPerClip,
           fps: desc.fps,
           clipSeconds: desc.framesPerClip / desc.fps,
-          clips: desc.clips.map((c) => ({ name: c.name, loop: c.mode === "loop" })),
+          clips: desc.clips.map((c) => ({
+            name: c.name,
+            loop: c.mode === "loop",
+            role: parseRole(c.role),
+          })),
           basis: desc.basis as BasisName,
           bakeOffset: desc.bakeOffset,
           positionsUrl: `/vat/${name}/${desc.files.positions}`,
@@ -304,7 +321,11 @@ async function initVatB(): Promise<void> {
       name,
       clipOffset: active.clipCount,
       clipCount: desc.clipCount,
-      clips: desc.clips.map((c) => ({ name: c.name, loop: c.mode === "loop" })),
+      clips: desc.clips.map((c) => ({
+        name: c.name,
+        loop: c.mode === "loop",
+        role: parseRole(c.role),
+      })),
       fps: desc.fps,
       textureHeight: desc.textureHeight,
       positionsUrl: `/vat/${name}/${desc.files.positions}`,

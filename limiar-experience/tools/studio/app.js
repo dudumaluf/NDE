@@ -508,6 +508,7 @@ async function analyze() {
         enabled: old?.enabled ?? c.matchedTracks > 0,
         inPlace: old?.inPlace ?? travels,
         yOff: old?.yOff ?? 0,
+        role: old?.role ?? "",
         travels,
         preview: true,
       };
@@ -897,6 +898,14 @@ function renderClips() {
             <button data-k="mode" data-v="oneshot" data-i="${i}" class="${c.mode === "oneshot" ? "on" : ""}"
               title="toca uma vez e congela no último frame (morrer, levantar…)">única</button>
           </span>
+          <select data-k="role" data-i="${i}" title="papel funcional na máquina de estados da multidão (grava \`role\` no vat.json — vence a detecção por nome; vazio = detectar pelo nome)">
+            ${["", "idle", "walk", "run", "pray"]
+              .map(
+                (r) =>
+                  `<option value="${r}" ${(c.role ?? "") === r ? "selected" : ""}>${r || "– papel –"}</option>`,
+              )
+              .join("")}
+          </select>
           <span class="fadefield" title="offset Y manual do clipe (unidades da fonte, ex.: 0.05 = sobe 5 cm num personagem de ~1,8) — vazio = automático: cada clipe é aterrado com os pés no y=0 no bake">
             Y <input type="number" data-k="yoff" data-i="${i}" step="0.01" placeholder="auto" value="${c.yOff ? c.yOff : ""}" /></span>
           <button class="playbtn ${playing ? "on" : ""}" data-k="play" data-i="${i}">${playing ? "▶ tocando" : "▶"}</button>
@@ -965,6 +974,12 @@ function renderClips() {
       renderClips();
     }),
   );
+  el.querySelectorAll("[data-k=role]").forEach((x) => {
+    x.addEventListener("change", () => {
+      state.clips[+x.dataset.i].role = x.value;
+    });
+    x.addEventListener("dragstart", (e) => e.preventDefault());
+  });
   el.querySelectorAll("[data-k=play]").forEach((x) =>
     x.addEventListener("click", () => playClip(+x.dataset.i)),
   );
@@ -1062,8 +1077,8 @@ async function bake() {
     .filter((c) => c.enabled)
     .map((c) =>
       c.kind === "combo"
-        ? { parts: c.parts, fade: c.fade, name: c.name, mode: c.mode, inPlace: c.inPlace, yOffset: c.yOff || 0 }
-        : { file: c.file, clip: c.clip, name: c.name, mode: c.mode, inPlace: c.inPlace, yOffset: c.yOff || 0 },
+        ? { parts: c.parts, fade: c.fade, name: c.name, mode: c.mode, inPlace: c.inPlace, yOffset: c.yOff || 0, role: c.role || undefined }
+        : { file: c.file, clip: c.clip, name: c.name, mode: c.mode, inPlace: c.inPlace, yOffset: c.yOff || 0, role: c.role || undefined },
     );
   if (selection.length === 0) return;
   const dupes = selection.map((s) => s.name.toLowerCase());

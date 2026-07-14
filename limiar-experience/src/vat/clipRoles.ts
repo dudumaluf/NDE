@@ -2,13 +2,19 @@ import { clipInfo, totalClipCount } from "./runtime";
 
 /**
  * Papéis funcionais dos clipes para a máquina de estados da multidão
- * (doc 04 §5.5): quem é "idle", quem é "andar", quem é "rezar" — detectado
- * por NOME (pt/en) no descriptor ativo (?vat= e ?vatB= entram com índice
- * global), com fallbacks seguros para qualquer VAT.
+ * (doc 04 §5.5, doc 06): quem é "idle", quem é "andar", quem é "rezar".
  *
- * O slot `run` fica PREPARADO para o clipe de corrida futuro do VAT Studio:
- * se existir um clipe /corr|run/ ele é usado no estado "correndo" e o boost
- * de playback do walk é dispensado; sem ele, correndo = walk acelerado
+ * Precedência de detecção (doc 06 §Vocabulary):
+ *  1. `role` DECLARADO no descriptor (dropdown "papel" do VAT Studio) —
+ *     a fonte de verdade quando existe;
+ *  2. NOME do clipe (regex pt/en) — o fallback histórico;
+ *  3. fallbacks seguros (primeiro loop) para qualquer VAT.
+ * (?vat= e ?vatB= entram com índice global; o grupo Vocabulary do painel
+ * pode sobrescrever tudo por cima em runtime.)
+ *
+ * O slot `run` fica PREPARADO para o clipe de corrida do VAT Studio:
+ * se existir (role/nome), é usado no estado "correndo" e o boost de
+ * playback do walk é dispensado; sem ele, correndo = walk acelerado
  * (`hasRunClip` avisa a sim).
  */
 export interface ClipRoles {
@@ -23,16 +29,35 @@ export interface ClipRoles {
 }
 
 export function detectClipRoles(): ClipRoles {
-  const clips: { i: number; name: string; loop: boolean }[] = [];
+  const clips: {
+    i: number;
+    name: string;
+    loop: boolean;
+    role: string | null;
+  }[] = [];
   for (let i = 0; i < totalClipCount(); i++) {
     const c = clipInfo(i);
-    if (c) clips.push({ i, name: c.name.toLowerCase(), loop: c.loop });
+    if (c)
+      clips.push({
+        i,
+        name: c.name.toLowerCase(),
+        loop: c.loop,
+        role: c.role ?? null,
+      });
   }
 
-  const find = (re: RegExp, nth = 0): number => {
+  /** N-ésimo clipe com o papel declarado OU (fallback) nome casando. */
+  const find = (role: string, re: RegExp, nth = 0): number => {
     let seen = 0;
     for (const c of clips) {
-      if (re.test(c.name)) {
+      if (c.role === role) {
+        if (seen === nth) return c.i;
+        seen += 1;
+      }
+    }
+    seen = 0;
+    for (const c of clips) {
+      if (c.role === null && re.test(c.name)) {
         if (seen === nth) return c.i;
         seen += 1;
       }
@@ -41,11 +66,13 @@ export function detectClipRoles(): ClipRoles {
   };
   const firstLoop = clips.find((c) => c.loop)?.i ?? 0;
 
-  const idle = ((v) => (v >= 0 ? v : firstLoop))(find(/idle|parad/));
-  const idle2 = ((v) => (v >= 0 ? v : idle))(find(/idle|parad/, 1));
-  const walk = ((v) => (v >= 0 ? v : idle))(find(/andar|walk|caminh/));
-  const runIdx = find(/corr|run/);
-  const rezar = ((v) => (v >= 0 ? v : idle))(find(/rez|pray|ajoelh|kneel/));
+  const idle = ((v) => (v >= 0 ? v : firstLoop))(find("idle", /idle|parad/));
+  const idle2 = ((v) => (v >= 0 ? v : idle))(find("idle", /idle|parad/, 1));
+  const walk = ((v) => (v >= 0 ? v : idle))(find("walk", /andar|walk|caminh/));
+  const runIdx = find("run", /corr|run/);
+  const rezar = ((v) => (v >= 0 ? v : idle))(
+    find("pray", /rez|pray|ajoelh|kneel/),
+  );
 
   return {
     idle,
