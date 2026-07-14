@@ -813,7 +813,9 @@ export function CrowdMesh() {
           formRadius={d.formRaio}
         />
       )}
-      {content && <PersonHover sim={sim} content={content} />}
+      {content && (
+        <PersonHover sim={sim} content={content} personScale={c.escala} />
+      )}
       {content && <FollowCamera sim={sim} content={content} />}
       <mesh ref={markerRef}>
         <sphereGeometry args={[0.06, 16, 16]} />

@@ -304,14 +304,20 @@ válidos (só referenciam índices < 46). `?onlyPeople=1`.
 **positionMirror (`src/sim/positionMirror.ts`)** — espelho CPU das posições
 dos agentes: readback `getArrayBufferAsync(positions)` CONTÍNUO com guarda
 de inflight (um em voo por vez; ao completar, agenda o próximo no rAF —
-~60 Hz efetivo, latência 1–3 frames, invisível com o damping da câmera).
-Singleton com refcount (`acquire()`/release) — só roda enquanto hover/follow
-precisam. Stride 4 (WebGPU, padding vec4) vs 3 (WebGL2/TF packed) detectado
-pelo tamanho. **Armadilha aprendida:** um `getArrayBufferAsync` ANTES do
-primeiro compute registra o attribute vazio no cache do backend WebGL2 e o
-compute quebra (`switchBuffers is not a function`) — o mirror espera
-`sim.u.time > 0`. Hover/follow/timeline leem daqui; se um dia o espelho
-mostrar limite, o upgrade é picking GPU (pendência).
+~60 Hz efetivo, latência 1–3 frames). Singleton com refcount
+(`acquire()`/release) — só roda enquanto hover/follow precisam. Stride 4
+(WebGPU, padding vec4) vs 3 (WebGL2/TF packed) detectado pelo tamanho.
+**Armadilha aprendida:** um `getArrayBufferAsync` ANTES do primeiro compute
+registra o attribute vazio no cache do backend WebGL2 e o compute quebra
+(`switchBuffers is not a function`) — o mirror espera `sim.u.time > 0`.
+**Fix M4 (2026-07-13): a latência VARIÁVEL do readback vira "escada" se
+lida crua** — a mesma amostra segura 1–3 frames e chega um salto com o
+acumulado; era metade do jitter do follow em multidão densa. O espelho
+guarda as DUAS últimas amostras com timestamp e `getPosSmooth()` re-fasea
+entre elas pelo tempo desde o readback (extrapolação ≤25% do período; salto
+>2 m = teleporte de reset, adota direto). Hover/follow/timeline leem SEMPRE
+`getPosSmooth`, nunca a crua; se um dia o espelho mostrar limite, o upgrade
+é picking GPU (pendência).
 
 **Vocabulary (M4b)** — os papéis de clipe (idle/idle2/walk/run/pray) têm
 precedência painel > `role` declarado no descriptor (dropdown por linha no
@@ -326,11 +332,50 @@ novo**: o clock global anda a `fps` frames/s; somar `(mult−1)×fps×dt` na
 FASE por agente (state pass) faz o frame efetivo andar a `mult×fps` — o
 sampler não muda, o orçamento de 4 varyings do TF fica intacto.
 
-**Follow (M4d)** — transição de 1,2 s (smootherstep) anima câmera +
-`controls.target` até atrás/acima da pessoa (azimute preservado); no lock,
-o DELTA do movimento da pessoa é somado no alvo E na câmera por frame — o
-OrbitControls fica LIGADO (órbita/zoom livres ao redor de quem anda).
-Clique ≠ arrasto: down→up com <6 px e <400 ms. `?follow=<i>` headless.
+**Hover (M4c; picking re-feito 2026-07-13)** — a v1 escolhia a pessoa mais
+próxima em XZ do ponto do raycast NO CHÃO (raio 1,2 m): com o cursor sobre
+o tronco/cabeça o ray atravessa o corpo e aterrissa metros ATRÁS do
+personagem (da câmera default a cabeça projeta ~3,8 m de chão) — "não pega"
+(bug M4c). O picking agora é em **SCREEN-SPACE**: o torso de cada pessoa
+(`getPosSmooth`) é projetado para pixels e o acerto é uma elipse do tamanho
+APARENTE do corpo (half 0,55×1,35 m × escala, ÷ profundidade; piso 18×26 px
+para gente longe; teto de distância 75 m; quase-empate → o mais perto da
+câmera vence — quem oclui é quem se vê). Tronco E cabeça acertam; pixel
+vazio não hovera ninguém. Rótulo lê a MESMA posição suavizada — não treme.
+Sonda: `scripts/follow-probe.mjs` move o mouse REAL ao pixel projetado
+(`__limiarPersonScreen(i, frac)`) e confere `hoverStore`.
+
+**Follow (M4d; rig re-arquitetado 2026-07-13 — fix do snap e do jitter)** —
+a v1 tinha fases (transição smootherstep de 1,2 s → lock por delta) e DUAS
+falhas de sensação: (1) durante a transição `controls.enabled=false` faz o
+drei PULAR `controls.update()` e nada girava o quaternion — a posição
+viajava com o olhar CONGELADO e o primeiro `update()` do lock aplicava o
+lookAt acumulado (~8–23° medidos) num frame só: o "snap" do relato era
+ROTAÇÃO, não posição; (2) o lock copiava o delta CRU do espelho (rajadas do
+readback + empurrões da separação) direto na câmera. O rig novo é **SEM
+fases**: âncora do olhar, offset câmera−âncora e posição suavizada da
+pessoa são **springs criticamente amortecidas** (SmoothDamp, dt-estável)
+re-alvejadas por frame — a "transição" é a spring convergindo, o lock É a
+spring convergida, e `camera.lookAt(anchor)` acontece TODO frame junto da
+posição: não existe costura para dar snap, por construção. OrbitControls
+fica LIGADO o tempo todo: depois do `update()` do drei (prio −1), qualquer
+diferença entre o offset real e o que o rig escreveu no frame anterior é
+input REAL do usuário (órbita/zoom + cauda do damping) e re-alveja a spring
+do offset; pan desliga no follow (brigaria com a âncora). Retarget
+pessoa→pessoa reusa as MESMAS springs a partir da pose corrente (P0 real,
+velocidades preservadas — A→B contínuo); resíduo de damping de um arrasto
+anterior é descarregado com `dampingFactor=1 + update()` (aplica E zera) e
+re-baseado para não passar por input. ESC/clique no vazio solta sem
+teleporte. Sliders `follow smoothing (s)` (spring da pessoa, ~0,25 s) e
+`follow ease (s)` (viagem, ~0,35 s) no grupo Scene via pref(). Clique ≠
+arrasto: down→up com <6 px e <400 ms. `?follow=<i>` headless.
+**Sonda de continuidade** (`scripts/follow-probe.mjs`, roda nos 2
+backends): `__limiarCamTrace` (dev) grava |Δpos| e Δângulo por frame em
+priority 0.5 (pós-rig, pré-render); anti-snap = nenhum frame >3× os
+vizinhos (antes: 12,6–23° no handoff; depois: pior spike 1,2–1,3×);
+anti-jitter = lock 5 s com desvio ~1 mm e 0% de frames congelados (antes:
+30% congelados no WebGPU denso — a escada do readback). Fluxo real via
+gancho `__limiarFollow(i)` — `?follow=` não passa pela pose de overview.
 
 **Terreno vivo (M4f)** — `src/scene/heightfield.ts` implementa h(x,z) DUAS
 vezes com a MESMA matemática: TSL (chão + sim) e JS (marker, labels).
