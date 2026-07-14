@@ -1,12 +1,10 @@
-import { useMemo } from "react";
-import * as THREE from "three/webgpu";
 import { OrbitControls } from "@react-three/drei";
 import { useControls } from "leva";
 import { VatCharacter } from "../vat/VatCharacter";
 import { CrowdMesh } from "../crowd/CrowdMesh";
 import { StateButtons } from "../ui/StateButtons";
 import { PlayerBridge } from "./PlayerBridge";
-import { mouseTarget } from "../sim/mouseTarget";
+import { TerrainGround } from "./TerrainGround";
 import { qpStr } from "../lib/urlParams";
 import { pref } from "../lib/prefs";
 import { useAppearance } from "../ui/appearanceStore";
@@ -29,6 +27,10 @@ export function initialSceneMode(): SceneMode {
  * (useAppearance). A NÉVOA inteira (de altura E a linear clássica) é
  * propriedade do PostFX desde 2026-07-12 — o toggle master de lá liga/
  * desliga de verdade; aqui não se declara mais `<fog>`.
+ *
+ * O chão (M4f) é o TerrainGround: um mesh só, com heightfield no
+ * positionNode e o grid em TSL no próprio material (o gridHelper flat saiu).
+ * Amplitude 0 (default) = look antigo, pixel a pixel.
  */
 export function Scene() {
   const { modo } = useControls("Scene", {
@@ -44,17 +46,6 @@ export function Scene() {
   });
 
   const fundo = useAppearance((s) => s.fundo);
-  const chao = useAppearance((s) => s.chao);
-  const gridCor = useAppearance((s) => s.gridCor);
-  const gridAlpha = useAppearance((s) => s.gridAlpha);
-
-  // GridHelper assa as duas cores em vertex colors no construtor — mudar cor
-  // exige remontar (key). Mantém a razão original entre linha central e as
-  // demais (#7c7c7c → #686868 ≈ ×0.84).
-  const gridSecundaria = useMemo(
-    () => "#" + new THREE.Color(gridCor).multiplyScalar(0.84).getHexString(),
-    [gridCor],
-  );
 
   return (
     <>
@@ -64,24 +55,7 @@ export function Scene() {
       <directionalLight position={[4, 6, 3]} intensity={1.7} color="#fff1de" />
       <directionalLight position={[-5, 3, -4]} intensity={0.45} color="#9fb4ff" />
 
-      <mesh
-        rotation-x={-Math.PI / 2}
-        onPointerMove={(e) => {
-          mouseTarget.point.copy(e.point);
-          mouseTarget.moved = true;
-        }}
-      >
-        <circleGeometry args={[80, 64]} />
-        <meshStandardMaterial color={chao} roughness={0.95} metalness={0} />
-      </mesh>
-      <gridHelper
-        key={`${gridCor}-${gridAlpha < 1}`}
-        args={[42.5, 170, gridCor, gridSecundaria]}
-        position-y={0.002}
-        visible={gridAlpha > 0.004}
-        material-transparent={gridAlpha < 1}
-        material-opacity={gridAlpha}
-      />
+      <TerrainGround />
 
       <PlayerBridge />
       <StateButtons />

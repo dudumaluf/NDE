@@ -26,6 +26,7 @@ import {
 } from "three/tsl";
 import { vat } from "../vat/runtime";
 import { detectClipRoles, type ClipRoles } from "../vat/clipRoles";
+import { heightTSL } from "../scene/heightfield";
 import { mouseTarget } from "./mouseTarget";
 
 type N = any;
@@ -283,7 +284,10 @@ export class CrowdSim {
       const px: N = gx.add(rnd(1).mul(2).sub(1).mul(u.spawnNoise).mul(spacing));
       const pz: N = gz.add(rnd(2).mul(2).sub(1).mul(u.spawnNoise).mul(spacing));
 
-      this.positions.element(instanceIndex).assign(vec3(px, 0, pz));
+      // Terreno vivo (M4f): nascer JÁ na superfície (h=0 com terreno off).
+      this.positions
+        .element(instanceIndex)
+        .assign(vec3(px, heightTSL(px, pz), pz));
       this.velocities.element(instanceIndex).assign(vec3(0, 0, 0));
 
       const ang: N = rnd(3).mul(Math.PI * 2);
@@ -444,8 +448,12 @@ export class CrowdSim {
         .mul(wave);
       vel2.assign(vel2.mul(min(float(1), speedCap.div(speed))));
 
+      // Forças/velocidades vivem em XZ; o y é DERIVADO da superfície
+      // (heightfield compartilhado com o chão — M4f). Fios e render herdam.
       const newPos: N = p.xz.add(vel2.mul(dt));
-      this.positions.element(instanceIndex).assign(vec3(newPos.x, 0, newPos.y));
+      this.positions
+        .element(instanceIndex)
+        .assign(vec3(newPos.x, heightTSL(newPos.x, newPos.y), newPos.y));
       this.velocities.element(instanceIndex).assign(vec3(vel2.x, 0, vel2.y));
 
       // --- direção suavizada (só gira quando há movimento real) ---

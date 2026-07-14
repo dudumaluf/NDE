@@ -6,6 +6,7 @@ import type { CrowdSim } from "../sim/CrowdSim";
 import type { Content } from "../data/types";
 import { clusterLabelColor, hexToRgb01 } from "../data/palette";
 import { useAppearance } from "../ui/appearanceStore";
+import { heightJS } from "../scene/heightfield";
 
 /**
  * Palavras 3D nos núcleos (M3.5): quando um núcleo "se forma" sob a gravidade
@@ -267,11 +268,10 @@ export function ClusterLabels({
       e.opacity += (target - e.opacity) * (1 - Math.exp(-dt / tau));
       e.material.opacity = e.opacity;
       e.sprite.visible = e.opacity > 0.012;
-      e.sprite.position.set(
-        e.centroid[0] * mapScale,
-        2.85 + e.height * 0.55,
-        e.centroid[1] * mapScale,
-      );
+      const lx = e.centroid[0] * mapScale;
+      const lz = e.centroid[1] * mapScale;
+      // Terreno vivo: a palavra flutua sobre a SUPERFÍCIE do núcleo.
+      e.sprite.position.set(lx, 2.85 + e.height * 0.55 + heightJS(lx, lz), lz);
       e.sprite.quaternion.copy(camQ); // billboard na CPU
     }
 

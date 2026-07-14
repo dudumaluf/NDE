@@ -34,6 +34,7 @@ import { PersonHover } from "../render/PersonHover";
 import { FollowCamera } from "../render/FollowCamera";
 import { legendFlashK, setElementLens, useLegend } from "../ui/legendStore";
 import { isHsbIdentity, useAppearance } from "../ui/appearanceStore";
+import { heightJS } from "../scene/heightfield";
 
 const NO_LENS = "nenhuma";
 
@@ -770,7 +771,9 @@ export function CrowdMesh() {
 
     if (markerRef.current) {
       markerRef.current.position.copy(mouseTarget.point);
-      markerRef.current.position.y = 0.05;
+      // O raycast acontece na malha CPU (flat) — o y real vem do heightfield.
+      markerRef.current.position.y =
+        0.05 + heightJS(mouseTarget.point.x, mouseTarget.point.z);
       markerRef.current.visible = s.mouseModo !== "off";
     }
   });
