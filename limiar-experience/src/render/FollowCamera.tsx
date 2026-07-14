@@ -8,7 +8,7 @@ import type { Content } from "../data/types";
 import { positionMirror } from "../sim/positionMirror";
 import { useHover } from "../ui/hoverStore";
 import { startFollow, stopFollow, useFollow } from "../ui/followStore";
-import { pref } from "../lib/prefs";
+import { prefNum } from "../lib/prefs";
 import { qpNum } from "../lib/urlParams";
 
 /** Entrada do trace de continuidade (dev): deltas por frame da câmera. */
@@ -107,17 +107,17 @@ export function FollowCamera({
 
   useEffect(() => positionMirror.acquire(gl, sim), [gl, sim]);
 
-  // Suavização exposta no painel (labels EN; defaults via pref()).
+  // Suavização exposta no painel (labels EN; qp > salvo > fábrica).
   const f = useControls("Scene", {
     followSmoothing: {
-      value: pref("Scene.followSmoothing", 0.25),
+      value: prefNum("followSmooth", "Scene.followSmoothing", 0.35),
       min: 0.05,
       max: 0.8,
       label: "follow smoothing (s)",
       hint: "spring time constant over the person's position — higher absorbs more collision jitter, lower tracks tighter",
     },
     followEase: {
-      value: pref("Scene.followEase", 0.35),
+      value: prefNum("followEase", "Scene.followEase", 0.45),
       min: 0.1,
       max: 1.2,
       label: "follow ease (s)",
@@ -177,6 +177,9 @@ export function FollowCamera({
   const offsetGoal = useMemo(() => new THREE.Vector3(), []);
   const writtenOffset = useMemo(() => new THREE.Vector3(), []);
   const userOffset = useMemo(() => new THREE.Vector3(), []);
+  const savedPos = useMemo(() => new THREE.Vector3(), []);
+  const savedTarget = useMemo(() => new THREE.Vector3(), []);
+  const savedQuat = useMemo(() => new THREE.Quaternion(), []);
 
   /** Pessoa que o rig está servindo (null = rig dormindo). */
   const activeFor = useRef<number | null>(null);
@@ -215,16 +218,24 @@ export function FollowCamera({
     if (!positionMirror.getPosSmooth(following, sample)) return;
 
     if (!seeded.current || retarget.current) {
-      // Consome num frame só o resíduo de damping de um arrasto anterior
-      // (dampingFactor=1 aplica o delta inteiro E o zera) — senão a cauda
-      // do drag contaria como "input" e cancelaria a viagem da spring.
+      // DESCARTA o resíduo de damping de um arrasto anterior sem aplicá-lo:
+      // o flush com dampingFactor=1 zera os deltas internos do controls e a
+      // pose é restaurada em seguida. Clique é intenção nova — sem isso a
+      // cauda do flick ou contaria como "input" por ~1,5 s (cancelando a
+      // viagem da spring) ou entraria inteira num frame (spike de ~4°
+      // medido no pessoa→pessoa após órbita).
+      savedPos.copy(camera.position);
+      savedTarget.copy(controls.target);
+      savedQuat.copy(camera.quaternion);
       const df = controls.dampingFactor;
       controls.dampingFactor = 1;
       controls.update();
       controls.dampingFactor = df;
-      // O delta do flush NÃO é input do usuário: re-baseia a referência do
-      // detector abaixo, senão num retarget pessoa→pessoa ele sobrescreveria
-      // o offsetGoal do enquadre recém-calculado.
+      camera.position.copy(savedPos);
+      controls.target.copy(savedTarget);
+      camera.quaternion.copy(savedQuat);
+      // Pós-restauração o offset real == o escrito pelo rig — a referência
+      // do detector de input segue válida; re-baseia por segurança.
       writtenOffset.copy(camera.position).sub(controls.target);
     }
     if (!seeded.current) {

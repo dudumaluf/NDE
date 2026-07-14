@@ -338,7 +338,7 @@ o tronco/cabeça o ray atravessa o corpo e aterrissa metros ATRÁS do
 personagem (da câmera default a cabeça projeta ~3,8 m de chão) — "não pega"
 (bug M4c). O picking agora é em **SCREEN-SPACE**: o torso de cada pessoa
 (`getPosSmooth`) é projetado para pixels e o acerto é uma elipse do tamanho
-APARENTE do corpo (half 0,55×1,35 m × escala, ÷ profundidade; piso 18×26 px
+APARENTE do corpo (half 0,55×1,05 m × escala, ÷ profundidade; piso 18×26 px
 para gente longe; teto de distância 75 m; quase-empate → o mais perto da
 câmera vence — quem oclui é quem se vê). Tronco E cabeça acertam; pixel
 vazio não hovera ninguém. Rótulo lê a MESMA posição suavizada — não treme.
@@ -364,18 +364,29 @@ input REAL do usuário (órbita/zoom + cauda do damping) e re-alveja a spring
 do offset; pan desliga no follow (brigaria com a âncora). Retarget
 pessoa→pessoa reusa as MESMAS springs a partir da pose corrente (P0 real,
 velocidades preservadas — A→B contínuo); resíduo de damping de um arrasto
-anterior é descarregado com `dampingFactor=1 + update()` (aplica E zera) e
-re-baseado para não passar por input. ESC/clique no vazio solta sem
-teleporte. Sliders `follow smoothing (s)` (spring da pessoa, ~0,25 s) e
-`follow ease (s)` (viagem, ~0,35 s) no grupo Scene via pref(). Clique ≠
-arrasto: down→up com <6 px e <400 ms. `?follow=<i>` headless.
-**Sonda de continuidade** (`scripts/follow-probe.mjs`, roda nos 2
-backends): `__limiarCamTrace` (dev) grava |Δpos| e Δângulo por frame em
-priority 0.5 (pós-rig, pré-render); anti-snap = nenhum frame >3× os
-vizinhos (antes: 12,6–23° no handoff; depois: pior spike 1,2–1,3×);
-anti-jitter = lock 5 s com desvio ~1 mm e 0% de frames congelados (antes:
-30% congelados no WebGPU denso — a escada do readback). Fluxo real via
-gancho `__limiarFollow(i)` — `?follow=` não passa pela pose de overview.
+anterior é DESCARTADO no clique/troca (flush com `dampingFactor=1 +
+update()` zera os deltas internos e a pose é restaurada — clique é intenção
+nova; aplicá-lo dava spike de ~4° no pessoa→pessoa pós-órbita, e deixá-lo
+vivo contaria como "input" por ~1,5 s e cancelaria a viagem). ESC/clique no
+vazio solta sem teleporte. Sliders `follow smoothing (s)` (spring da
+pessoa, default 0,35 s) e `follow ease (s)` (viagem, default 0,45 s) no
+grupo Scene via pref() + `?followSmooth=`/`?followEase=`. Clique ≠ arrasto:
+down→up com <6 px e <400 ms. `?follow=<i>` headless.
+**Sondas** (rodam nos 2 backends): `scripts/follow-probe.mjs` —
+`__limiarCamTrace` (dev) grava |Δpos|, Δângulo e Δt por frame em priority
+0.5 (pós-rig, pré-render; deltas normalizados pelo Δt real — hitch de
+headless não é snap); anti-snap = nenhum frame >3× os vizinhos (antes:
+12,6–23° no handoff; depois: rampa suave), lock 5 s com desvio ~1–3 mm e 0%
+de frames congelados (antes: 30% congelados no WebGPU denso — a escada do
+readback), órbita DURANTE o follow gira o enquadre sem soltar, ESC sem
+teleporte; fluxo real via gancho `__limiarFollow(i)` — `?follow=` não passa
+pela pose de overview. `scripts/follow-settled-check.mjs` — meta de
+qualidade do relato: seguindo pessoa ASSENTADA (estado 3/4 via readback de
+states) em grid 32 denso com separação 3,5, o tremor de alta frequência da
+câmera (>~4 Hz, resíduo sobre média móvel ±5 frames re-amostrados a 60 Hz)
+tem de ficar p95 <2 mm/frame e sem vaivém — medido **0,85 mm (WebGPU) /
+0,09 mm (WebGL2)**, 0% reversões; deriva lenta (a multidão espreme, físico)
+passa por design.
 
 **Terreno vivo (M4f)** — `src/scene/heightfield.ts` implementa h(x,z) DUAS
 vezes com a MESMA matemática: TSL (chão + sim) e JS (marker, labels).

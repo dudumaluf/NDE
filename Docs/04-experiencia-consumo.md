@@ -121,14 +121,25 @@ gesto (hover, follow) existe.
 
 A escada do §4.1 saiu do papel, ainda sem o áudio:
 
-1. **Hover** — a pessoa REAL mais próxima do cursor (raio ~1,2 m; dormentes
-   não respondem — quem tem história fala) ganha o **nome flutuando** sobre
-   a cabeça: billboard com fade de ~0,25 s, cor da paleta de labels
-   (segue o núcleo ou fixa, grupo Appearance), cursor vira pointer.
-2. **Clique = follow em 3ª pessoa** — transição suave de ~1,2 s até
-   atrás/acima da pessoa; depois a câmera ACOMPANHA (órbita e zoom seguem
-   livres — o OrbitControls não desliga). ESC ou clique no vazio solta,
-   sem teleporte. Arrastos de órbita nunca disparam clique.
+1. **Hover** — a pessoa REAL sob o cursor (dormentes não respondem — quem
+   tem história fala) ganha o **nome flutuando** sobre a cabeça: billboard
+   com fade de ~0,25 s, cor da paleta de labels (segue o núcleo ou fixa,
+   grupo Appearance), cursor vira pointer. *Refeito em 2026-07-13 (feedback
+   "não tá preciso"):* o acerto agora é em **screen-space** — mirar o corpo
+   NA TELA acerta (elipse do tamanho aparente; sobrepostos → o da frente
+   vence), em vez do antigo raio de 1,2 m ao redor do ponto do mouse no
+   chão, que falhava ao apontar para tronco/cabeça (doc 03 §14.6).
+2. **Clique = follow em 3ª pessoa** — a câmera viaja até atrás/acima da
+   pessoa e ACOMPANHA (órbita e zoom seguem livres — o OrbitControls não
+   desliga). ESC ou clique no vazio solta, sem teleporte. Arrastos de
+   órbita nunca disparam clique. *Refeito em 2026-07-13 (feedback "vai até
+   um ponto e dá um snap"; "quero tudo bem suave"):* a viagem virou
+   **springs contínuas sem fases** — não existe mais "fim de transição"
+   (era a costura do snap), clicar em outra pessoa emenda uma viagem na
+   outra, e a câmera segue uma posição **suavizada** da pessoa (espelho
+   interpolado + spring `follow smoothing`): no meio da multidão densa,
+   com colisões, o enquadre fica parado feito tripé — sem tremor (meta
+   medida: <1 mm/frame de ruído de alta frequência; doc 03 §14.6).
 3. **Timeline da história** — aparece só no follow, bottom-center, irmã
    estética da Legenda (que desvanece — uma voz por vez, §1.1): linha com
    leve atração ao mouse (eco do menu cables do Dudu), **pontos nos beats

@@ -223,6 +223,27 @@ async function probeBackend(browser, forceWebGL) {
     `frames congelados=${(fracZero * 100).toFixed(0)}% (pessoa ${moving ? "andando" : "parada"})`,
   );
 
+  // ---------- 3.5 órbita durante o follow continua viva ----------
+  const beforeOrbit = await page.evaluate("window.__limiarFollowState");
+  await page.mouse.move(640, 400);
+  await page.mouse.down();
+  await page.mouse.move(760, 360, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  const afterOrbit = await page.evaluate("window.__limiarFollowState");
+  const offBefore = beforeOrbit.cam.map((v, ix) => v - beforeOrbit.target[ix]);
+  const offAfter = afterOrbit.cam.map((v, ix) => v - afterOrbit.target[ix]);
+  const offDelta = Math.hypot(
+    offAfter[0] - offBefore[0],
+    offAfter[1] - offBefore[1],
+    offAfter[2] - offBefore[2],
+  );
+  check(
+    afterOrbit.following !== null && offDelta > 0.3,
+    "órbita durante o follow gira o enquadre (sem soltar)",
+    `Δoffset=${offDelta.toFixed(2)}u following=${afterOrbit.following}`,
+  );
+
   // ---------- 4. pessoa→pessoa (springs re-alvejadas, sem reset) ----------
   const second = await frontmost(target.i);
   if (second) {
