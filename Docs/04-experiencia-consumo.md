@@ -140,13 +140,43 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
    interpolado + spring `follow smoothing`): no meio da multidão densa,
    com colisões, o enquadre fica parado feito tripé — sem tremor (meta
    medida: <1 mm/frame de ruído de alta frequência; doc 03 §14.6).
-3. **Timeline da história** — aparece só no follow, bottom-center, irmã
-   estética da Legenda (que desvanece — uma voz por vez, §1.1): linha com
-   leve atração ao mouse (eco do menu cables do Dudu), **pontos nos beats
-   (`t_norm`) coloridos por valência** (fria→quente), anel na virada do
-   arco, nome + entrada/saída do arco à esquerda; hover num ponto = resumo
-   do beat + rótulo emocional; clique seleciona o beat. **v1 é visual** —
-   tocar o corte de áudio do beat é a próxima etapa (Supabase, §5.2).
+3. **Timeline da história** — aparece só no follow, bottom-center (a
+   Legenda desvanece — uma voz por vez, §1.1). *Redesenhada em 2026-07-14
+   (feedback do Dudu: "timeline com item demais espremido… quero algo mais
+   clean… coisas mais claras e padronizadas entre as pessoas"):*
+
+   - **Estações canônicas como default — a gramática comum.** Em vez de
+     despejar todos os beats, a linha mostra um conjunto FIXO de estações,
+     sempre com os mesmos nomes e na mesma ordem para toda pessoa (só
+     aparecem as presentes): **Antes · A morte · O outro lado · A virada ·
+     O retorno · Depois**. É a tese do projeto na UI: a mesma travessia,
+     marcos padronizados, palpáveis. Derivação de `beats[].type` +
+     `arc.virada` (primeiro beat de cada fase, com âncoras de ordem
+     narrativa — ver `src/ui/timelineStations.ts`); cobertura no corpus de
+     86: Antes 85/85 · A morte 74 · O outro lado 85 · A virada 82 ·
+     O retorno 78 · Depois 84. Pontos maiores, rótulo pequeno sempre
+     visível embaixo (≤6, nunca espreme), cor pela valência do beat;
+     virada que coincide com outra estação vira o anel dela.
+   - **Filtro de consumo** — o que a linha mostra são "pontos a serem
+     consumidos", e isso é um filtro: texto-botões minúsculos à direita
+     acima da linha (estética de rádio antigo) — **estações** (default) ·
+     **momentos** (todos os beats, pontos pequenos sem rótulo — a
+     densidade vira opção, não imposição) · **o elemento da lente ativa**
+     (só aparece com lente de elemento no Campo: pontos = quotes com
+     `t_norm` daquele elemento no JSON da pessoa — onde AQUELE fenômeno
+     acontece nesta história; pessoa sem o elemento = linha vazia,
+     honesto). Troca de modo = crossfade suave. Default via pref
+     (`Scene.tlmode`), `?tlmode=stations|all|element`.
+   - **Layout clean** — sem retângulo/painel: a linha flutua sobre a cena
+     (~48% da largura, sombra leve para legibilidade). Nome da pessoa em
+     caixa alta minúscula acima à esquerda; **entrada/saída do arco viraram
+     tooltips dos extremos da linha** (hover no início/fim — informação
+     sob demanda, não mobília); resumo do beat/estação só no hover, uma
+     linha acima com crossfade (padrão da frase da Legenda). Atração da
+     linha ao mouse mantida, mais sutil (é o charme, não o protagonista).
+   - Anel na virada, cores por valência (fria→quente) e clique-seleciona
+     continuam. **v1 é visual** — tocar o corte de áudio do beat é a
+     próxima etapa (Supabase, §5.2).
 
 Pendências assumidas: áudio (a Sintonia §5.1 e o corte por beat), e o
 espelho de posições (doc 03 §14.6) como limite conhecido — se a latência

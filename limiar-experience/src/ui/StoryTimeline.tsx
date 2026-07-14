@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useControls } from "leva";
 import { useContent } from "../data/contentStore";
 import {
   clearPerson,
@@ -8,52 +9,91 @@ import {
   type PersonBeat,
 } from "../data/personStore";
 import { useFollow } from "./followStore";
+import { useLegend } from "./legendStore";
 import { cssColor, demoRampColor } from "../data/palette";
+import { computeStations } from "./timelineStations";
+import { prefStr } from "../lib/prefs";
 
 /**
- * Timeline da história (M4e, doc 04 §4.1): aparece ao entrar em follow —
- * a linha do tempo da entrevista da pessoa seguida, bottom-center, irmã
- * estética da Legend (mesma fonte, fundo translúcido, caixa alta discreta).
+ * Timeline da história (M4e; redesenhada 2026-07-14 com o feedback do Dudu:
+ * "timeline com item demais espremido... quero algo mais clean... coisas
+ * padronizadas entre as pessoas"). Aparece só no follow, bottom-center.
  *
- * Referência visual: o menu do patch cables do Dudu
- * (public/examples_code/Menu_Timeline): linha horizontal com pontos, labels
- * pequenos embaixo, item ativo grande, e a LINHA levemente atraída pelo
- * mouse (SVG puro — custo zero de WebGL; o path é re-desenhado num rAF só
- * enquanto a timeline está montada).
+ * Três decisões do redesign:
+ *  1. ESTAÇÕES CANÔNICAS como default — a gramática comum entre as
+ *     histórias (Antes · A morte · O outro lado · A virada · O retorno ·
+ *     Depois), derivada de beats[].type + arc.virada em
+ *     ui/timelineStations.ts. Pontos maiores, rótulo sempre visível,
+ *     mesmos nomes/ordem para todo mundo (só as presentes aparecem).
+ *  2. FILTRO DE CONSUMO — texto-botões minúsculos acima da linha (estética
+ *     de rádio antigo): estações (default) · momentos (todos os beats,
+ *     pontos pequenos sem rótulo) · o elemento da lente ativa no Campo
+ *     (pontos = quotes com t_norm daquele elemento no JSON da pessoa).
+ *     Default via pref ("Scene.tlmode"); ?tlmode=stations|all|element para
+ *     screenshots. Trocar de modo = crossfade dos pontos.
+ *  3. LAYOUT CLEAN — sem retângulo/painel: a linha flutua sobre a cena
+ *     (~48% da largura) com sombra para legibilidade. Nome em caixa alta
+ *     minúscula acima à esquerda; entrada/saída do arco viraram tooltips
+ *     dos EXTREMOS da linha; resumo do ponto só no hover, numa linha acima
+ *     com crossfade (padrão BottomPhrase da Legend).
  *
- * Pontos em `t_norm` coloridos por valência (−2 frio → +2 quente, rampa do
- * demoRampColor — a mesma família das lentes ordinais); anel discreto na
- * `virada` do arco. Hover = resumo do beat + rótulo emocional numa linha
- * acima (crossfade). Clique = seleciona (activeBeat no personStore) — v1 é
- * VISUAL; tocar o áudio do corte é a próxima etapa (doc 04 §4.1).
+ * Mantidos: linha SVG com leve atração ao mouse (eco do menu cables, mais
+ * sutil), pontos coloridos por valência (fria→quente), anel na virada,
+ * clique seleciona o beat (v1 visual; áudio é a próxima etapa).
  */
 
 const FONT_STACK =
   '"Inter", "SF Pro Text", "Helvetica Neue", system-ui, sans-serif';
 
 const W = 640;
-const H = 74;
-const PAD_X = 18;
-const LINE_Y = 30;
-const LABEL_Y = 52;
+const H = 70;
+const PAD_X = 24;
+const LINE_Y = 18;
+/** Rótulos em até 3 linhas: estações coladas descem (nunca se sobrepõem). */
+const LABEL_Y0 = 40;
+const LABEL_ROW_DY = 11;
+const LABEL_MAX_ROWS = 3;
+/** Largura estimada por caractere (font 7.5px caixa alta + tracking 0.16em). */
+const LABEL_CHAR_W = 5.4;
+
+const TL_MODES = ["stations", "all", "element"] as const;
+type TimelineMode = (typeof TL_MODES)[number];
+
+/** Sombra dos textos HTML — a timeline flutua sem painel. */
+const TEXT_SHADOW = "0 1px 12px rgba(0,0,0,0.6), 0 0 2px rgba(0,0,0,0.45)";
 
 /** Cor da valência −2..+2 → rampa fria→quente (nunca passa pelo verde). */
 function valenceColor(v: number): string {
   return cssColor(demoRampColor((Math.max(-2, Math.min(2, v)) + 2) / 4));
 }
 
-interface TimelineBeat {
-  beat: PersonBeat;
-  x: number;
-  valence: number;
-  emotionLabel: string | null;
-  isVirada: boolean;
-  /** Linha do label (0/1): beats colados alternam para não sobrepor. */
-  labelRow: number;
+/** Cor dos pontos do modo elemento — o creme "viveram isso" da Legend. */
+const ELEMENT_DOT = "rgb(237, 222, 184)";
+
+/** t_norm [0,1] → x no viewBox da linha. */
+function xOf(t: number): number {
+  return PAD_X + t * (W - PAD_X * 2);
 }
 
-/** Linha acima da timeline: resumo do beat com crossfade (padrão da Legend). */
-function BeatInfo({ text }: { text: string | null }) {
+/** Um ponto desenhável na linha, qualquer que seja o modo. */
+interface TimelineDot {
+  key: string;
+  x: number;
+  color: string;
+  /** Raio base (estações são maiores que beats/quotes). */
+  r: number;
+  /** Rótulo sempre visível embaixo (só estações). */
+  label: string | null;
+  labelRow: number;
+  isVirada: boolean;
+  /** Texto da linha de info no hover. */
+  info: string;
+  /** beat_index selecionável no clique (quote usa o beat que a contém). */
+  beatIndex: number | null;
+}
+
+/** Linha acima da timeline: resumo no hover com crossfade (padrão Legend). */
+function InfoLine({ text }: { text: string | null }) {
   const [shown, setShown] = useState(text);
   const [visible, setVisible] = useState(Boolean(text));
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,7 +108,7 @@ function BeatInfo({ text }: { text: string | null }) {
     timer.current = setTimeout(() => {
       setShown(text);
       setVisible(Boolean(text));
-    }, 220);
+    }, 200);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
@@ -77,20 +117,21 @@ function BeatInfo({ text }: { text: string | null }) {
   return (
     <div
       style={{
-        minHeight: 38,
+        minHeight: 40,
         display: "flex",
         alignItems: "flex-end",
         justifyContent: "center",
         textAlign: "center",
-        padding: "0 18px 8px",
+        padding: "0 12px 9px",
         fontSize: 12.5,
         fontWeight: 300,
         letterSpacing: "0.04em",
         lineHeight: 1.45,
-        color: "rgba(235, 230, 222, 0.9)",
+        color: "rgba(235, 230, 222, 0.92)",
+        textShadow: TEXT_SHADOW,
         opacity: visible ? 1 : 0,
         transform: `translateY(${visible ? 0 : 4}px)`,
-        transition: "opacity 0.22s ease, transform 0.22s ease",
+        transition: "opacity 0.2s ease, transform 0.2s ease",
         pointerEvents: "none",
       }}
     >
@@ -104,7 +145,19 @@ export function StoryTimeline() {
   const following = useFollow((s) => s.following);
   const person = usePerson((s) => s.person);
   const activeBeat = usePerson((s) => s.activeBeat);
-  const [hoverBeat, setHoverBeat] = useState<number | null>(null);
+  const elementLens = useLegend((s) => s.elementLens);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+
+  // Modo do filtro: controle leva (grupo Scene, path estável p/ prefs) que os
+  // texto-botões da própria timeline re-escrevem — uma fonte de verdade só.
+  const [{ tlmode }, setTl] = useControls("Scene", () => ({
+    tlmode: {
+      value: prefStr<TimelineMode>("tlmode", "Scene.tlmode", "stations", TL_MODES),
+      options: { stations: "stations", "all beats": "all", element: "element" },
+      label: "timeline mode",
+      hint: "what the story timeline plots: canonical stations, every beat, or the active element lens' quotes",
+    },
+  }));
 
   // Entrar/sair do follow carrega/limpa a pessoa (fetch com cache).
   useEffect(() => {
@@ -115,32 +168,107 @@ export function StoryTimeline() {
     }
   }, [following, content]);
 
-  const beats = useMemo<TimelineBeat[]>(() => {
-    if (!person) return [];
-    const emotion = new Map(
-      person.arc.beats_emotion.map((e) => [e.beat_index, e]),
-    );
-    let prevX = -1e9;
-    let prevRow = 0;
-    return person.beats.map((b) => {
-      const e = emotion.get(b.beat_index);
-      const x = PAD_X + b.t_norm * (W - PAD_X * 2);
-      // labels de beats colados (<72 px) alternam de linha
-      const labelRow = x - prevX < 72 ? 1 - prevRow : 0;
-      prevX = x;
-      prevRow = labelRow;
-      return {
-        beat: b,
-        x,
-        valence: e?.valence ?? 0,
-        emotionLabel: e?.label ?? null,
-        isVirada: person.arc.virada === b.beat_index,
-        labelRow,
-      };
-    });
-  }, [person]);
+  // Modo efetivo: "element" exige lente de elemento ativa no Campo.
+  const mode: TimelineMode =
+    tlmode === "element" && !elementLens ? "stations" : (tlmode as TimelineMode);
 
-  // --- linha atraída pelo mouse: path + pontos re-desenhados num rAF ---
+  // Crossfade na troca de modo: esvanece os pontos, troca, re-esvanece.
+  const [shownMode, setShownMode] = useState<TimelineMode>(mode);
+  const [dotsVisible, setDotsVisible] = useState(true);
+  useEffect(() => {
+    if (mode === shownMode) return;
+    setDotsVisible(false);
+    setHoverKey(null);
+    const t = setTimeout(() => {
+      setShownMode(mode);
+      setDotsVisible(true);
+    }, 180);
+    return () => clearTimeout(t);
+  }, [mode, shownMode]);
+
+  const emotion = useMemo(
+    () =>
+      new Map(
+        (person?.arc.beats_emotion ?? []).map((e) => [e.beat_index, e]),
+      ),
+    [person],
+  );
+
+  const dots = useMemo<TimelineDot[]>(() => {
+    if (!person) return [];
+
+    if (shownMode === "stations") {
+      // Linha do rótulo por LARGURA real estimada: cada rótulo desce para a
+      // primeira linha onde não colide com o anterior (estações podem se
+      // amontoar no início — ex.: morte aos 3% da entrevista).
+      const rowRight: number[] = [];
+      return computeStations(person).map((st) => {
+        const e = emotion.get(st.beat.beat_index);
+        const x = xOf(st.beat.t_norm);
+        const half = (st.label.length * LABEL_CHAR_W) / 2;
+        let labelRow = rowRight.findIndex((r) => x - half > r + 6);
+        if (labelRow === -1) {
+          labelRow =
+            rowRight.length < LABEL_MAX_ROWS
+              ? rowRight.length
+              : rowRight.indexOf(Math.min(...rowRight));
+        }
+        rowRight[labelRow] = x + half;
+        return {
+          key: `st:${st.key}`,
+          x,
+          color: valenceColor(e?.valence ?? 0),
+          r: 4.5,
+          label: st.label,
+          labelRow,
+          isVirada: st.isVirada,
+          info: (e?.label ? `${e.label} — ` : "") + st.beat.summary,
+          beatIndex: st.beat.beat_index,
+        };
+      });
+    }
+
+    if (shownMode === "all") {
+      return person.beats.map((b) => {
+        const e = emotion.get(b.beat_index);
+        return {
+          key: `beat:${b.beat_index}`,
+          x: xOf(b.t_norm),
+          color: valenceColor(e?.valence ?? 0),
+          r: 2.6,
+          label: null,
+          labelRow: 0,
+          isVirada: person.arc.virada === b.beat_index,
+          info: (e?.label ? `${e.label} — ` : "") + b.summary,
+          beatIndex: b.beat_index,
+        };
+      });
+    }
+
+    // "element": as quotes (com t_norm) do elemento da lente ativa nesta
+    // história — os pontos onde AQUELE elemento acontece. Pessoa sem o
+    // elemento = linha vazia (honesto: ela não conta sobre isso).
+    const el = person.elements?.find((e) => e.key === elementLens);
+    const quotes = [...(el?.quotes ?? [])].sort((a, b) => a.t_norm - b.t_norm);
+    const containing = (t: number): PersonBeat | undefined =>
+      person.beats.find((b) => t >= b.t_norm && t <= b.t_norm_end) ??
+      [...person.beats].sort(
+        (a, b) => Math.abs(a.t_norm - t) - Math.abs(b.t_norm - t),
+      )[0];
+    return quotes.map((q, i) => ({
+      key: `q:${i}`,
+      x: xOf(q.t_norm),
+      color: ELEMENT_DOT,
+      r: 3.2,
+      label: null,
+      labelRow: 0,
+      isVirada: false,
+      info: `“${q.text}”`,
+      beatIndex: containing(q.t_norm)?.beat_index ?? null,
+    }));
+  }, [person, shownMode, elementLens, emotion]);
+
+  // --- linha atraída pelo mouse (eco do menu cables), mais sutil que a v1 ---
   const svgRef = useRef<SVGSVGElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
   const mouse = useRef({ x: 0, y: 0, in: 0 });
@@ -153,12 +281,12 @@ export function StoryTimeline() {
       const m = mouse.current;
       const p = pull.current;
       // easing: a linha persegue o mouse (entra) e relaxa reta (sai)
-      p.k += (m.in - p.k) * 0.12;
-      p.x += (m.x - p.x) * 0.18;
-      p.y += (m.y - p.y) * 0.18;
+      p.k += (m.in - p.k) * 0.1;
+      p.x += (m.x - p.x) * 0.16;
+      p.y += (m.y - p.y) * 0.16;
 
-      const amp = Math.max(-13, Math.min(13, (p.y - LINE_Y) * 0.45)) * p.k;
-      const sigma2 = 2 * 85 * 85;
+      const amp = Math.max(-7, Math.min(7, (p.y - LINE_Y) * 0.3)) * p.k;
+      const sigma2 = 2 * 95 * 95;
       const yAt = (x: number) =>
         LINE_Y + amp * Math.exp(-((x - p.x) * (x - p.x)) / sigma2);
 
@@ -174,6 +302,11 @@ export function StoryTimeline() {
           const x = Number(el.dataset.x);
           el.setAttribute("cy", yAt(x).toFixed(2));
         });
+        svg.querySelectorAll<SVGElement>("[data-tick]").forEach((el) => {
+          const y = yAt(Number(el.dataset.x));
+          el.setAttribute("y1", (y - 3).toFixed(2));
+          el.setAttribute("y2", (y + 3).toFixed(2));
+        });
       }
       raf = requestAnimationFrame(tick);
     };
@@ -184,135 +317,212 @@ export function StoryTimeline() {
   if (following === null || !person || !content) return null;
 
   const name = content.manifest.people[following]?.display_name ?? "";
-  // Histórias curtas (≤8 beats) mostram todos os labels como o menu cables;
-  // longas (20+) só ativo/hover — senão os labels viram mancha ilegível.
-  const showAllLabels = beats.length <= 8;
-  const infoBeat =
-    hoverBeat !== null
-      ? beats.find((b) => b.beat.beat_index === hoverBeat)
-      : activeBeat !== null
-        ? beats.find((b) => b.beat.beat_index === activeBeat)
-        : null;
-  const infoText = infoBeat
-    ? (infoBeat.emotionLabel ? `${infoBeat.emotionLabel} — ` : "") +
-      infoBeat.beat.summary
+  const elementLabel = elementLens
+    ? (content.taxonomy.elementos.find((e) => e.key === elementLens)?.label ??
+      elementLens)
     : null;
+
+  const hoveredDot =
+    hoverKey !== null ? dots.find((d) => d.key === hoverKey) : undefined;
+  const infoText = hoveredDot
+    ? hoveredDot.info
+    : hoverKey === "in" && person.arc.entrada
+      ? person.arc.entrada.resumo
+      : hoverKey === "out" && person.arc.saida
+        ? person.arc.saida.resumo
+        : activeBeat !== null
+          ? (dots.find((d) => d.beatIndex === activeBeat)?.info ?? null)
+          : null;
+
+  const modeButton = (m: TimelineMode, label: string) => (
+    <button
+      key={m}
+      onClick={() => setTl({ tlmode: m })}
+      style={{
+        all: "unset",
+        cursor: "pointer",
+        fontSize: 8.5,
+        fontWeight: mode === m ? 400 : 300,
+        letterSpacing: "0.18em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+        maxWidth: 150,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        color:
+          mode === m ? "rgba(235, 230, 222, 0.95)" : "rgba(201, 194, 184, 0.42)",
+        textShadow: TEXT_SHADOW,
+        transition: "color 0.25s ease",
+      }}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div
       style={{
         position: "fixed",
         left: "50%",
-        bottom: 30,
+        bottom: 26,
         transform: "translateX(-50%)",
-        width: "min(920px, 92vw)",
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 18,
-        padding: "12px 20px 10px",
-        borderRadius: 12,
-        background: "rgba(22, 21, 20, 0.55)",
-        backdropFilter: "blur(14px)",
-        WebkitBackdropFilter: "blur(14px)",
-        border: "1px solid rgba(255, 252, 245, 0.06)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+        width: "clamp(400px, 48vw, 660px)",
         fontFamily: FONT_STACK,
         zIndex: 42,
-        animation: "limiar-fadein 0.5s ease",
+        pointerEvents: "none",
+        animation: "limiar-tl-fadein 0.5s ease",
       }}
     >
-      <style>{`@keyframes limiar-fadein { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }`}</style>
+      <style>{`@keyframes limiar-tl-fadein { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }`}</style>
 
-      {/* título à esquerda: nome + entrada/saída do arco */}
-      <div style={{ width: 210, flexShrink: 0, paddingBottom: 6 }}>
+      {/* resumo do ponto (hover) — uma linha acima da timeline, crossfade */}
+      <InfoLine text={infoText} />
+
+      {/* acima da linha: nome à esquerda, filtro de consumo à direita */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: `0 ${(PAD_X / W) * 100}%`,
+          marginBottom: 4,
+        }}
+      >
         <div
           style={{
-            fontSize: 10.5,
+            fontSize: 10,
             fontWeight: 400,
-            letterSpacing: "0.2em",
+            letterSpacing: "0.22em",
             textTransform: "uppercase",
-            color: "rgba(233, 228, 220, 0.88)",
-            lineHeight: 1.5,
-            marginBottom: 6,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            color: "rgba(233, 228, 220, 0.85)",
+            textShadow: TEXT_SHADOW,
           }}
         >
           {name}
         </div>
-        {person.arc.entrada && (
-          <div
-            style={{
-              fontSize: 10.5,
-              fontWeight: 300,
-              letterSpacing: "0.03em",
-              lineHeight: 1.45,
-              color: "rgba(201, 194, 184, 0.6)",
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}
-          >
-            {person.arc.entrada.resumo}
-          </div>
-        )}
-        {person.arc.saida && (
-          <div
-            style={{
-              marginTop: 4,
-              fontSize: 10.5,
-              fontWeight: 300,
-              letterSpacing: "0.03em",
-              lineHeight: 1.45,
-              color: "rgba(214, 205, 190, 0.74)",
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}
-          >
-            {person.arc.saida.resumo}
-          </div>
-        )}
-      </div>
-
-      {/* a linha do tempo (SVG) com o resumo do beat por cima */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <BeatInfo text={infoText} />
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", height: "auto", display: "block" }}
-          onMouseMove={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            mouse.current.x = ((e.clientX - r.left) / r.width) * W;
-            mouse.current.y = ((e.clientY - r.top) / r.height) * H;
-            mouse.current.in = 1;
-          }}
-          onMouseLeave={() => {
-            mouse.current.in = 0;
-            setHoverBeat(null);
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 14,
+            pointerEvents: "auto",
           }}
         >
-          <path
-            ref={pathRef}
-            d={`M${PAD_X},${LINE_Y} L${W - PAD_X},${LINE_Y}`}
-            fill="none"
-            stroke="rgba(233, 228, 220, 0.34)"
-            strokeWidth="1"
+          {modeButton("stations", "estações")}
+          {modeButton("all", "momentos")}
+          {elementLabel && modeButton("element", elementLabel)}
+        </div>
+      </div>
+
+      {/* a linha (SVG) — flutua sem painel; sombra dá a legibilidade */}
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        style={{
+          width: "100%",
+          height: "auto",
+          display: "block",
+          pointerEvents: "auto",
+          filter: "drop-shadow(0 1px 5px rgba(0,0,0,0.55))",
+        }}
+        onMouseMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          mouse.current.x = ((e.clientX - r.left) / r.width) * W;
+          mouse.current.y = ((e.clientY - r.top) / r.height) * H;
+          mouse.current.in = 1;
+        }}
+        onMouseLeave={() => {
+          mouse.current.in = 0;
+          setHoverKey(null);
+        }}
+      >
+        {/* extremos: entrada/saída do arco sob demanda (tooltip, não mobília) */}
+        {person.arc.entrada && (
+          <rect
+            x={0}
+            y={0}
+            width={PAD_X + 8}
+            height={H}
+            fill="transparent"
+            onMouseEnter={() => setHoverKey("in")}
+            onMouseLeave={() => setHoverKey((h) => (h === "in" ? null : h))}
           />
-          {beats.map((b) => {
-            const active = activeBeat === b.beat.beat_index;
-            const hovered = hoverBeat === b.beat.beat_index;
-            const color = valenceColor(b.valence);
+        )}
+        {person.arc.saida && (
+          <rect
+            x={W - PAD_X - 8}
+            y={0}
+            width={PAD_X + 8}
+            height={H}
+            fill="transparent"
+            onMouseEnter={() => setHoverKey("out")}
+            onMouseLeave={() => setHoverKey((h) => (h === "out" ? null : h))}
+          />
+        )}
+
+        <path
+          ref={pathRef}
+          d={`M${PAD_X},${LINE_Y} L${W - PAD_X},${LINE_Y}`}
+          fill="none"
+          stroke="rgba(233, 228, 220, 0.35)"
+          strokeWidth="1"
+        />
+        {/* tiques dos extremos — a única pista de que ali mora algo */}
+        <line
+          data-tick
+          data-x={PAD_X}
+          x1={PAD_X}
+          y1={LINE_Y - 3}
+          x2={PAD_X}
+          y2={LINE_Y + 3}
+          stroke={
+            hoverKey === "in"
+              ? "rgba(235, 230, 222, 0.8)"
+              : "rgba(233, 228, 220, 0.35)"
+          }
+          strokeWidth="1"
+          style={{ transition: "stroke 0.25s ease" }}
+        />
+        <line
+          data-tick
+          data-x={W - PAD_X}
+          x1={W - PAD_X}
+          y1={LINE_Y - 3}
+          x2={W - PAD_X}
+          y2={LINE_Y + 3}
+          stroke={
+            hoverKey === "out"
+              ? "rgba(235, 230, 222, 0.8)"
+              : "rgba(233, 228, 220, 0.35)"
+          }
+          strokeWidth="1"
+          style={{ transition: "stroke 0.25s ease" }}
+        />
+
+        {/* os pontos do modo ativo (crossfade na troca) */}
+        <g
+          style={{
+            opacity: dotsVisible ? 1 : 0,
+            transition: "opacity 0.18s ease",
+          }}
+        >
+          {dots.map((d) => {
+            const active =
+              d.beatIndex !== null && activeBeat === d.beatIndex;
+            const hovered = hoverKey === d.key;
             return (
-              <g key={b.beat.beat_index}>
-                {b.isVirada && (
+              <g key={d.key}>
+                {d.isVirada && (
                   <circle
                     data-dot
-                    data-x={b.x}
-                    cx={b.x}
+                    data-x={d.x}
+                    cx={d.x}
                     cy={LINE_Y}
-                    r={7.5}
+                    r={d.r + 4}
                     fill="none"
                     stroke="rgba(233, 228, 220, 0.55)"
                     strokeWidth="0.8"
@@ -320,60 +530,61 @@ export function StoryTimeline() {
                 )}
                 <circle
                   data-dot
-                  data-x={b.x}
-                  cx={b.x}
+                  data-x={d.x}
+                  cx={d.x}
                   cy={LINE_Y}
-                  r={active ? 5.5 : hovered ? 4.5 : 3}
-                  fill={color}
+                  r={active ? d.r + 2 : hovered ? d.r + 1.2 : d.r}
+                  fill={d.color}
                   style={{ transition: "r 0.18s ease" }}
                 />
                 {/* alvo de clique generoso (o ponto é pequeno) */}
                 <circle
                   data-dot
-                  data-x={b.x}
-                  cx={b.x}
+                  data-x={d.x}
+                  cx={d.x}
                   cy={LINE_Y}
-                  r={13}
+                  r={10}
                   fill="transparent"
+                  pointerEvents="all"
                   style={{ cursor: "pointer" }}
-                  onMouseEnter={() => setHoverBeat(b.beat.beat_index)}
+                  onMouseEnter={() => setHoverKey(d.key)}
                   onMouseLeave={() =>
-                    setHoverBeat((h) => (h === b.beat.beat_index ? null : h))
+                    setHoverKey((h) => (h === d.key ? null : h))
                   }
-                  onClick={() =>
+                  onClick={() => {
+                    if (d.beatIndex === null) return;
                     setActiveBeat(
-                      activeBeat === b.beat.beat_index
-                        ? null
-                        : b.beat.beat_index,
-                    )
-                  }
+                      activeBeat === d.beatIndex ? null : d.beatIndex,
+                    );
+                  }}
                 />
-                {(showAllLabels || active || hovered) && (
+                {d.label && (
                   <text
-                    x={b.x}
-                    y={LABEL_Y + (showAllLabels ? b.labelRow * 11 : 0)}
+                    x={d.x}
+                    y={LABEL_Y0 + d.labelRow * LABEL_ROW_DY}
                     textAnchor="middle"
                     style={{
                       fontFamily: FONT_STACK,
-                      fontSize: active ? 9.5 : hovered ? 8.5 : 7.5,
+                      fontSize: active || hovered ? 8.5 : 7.5,
                       fontWeight: active ? 400 : 300,
-                      letterSpacing: "0.14em",
+                      letterSpacing: "0.16em",
                       textTransform: "uppercase",
                       fill:
                         active || hovered
-                          ? "rgba(235, 230, 222, 0.92)"
-                          : "rgba(201, 194, 184, 0.5)",
+                          ? "rgba(235, 230, 222, 0.95)"
+                          : "rgba(207, 200, 190, 0.62)",
                       pointerEvents: "none",
+                      transition: "fill 0.2s ease",
                     }}
                   >
-                    {b.beat.type}
+                    {d.label}
                   </text>
                 )}
               </g>
             );
           })}
-        </svg>
-      </div>
+        </g>
+      </svg>
     </div>
   );
 }

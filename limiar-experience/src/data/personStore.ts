@@ -32,6 +32,18 @@ export interface PersonArcEnd {
   valence: number;
 }
 
+/** Quote literal de um elemento (só o que o modo "elemento" da timeline usa). */
+export interface PersonElementQuote {
+  text: string;
+  /** Posição normalizada [0,1] no tempo total da entrevista. */
+  t_norm: number;
+}
+
+export interface PersonElement {
+  key: string;
+  quotes: PersonElementQuote[];
+}
+
 export interface PersonDetail {
   id: string;
   display_name: string;
@@ -43,6 +55,8 @@ export interface PersonDetail {
     virada: number | null;
   };
   beats: PersonBeat[];
+  /** Elementos com quotes (t_norm) — o modo "elemento" da timeline lê daqui. */
+  elements?: PersonElement[];
   timeline_norm: { total_s: number };
 }
 
