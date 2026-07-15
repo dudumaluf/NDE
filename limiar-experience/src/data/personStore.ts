@@ -32,6 +32,11 @@ export interface PersonArcEnd {
   valence: number;
 }
 
+export interface PersonSummary {
+  one_liner: string;
+  short?: string;
+}
+
 /** Quote literal de um elemento (só o que o modo "elemento" da timeline usa). */
 export interface PersonElementQuote {
   text: string;
@@ -58,6 +63,7 @@ export interface PersonAudio {
 export interface PersonDetail {
   id: string;
   display_name: string;
+  summary?: PersonSummary;
   arc: {
     beats_emotion: PersonBeatEmotion[];
     entrada?: PersonArcEnd;

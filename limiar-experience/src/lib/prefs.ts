@@ -40,14 +40,135 @@ const GROUP_RENAMES: readonly [string, string][] = [
   ["Preferências.", "Preferences."],
 ];
 
+/** Reorganização do painel (2026-07-15): testemunhas vs dormentes vs física. */
+const PHYS = "Field · physics";
+const WIT = "Witnesses";
+const DORM = "Dormants";
+const COUPLE = "Field · coupling";
+const STAGE = "Stage (treadmill)";
+
+function moveGroup(
+  out: Record<string, string>,
+  from: string,
+  to: string,
+  keys: readonly string[],
+): void {
+  for (const k of keys) out[`${from}.${k}`] = `${to}.${k}`;
+}
+
+const PATH_MIGRATIONS: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  moveGroup(m, "Crowd", PHYS, [
+    "grid",
+    "ruido",
+    "seed",
+    "escala",
+    "paleta",
+  ]);
+  moveGroup(m, "Simulation", PHYS, [
+    "maxSpeed",
+    "separacao",
+    "sepRaio",
+    "contRaio",
+    "worldWrap",
+    "debugAreas",
+    "mouseModo",
+    "mouseRaio",
+    "mouseForca",
+    "giro",
+    "passo",
+    "faceFlip",
+    "debug",
+  ]);
+  moveGroup(m, "States (per agent)", WIT, [
+    "auto",
+    "v0",
+    "v1",
+    "histerese",
+    "fadeEstado",
+    "pesoIdle",
+    "pesoRezar",
+    "onda",
+    "wanderW",
+    "wanderScale",
+    "wanderEvolve",
+    "wanderVariance",
+    "pausas",
+    "speedVariance",
+    "wanderWhileSeek",
+    "lockAtCluster",
+    "speedMul",
+    "hoverFreeze",
+  ]);
+  moveGroup(m, "States (per agent)", DORM, [
+    "pausas",
+    "dormVel",
+    "speedVariance",
+    "wanderW",
+    "wanderScale",
+    "wanderEvolve",
+    "wanderVariance",
+    "wanderWhileForm",
+    "lockAtForm",
+  ]);
+  // Wander saiu de Field · physics (2026-07-15): global → por grupo.
+  m["Field · physics.wander"] = `${WIT}.wanderW`;
+  m["Field · physics.wanderScale"] = `${WIT}.wanderScale`;
+  m["Field · physics.wanderEvolve"] = `${WIT}.wanderEvolve`;
+  m["Simulation.wander"] = `${WIT}.wanderW`;
+  m["Simulation.wanderScale"] = `${WIT}.wanderScale`;
+  m["Simulation.wanderEvolve"] = `${WIT}.wanderEvolve`;
+  m["Dormants.dormWander"] = `${DORM}.wanderW`;
+  m["States (per agent).dormWander"] = `${DORM}.wanderW`;
+  moveGroup(m, "Data (M3)", WIT, [
+    "gravidade",
+    "mapScale",
+    "gravForca",
+    "lente",
+    "fios",
+    "fiosAlpha",
+    "fiosAltura",
+    "fiosFadePerto",
+    "fiosFadeLonge",
+    "fiosPeso",
+    "fiosSoNucleos",
+    "palavras",
+    "formRaio",
+  ]);
+  m["Demographic lens.dlente"] = `${WIT}.dlente`;
+  moveGroup(m, "Formations", DORM, ["formation", "spacing"]);
+  m["Crowd.soHistorias"] = `${DORM}.soHistorias`;
+  moveGroup(m, "Active field", COUPLE, [
+    "fieldOn",
+    "fieldRadius",
+    "fieldStrength",
+    "yieldW",
+    "selInertia",
+    "storyField",
+    "storyRadius",
+    "storyRepelRadius",
+    "storyStrength",
+  ]);
+  moveGroup(m, "Active field", STAGE, ["steerOn", "steerStrength"]);
+  return m;
+})();
+
+function migratePath(path: string): string {
+  let p = path;
+  const hit = GROUP_RENAMES.find(([old]) => p.startsWith(old));
+  if (hit) p = hit[1] + p.slice(hit[0].length);
+  return PATH_MIGRATIONS[p] ?? p;
+}
+
 function migrateValues(values: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [path, v] of Object.entries(values)) {
-    const hit = GROUP_RENAMES.find(([old]) => path.startsWith(old));
-    // Path novo já presente vence o migrado (`?? =` não sobrescreve).
-    const key = hit ? hit[1] + path.slice(hit[0].length) : path;
-    if (!(key in out) || key === path) out[key] = v;
+    const key = migratePath(path);
+    if (!(key in out)) out[key] = v;
   }
+  // attract puro → social (bolha interna, 2026-07-15).
+  const sf = out["Field · coupling.storyField"];
+  if (sf === "attract") out["Field · coupling.storyField"] = "social";
   return out;
 }
 

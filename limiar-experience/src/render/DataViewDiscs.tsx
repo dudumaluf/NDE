@@ -74,7 +74,7 @@ export function DataViewDiscs({ content }: { content: Content }) {
 
   // Reconstrói as cores quando o content muda (seed lida no momento).
   const fillColors = (attr: THREE.InstancedBufferAttribute) => {
-    const seed = levaVal("Crowd.seed", 3);
+    const seed = levaVal("Field · physics.seed", 3);
     fillContentAttributes({ colorScale: attr }, MAX_COUNT, seed, content);
     attr.needsUpdate = true;
   };
@@ -174,7 +174,7 @@ export function DataViewDiscs({ content }: { content: Content }) {
 
     // Desenha só os agentes ativos (grid atual) — os além de count têm
     // posição obsoleta. Invisível quando o crossfade está zerado.
-    const grid = levaVal("Crowd.grid", 32);
+    const grid = levaVal("Field · physics.grid", 32);
     const count = Math.min(grid * grid, MAX_COUNT);
     b.mesh.count = mix.current > 0.004 ? count : 0;
 

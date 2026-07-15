@@ -16,6 +16,7 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
+import { terrainU } from "../../scene/heightfield";
 
 type N = any;
 
@@ -118,12 +119,14 @@ export function buildHeightFog(fogColor: THREE.Color): HeightFogHandle {
   const heightBand: N = exp(hNorm.mul(-3));
 
   // Ruído lento em espaço de mundo (xz + deriva temporal) — "nuvens" do banco.
+  // O scroll da esteira (terrainU.scroll*) desloca o domínio junto com o
+  // chão — sem isso as nuvens ficam paradas enquanto o grid/terreno anda.
   // cheapTriNoise devolve ~[0, 0.9]; recentra para [1-amt, 1+amt].
   const drift: N = time.mul(uDrift);
   const noiseP: N = vec3(
-    positionWorld.x.mul(0.09).add(drift.mul(0.05)),
+    positionWorld.x.add(terrainU.scrollX).mul(0.09).add(drift.mul(0.05)),
     positionWorld.y.mul(0.22),
-    positionWorld.z.mul(0.09).sub(drift.mul(0.035)),
+    positionWorld.z.add(terrainU.scrollZ).mul(0.09).sub(drift.mul(0.035)),
   );
   const noise: N = cheapTriNoise(noiseP, drift);
   // De cima o tri-noise (anisotrópico, cristas alinhadas aos eixos) viraria

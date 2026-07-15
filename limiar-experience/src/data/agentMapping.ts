@@ -14,10 +14,14 @@ export interface AgentTargetParams {
   containRadius: number;
   /** Lente ativa (key de elemento da taxonomy) ou null. */
   lens: string | null;
+  /** Testemunhas buscam alvo (w=1)? Gravidade OU lente elemento — nunca formação. */
+  witnessSeek: boolean;
 }
 
 /**
  * Preenche `out` (vec4 por agente: xyz alvo no mundo, w = tem-alvo 0/1).
+ * `witnessSeek` false: posições UMAP/lente ficam no buffer mas w=0 — a física
+ * ignora (formação dos dormentes pode ligar seekWeight sem puxar testemunhas).
  * Sem lente: alvo = umap3d escalado (x,z no chão — eixos 0 e 2).
  * Com lente: quem TEM o elemento → anel interno (gravita ao centro);
  * quem NÃO tem → anel na borda da contenção. Ângulo preservado do layout
@@ -27,11 +31,12 @@ export function computeTargets(
   content: Content,
   agentCount: number,
   out: Float32Array,
-  { mapScale, containRadius, lens }: AgentTargetParams,
+  { mapScale, containRadius, lens, witnessSeek }: AgentTargetParams,
 ): void {
   out.fill(0);
   const people = content.manifest.people;
   const n = Math.min(people.length, agentCount);
+  const w = witnessSeek ? 1 : 0;
 
   for (let i = 0; i < n; i++) {
     const person = people[i];
@@ -54,7 +59,7 @@ export function computeTargets(
     out[i * 4 + 0] = x;
     out[i * 4 + 1] = 0;
     out[i * 4 + 2] = z;
-    out[i * 4 + 3] = 1;
+    out[i * 4 + 3] = w;
   }
 }
 
@@ -72,6 +77,10 @@ export const DORMANT_FORMATIONS: readonly DormantFormation[] = [
 export interface DormantTargetParams {
   /** Raio de contenção do Campo (círculo/clear ancoram nele). */
   containRadius: number;
+  /** Recuo da moldura em relação à costura do wrap (m). Só quando worldWrap. */
+  rimInset: number;
+  /** Mundo-toro ligado — formações recuam da costura. */
+  worldWrap: boolean;
   /** Espaçamento entre dormentes na formação (slider do leva). */
   spacing: number;
   /** Corridor: posição da pessoa seguida (positionMirror) — null cai em wander. */
@@ -102,6 +111,15 @@ function slotJitter(slot: number, k: number): number {
  *    de maratona) — linhas paralelas ao heading estimado, à frente dela.
  *  - `clear`: recuam à borda máxima da contenção (foco total no cenário).
  */
+function formationRimRadius(
+  containRadius: number,
+  rimInset: number,
+  worldWrap: boolean,
+): number {
+  if (!worldWrap || rimInset <= 0) return containRadius;
+  return Math.max(containRadius - rimInset, containRadius * 0.35);
+}
+
 export function computeDormantTargets(
   mode: DormantFormation,
   peopleCount: number,
@@ -109,6 +127,8 @@ export function computeDormantTargets(
   out: Float32Array,
   {
     containRadius,
+    rimInset,
+    worldWrap,
     spacing,
     followPos,
     followHeading,
@@ -128,9 +148,9 @@ export function computeDormantTargets(
   }
 
   if (mode === "circle" || mode === "clear") {
-    // Anel: circle = moldura interna (0,92×contain, 2 fileiras); clear =
-    // borda máxima (a contenção segura — foco no que sobrou no centro).
-    const baseR = mode === "circle" ? containRadius * 0.92 : containRadius;
+    const rim = formationRimRadius(containRadius, rimInset, worldWrap);
+    // Anel: circle = moldura interna (0,92×rim); clear = borda do rim (não a costura).
+    const baseR = mode === "circle" ? rim * 0.92 : rim;
     const rowGap = Math.max(spacing, 0.4);
     for (let i = peopleCount; i < agentCount; i++) {
       const k = i - peopleCount;
@@ -167,16 +187,17 @@ export function computeDormantTargets(
   const layers = 3;
   const slotsPerRow = Math.max(1, Math.floor(corridorLength / step));
   const capacity = slotsPerRow * 2 * layers;
+  const rim = formationRimRadius(containRadius, rimInset, worldWrap);
 
   for (let i = peopleCount; i < agentCount; i++) {
     const k = i - peopleCount;
     if (k >= capacity) {
-      // Excedente: espera na borda (fora do corredor, sem apinhar).
+      // Excedente: espera no anel (recuado da costura quando wrap ON).
       const angle =
         ((k - capacity) / Math.max(nDormant - capacity, 1)) * Math.PI * 2;
-      out[i * 4 + 0] = Math.cos(angle) * containRadius;
+      out[i * 4 + 0] = Math.cos(angle) * rim;
       out[i * 4 + 1] = 0;
-      out[i * 4 + 2] = Math.sin(angle) * containRadius;
+      out[i * 4 + 2] = Math.sin(angle) * rim;
       out[i * 4 + 3] = 1;
       continue;
     }
@@ -292,7 +313,7 @@ export function computeAgentMeta(
       // Dormente ou multidão procedural: só idle vs rezar, pesos base.
       gesture = draw(i, baseCands);
     }
-    out[i * 4 + 0] = content && !person ? 0 : 1;
+    out[i * 4 + 0] = person ? 1 : 0;
     out[i * 4 + 1] = gesture;
     out[i * 4 + 2] = 0;
     out[i * 4 + 3] = 0;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useControls } from "leva";
 import { useContent } from "../data/contentStore";
 import {
@@ -11,8 +11,27 @@ import {
 import { useFollow } from "./followStore";
 import { useLegend } from "./legendStore";
 import { cssColor, demoRampColor } from "../data/palette";
-import { computeStations } from "./timelineStations";
-import { prefStr } from "../lib/prefs";
+import { computeStations, chapterIndexForT } from "./timelineStations";
+import { spreadTimelineMarkers } from "./stationLabelLayout";
+import {
+  DEFAULT_TIMELINE_SCREEN,
+  pxToSvg,
+  toSvgLayout,
+  type TimelineScreenLayout,
+} from "./timelineLayout";
+import {
+  formatTime,
+  lerpX,
+  morphZoomTarget,
+  momentZoomX,
+  easeInOutCubic,
+  stationZoomOpacity,
+  stationZoomX,
+  TL_PAD_X,
+  TL_W,
+  type ZoomMorphSnap,
+} from "./timelineZoom";
+import { prefNum, prefStr } from "../lib/prefs";
 import {
   beatCut,
   ensureAudioIndex,
@@ -25,96 +44,59 @@ import {
 import * as player from "../audio/player";
 
 /**
- * Timeline da história (M4e; redesenhada 2026-07-14 com o feedback do Dudu:
- * "timeline com item demais espremido... quero algo mais clean... coisas
- * padronizadas entre as pessoas"). Aparece só no follow, bottom-center.
- *
- * Três decisões do redesign:
- *  1. ESTAÇÕES CANÔNICAS como default — a gramática comum entre as
- *     histórias (Antes · A morte · O outro lado · A virada · O retorno ·
- *     Depois), derivada de beats[].type + arc.virada em
- *     ui/timelineStations.ts. Pontos maiores, rótulo sempre visível,
- *     mesmos nomes/ordem para todo mundo (só as presentes aparecem).
- *  2. FILTRO DE CONSUMO — texto-botões minúsculos acima da linha (estética
- *     de rádio antigo): estações (default) · momentos (todos os beats,
- *     pontos pequenos sem rótulo) · o elemento da lente ativa no Campo
- *     (pontos = quotes com t_norm daquele elemento no JSON da pessoa).
- *     Default via pref ("Scene.tlmode"); ?tlmode=stations|all|element para
- *     screenshots. Trocar de modo = crossfade dos pontos.
- *  3. LAYOUT CLEAN — sem retângulo/painel: a linha flutua sobre a cena
- *     (~48% da largura) com sombra para legibilidade. Nome em caixa alta
- *     minúscula acima à esquerda; entrada/saída do arco viraram tooltips
- *     dos EXTREMOS da linha; resumo do ponto só no hover, numa linha acima
- *     com crossfade (padrão BottomPhrase da Legend).
- *
- * Mantidos: linha SVG com leve atração ao mouse (eco do menu cables, mais
- * sutil), pontos coloridos por valência (fria→quente), anel na virada.
- *
- * VOZ v1 (2026-07-14, doc 04 §4.2): clicar num ponto TOCA o corte real da
- * pessoa (estação/momento → corte do beat; ponto de elemento → corte da
- * quote, ou o do beat que a contém se a quote não subiu). Enquanto toca, o
- * ponto pulsa discretamente e ganha um ANEL DE PROGRESSO que se preenche
- * (SVG puro — nada de player chunky). Clicar de novo para; trocar de ponto
- * crossfada (player singleton, fades ~120 ms); ESC/sair do follow para o
- * áudio. Ponto sem corte no bucket = sem pulso + "sem áudio ainda" no hover
- * (estado vazio honesto, decidido pelo _index.json do bucket — ver
- * src/audio/cuts.ts). Mute minúsculo à direita dos modos.
+ * Timeline da história — uma linha em t_norm (2026-07-15).
+ * Estações = marcos canônicos (bolinha maior + rótulo) no tempo real do beat;
+ * momentos = pontos finos entre eles. Zoom/peek nos capítulos; clique no
+ * momento toca o beat sem zoom.
  */
 
 const FONT_STACK =
   '"Inter", "SF Pro Text", "Helvetica Neue", system-ui, sans-serif';
 
-const W = 640;
-const H = 70;
-const PAD_X = 24;
-const LINE_Y = 18;
-/** Rótulos em até 3 linhas: estações coladas descem (nunca se sobrepõem). */
-const LABEL_Y0 = 40;
-const LABEL_ROW_DY = 11;
-const LABEL_MAX_ROWS = 3;
-/** Largura estimada por caractere (font 7.5px caixa alta + tracking 0.16em). */
-const LABEL_CHAR_W = 5.4;
+const W = TL_W;
+const H = 72;
+const PAD_X = TL_PAD_X;
 
 const TL_MODES = ["stations", "all", "element"] as const;
 type TimelineMode = (typeof TL_MODES)[number];
 
-/** Sombra dos textos HTML — a timeline flutua sem painel. */
 const TEXT_SHADOW = "0 1px 12px rgba(0,0,0,0.6), 0 0 2px rgba(0,0,0,0.45)";
+/** Zoom overview → capítulo (ease-in-out, ms). */
+const ZOOM_IN_MS = 1200;
+/** Recolher capítulo → overview. */
+const ZOOM_OUT_MS = 800;
+/** Morph entre capítulos já em zoom. */
+const ZOOM_MORPH_SPEED = 0.09;
+/** Overview da régua inteira antes do zoom no 1º capítulo (auto-play no follow). */
+const AUTO_PLAY_OVERVIEW_MS = 750;
 
-/** Cor da valência −2..+2 → rampa fria→quente (nunca passa pelo verde). */
 function valenceColor(v: number): string {
   return cssColor(demoRampColor((Math.max(-2, Math.min(2, v)) + 2) / 4));
 }
 
-/** Cor dos pontos do modo elemento — o creme "viveram isso" da Legend. */
 const ELEMENT_DOT = "rgb(237, 222, 184)";
 
-/** t_norm [0,1] → x no viewBox da linha. */
 function xOf(t: number): number {
   return PAD_X + t * (W - PAD_X * 2);
 }
 
-/** Um ponto desenhável na linha, qualquer que seja o modo. */
 interface TimelineDot {
   key: string;
-  x: number;
+  track: "station" | "moment" | "quote";
+  overviewX: number;
+  zoomX: number;
+  zoomOpacity: number;
   color: string;
-  /** Raio base (estações são maiores que beats/quotes). */
   r: number;
-  /** Rótulo sempre visível embaixo (só estações). */
   label: string | null;
-  labelRow: number;
   isVirada: boolean;
-  /** Texto da linha de info no hover. */
   info: string;
-  /** beat_index selecionável no clique (quote usa o beat que a contém). */
   beatIndex: number | null;
-  /** Corte de áudio deste ponto (null = "sem áudio ainda", honesto). */
+  stationIndex: number | null;
   cut: Cut | null;
 }
 
-/** Linha acima da timeline: resumo no hover com crossfade (padrão Legend). */
-function InfoLine({ text }: { text: string | null }) {
+function InfoLine({ text, fontSize }: { text: string | null; fontSize: number }) {
   const [shown, setShown] = useState(text);
   const [visible, setVisible] = useState(Boolean(text));
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,7 +126,7 @@ function InfoLine({ text }: { text: string | null }) {
         justifyContent: "center",
         textAlign: "center",
         padding: "0 12px 9px",
-        fontSize: 12.5,
+        fontSize,
         fontWeight: 300,
         letterSpacing: "0.04em",
         lineHeight: 1.45,
@@ -165,51 +147,307 @@ export function StoryTimeline() {
   const content = useContent((s) => s.content);
   const following = useFollow((s) => s.following);
   const person = usePerson((s) => s.person);
+  const personId = usePerson((s) => s.personId);
   const activeBeat = usePerson((s) => s.activeBeat);
   const elementLens = useLegend((s) => s.elementLens);
   const audioIndex = useAudioIndex((s) => s.index);
+  const audioReady = useAudioIndex((s) => s.ready);
   const playing = useAudioIndex((s) => s.playing);
   const muted = useAudioIndex((s) => s.muted);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [peekUi, setPeekUi] = useState(false);
+  const [focusStationIdx, setFocusStationIdx] = useState<number | null>(null);
+  const [focusMomentT, setFocusMomentT] = useState<number | null>(null);
+  const zoomK = useRef(0);
+  const zoomTarget = useRef(0);
+  const prevZoomTarget = useRef(0);
+  const zoomAnim = useRef<{
+    from: number;
+    to: number;
+    start: number;
+    dur: number;
+  } | null>(null);
+  const morphK = useRef(1);
+  const morphSnapshotRef = useRef<Record<string, ZoomMorphSnap>>({});
+  const prevDotsRef = useRef<TimelineDot[]>([]);
+  const prevFocusRef = useRef<{ station: number | null; momentT: number | null }>({
+    station: null,
+    momentT: null,
+  });
+  const peekLatched = useRef(false);
+  const sessionEndRef = useRef(false);
+  /** Follow slot que ainda não recebeu auto-play desta entrada (doc 04 §4.1). */
+  const autoPlayFor = useRef<number | null>(null);
+  const autoPlayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusRef = useRef<number | null>(null);
+  focusRef.current = focusStationIdx;
 
-  // Modo do filtro: controle leva (grupo Scene, path estável p/ prefs) que os
-  // texto-botões da própria timeline re-escrevem — uma fonte de verdade só.
+  const clearAutoPlayTimer = useCallback(() => {
+    if (autoPlayTimer.current !== null) {
+      clearTimeout(autoPlayTimer.current);
+      autoPlayTimer.current = null;
+    }
+  }, []);
+
+  const resetZoomMotion = useCallback(() => {
+    zoomK.current = 0;
+    zoomTarget.current = 0;
+    prevZoomTarget.current = 0;
+    zoomAnim.current = null;
+    morphK.current = 1;
+  }, []);
+
   const [{ tlmode }, setTl] = useControls("Scene", () => ({
     tlmode: {
       value: prefStr<TimelineMode>("tlmode", "Scene.tlmode", "stations", TL_MODES),
-      options: { stations: "stations", "all beats": "all", element: "element" },
+      options: { stations: "stations (régua)", element: "element" },
       label: "timeline mode",
-      hint: "what the story timeline plots: canonical stations, every beat, or the active element lens' quotes",
+      hint: "stations = capítulos + momentos; element = quotes da lente ativa",
     },
   }));
 
-  // Entrar/sair do follow carrega/limpa a pessoa (fetch com cache) — e o
-  // áudio segue a mesma regra: trocar/sair de pessoa cala a voz (ESC solta o
-  // follow no FollowCamera, o cleanup daqui faz o resto).
+  const [
+    {
+      widthVw: tlVw,
+      widthMax: tlMax,
+      widthMin: tlMin,
+      bottom: tlBottom,
+      stationDotPx,
+      momentDotPx,
+      quoteDotPx,
+      labelFontPx,
+      labelCharPx,
+      labelGapPx,
+      dotGapPx,
+      stationHitPx,
+      momentHitPx,
+      lineYPx,
+      labelYPx,
+      infoFontPx,
+      headerFontPx,
+    },
+  ] = useControls(
+    "Timeline",
+    () => ({
+      widthVw: {
+        value: prefNum("tlVw", "Timeline.widthVw", 72),
+        min: 40,
+        max: 92,
+        step: 1,
+        label: "width % viewport",
+      },
+      widthMax: {
+        value: prefNum("tlMax", "Timeline.widthMax", 960),
+        min: 560,
+        max: 1400,
+        step: 10,
+        label: "width max px",
+      },
+      widthMin: {
+        value: prefNum("tlMin", "Timeline.widthMin", 480),
+        min: 320,
+        max: 900,
+        step: 10,
+        label: "width min px",
+      },
+      bottom: {
+        value: prefNum("tlBottom", "Timeline.bottom", 26),
+        min: 8,
+        max: 120,
+        step: 1,
+        label: "bottom px",
+      },
+      stationDotPx: {
+        value: prefNum("tlStDot", "Timeline.stationDotPx", DEFAULT_TIMELINE_SCREEN.stationDotPx),
+        min: 2,
+        max: 14,
+        step: 0.1,
+        label: "station dot px",
+      },
+      momentDotPx: {
+        value: prefNum("tlMoDot", "Timeline.momentDotPx", DEFAULT_TIMELINE_SCREEN.momentDotPx),
+        min: 1,
+        max: 10,
+        step: 0.1,
+        label: "moment dot px",
+      },
+      quoteDotPx: {
+        value: prefNum("tlQtDot", "Timeline.quoteDotPx", DEFAULT_TIMELINE_SCREEN.quoteDotPx),
+        min: 1,
+        max: 10,
+        step: 0.1,
+        label: "quote dot px",
+      },
+      labelFontPx: {
+        value: prefNum("tlLblFont", "Timeline.labelFontPx", DEFAULT_TIMELINE_SCREEN.labelFontPx),
+        min: 5,
+        max: 16,
+        step: 0.5,
+        label: "label font px",
+      },
+      labelCharPx: {
+        value: prefNum("tlLblChar", "Timeline.labelCharPx", DEFAULT_TIMELINE_SCREEN.labelCharPx),
+        min: 3,
+        max: 12,
+        step: 0.1,
+        label: "label char width px",
+      },
+      labelGapPx: {
+        value: prefNum("tlLblGap", "Timeline.labelGapPx", DEFAULT_TIMELINE_SCREEN.labelGapPx),
+        min: 2,
+        max: 24,
+        step: 1,
+        label: "label gap px",
+      },
+      dotGapPx: {
+        value: prefNum("tlDotGap", "Timeline.dotGapPx", DEFAULT_TIMELINE_SCREEN.dotGapPx),
+        min: 1,
+        max: 16,
+        step: 0.5,
+        label: "dot gap px",
+      },
+      stationHitPx: {
+        value: prefNum("tlStHit", "Timeline.stationHitPx", DEFAULT_TIMELINE_SCREEN.stationHitPx),
+        min: 6,
+        max: 24,
+        step: 1,
+        label: "station hit px",
+      },
+      momentHitPx: {
+        value: prefNum("tlMoHit", "Timeline.momentHitPx", DEFAULT_TIMELINE_SCREEN.momentHitPx),
+        min: 4,
+        max: 20,
+        step: 1,
+        label: "moment hit px",
+      },
+      lineYPx: {
+        value: prefNum("tlLineY", "Timeline.lineYPx", DEFAULT_TIMELINE_SCREEN.lineYPx),
+        min: 8,
+        max: 36,
+        step: 1,
+        label: "line Y px",
+      },
+      labelYPx: {
+        value: prefNum("tlLblY", "Timeline.labelYPx", DEFAULT_TIMELINE_SCREEN.labelYPx),
+        min: 20,
+        max: 56,
+        step: 1,
+        label: "label Y px",
+      },
+      infoFontPx: {
+        value: prefNum("tlInfoFont", "Timeline.infoFontPx", DEFAULT_TIMELINE_SCREEN.infoFontPx),
+        min: 9,
+        max: 20,
+        step: 0.5,
+        label: "info font px",
+      },
+      headerFontPx: {
+        value: prefNum("tlHdrFont", "Timeline.headerFontPx", DEFAULT_TIMELINE_SCREEN.headerFontPx),
+        min: 7,
+        max: 16,
+        step: 0.5,
+        label: "header font px",
+      },
+    }),
+    { collapsed: true },
+  );
+
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [svgClientWidth, setSvgClientWidth] = useState(TL_W);
+  const layoutRef = useRef(toSvgLayout(DEFAULT_TIMELINE_SCREEN, TL_W));
+
+  const screenLayout = useMemo<TimelineScreenLayout>(
+    () => ({
+      stationDotPx,
+      momentDotPx,
+      quoteDotPx,
+      labelFontPx,
+      labelCharPx,
+      labelGapPx,
+      dotGapPx,
+      stationHitPx,
+      momentHitPx,
+      lineYPx,
+      labelYPx,
+      infoFontPx,
+      headerFontPx,
+    }),
+    [
+      stationDotPx,
+      momentDotPx,
+      quoteDotPx,
+      labelFontPx,
+      labelCharPx,
+      labelGapPx,
+      dotGapPx,
+      stationHitPx,
+      momentHitPx,
+      lineYPx,
+      labelYPx,
+      infoFontPx,
+      headerFontPx,
+    ],
+  );
+
+  const svgLayout = useMemo(
+    () => toSvgLayout(screenLayout, svgClientWidth),
+    [screenLayout, svgClientWidth],
+  );
+  layoutRef.current = svgLayout;
+
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const sync = () => setSvgClientWidth(el.getBoundingClientRect().width);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [following, person]);
+
   useEffect(() => {
     if (following !== null && content) {
       const p = content.manifest.people[following];
       if (p) loadPerson(p.id);
       ensureAudioIndex();
+      autoPlayFor.current = following;
       return () => {
+        autoPlayFor.current = null;
+        clearAutoPlayTimer();
         clearPerson();
         void player.stop();
         setPlaying(null);
+        setFocusStationIdx(null);
+        setFocusMomentT(null);
+        resetZoomMotion();
+        peekLatched.current = false;
+        sessionEndRef.current = false;
       };
     }
-  }, [following, content]);
+  }, [following, content, clearAutoPlayTimer, resetZoomMotion]);
 
-  // Modo efetivo: "element" exige lente de elemento ativa no Campo.
+  const rawMode = tlmode as TimelineMode;
+  // "all" era o modo antigo só-momentos; visitante sempre vê régua unificada.
   const mode: TimelineMode =
-    tlmode === "element" && !elementLens ? "stations" : (tlmode as TimelineMode);
+    rawMode === "all" || (rawMode === "element" && !elementLens)
+      ? "stations"
+      : rawMode;
 
-  // Crossfade na troca de modo: esvanece os pontos, troca, re-esvanece.
+  useEffect(() => {
+    if (tlmode === "all") setTl({ tlmode: "stations" });
+  }, [tlmode, setTl]);
+
   const [shownMode, setShownMode] = useState<TimelineMode>(mode);
   const [dotsVisible, setDotsVisible] = useState(true);
   useEffect(() => {
     if (mode === shownMode) return;
     setDotsVisible(false);
     setHoverKey(null);
+    setPeekUi(false);
+    peekLatched.current = false;
+    setFocusStationIdx(null);
+    setFocusMomentT(null);
+    zoomTarget.current = 0;
     const t = setTimeout(() => {
       setShownMode(mode);
       setDotsVisible(true);
@@ -225,64 +463,102 @@ export function StoryTimeline() {
     [person],
   );
 
+  const stationCount = useMemo(
+    () => (person ? computeStations(person).length : 0),
+    [person],
+  );
+
   const dots = useMemo<TimelineDot[]>(() => {
     if (!person) return [];
+    const focus = focusStationIdx ?? 0;
 
-    if (shownMode === "stations") {
-      // Linha do rótulo por LARGURA real estimada: cada rótulo desce para a
-      // primeira linha onde não colide com o anterior (estações podem se
-      // amontoar no início — ex.: morte aos 3% da entrevista).
-      const rowRight: number[] = [];
-      return computeStations(person).map((st) => {
+    if (shownMode !== "element") {
+      const stations = computeStations(person);
+      const n = stations.length;
+      const stationBeatIds = new Set(stations.map((st) => st.beat.beat_index));
+      const focusT = stations[focus]?.beat.t_norm ?? 0;
+      const nextT = stations[focus + 1]?.beat.t_norm ?? 1;
+      const momentLeftT = focusMomentT ?? focusT;
+      const subZoom = focusMomentT !== null;
+
+      const inMomentWindow = (t: number) =>
+        t >= momentLeftT - 0.001 && t <= nextT + 0.001;
+
+      const stationMarkers = stations.map((st) => ({
+        anchorX: xOf(st.beat.t_norm),
+        label: st.label,
+      }));
+      const momentAnchors = person.beats
+        .filter((b) => !stationBeatIds.has(b.beat_index))
+        .map((b) => ({ beat: b, anchorX: xOf(b.t_norm) }));
+
+      const spread = spreadTimelineMarkers(
+        [
+          ...stationMarkers.map((m) => ({
+            anchorX: m.anchorX,
+            kind: "station" as const,
+            label: m.label,
+          })),
+          ...momentAnchors.map((m) => ({
+            anchorX: m.anchorX,
+            kind: "moment" as const,
+          })),
+        ],
+        svgLayout,
+      );
+
+      const stationSpread = spread.filter((s) => s.kind === "station");
+      const momentSpread = spread.filter((s) => s.kind === "moment");
+
+      const stationDots: TimelineDot[] = stations.map((st, i) => {
         const e = emotion.get(st.beat.beat_index);
-        const x = xOf(st.beat.t_norm);
-        const half = (st.label.length * LABEL_CHAR_W) / 2;
-        let labelRow = rowRight.findIndex((r) => x - half > r + 6);
-        if (labelRow === -1) {
-          labelRow =
-            rowRight.length < LABEL_MAX_ROWS
-              ? rowRight.length
-              : rowRight.indexOf(Math.min(...rowRight));
-        }
-        rowRight[labelRow] = x + half;
+        const ox = stationSpread[i].displayX;
         return {
           key: `st:${st.key}`,
-          x,
+          track: "station",
+          overviewX: ox,
+          zoomX: subZoom
+            ? momentZoomX(st.beat.t_norm, momentLeftT, nextT)
+            : stationZoomX(i, focus, n),
+          zoomOpacity: subZoom
+            ? inMomentWindow(st.beat.t_norm)
+              ? 1
+              : 0.15
+            : stationZoomOpacity(i, focus, n),
           color: valenceColor(e?.valence ?? 0),
-          r: 4.5,
+          r: svgLayout.stationDotR,
           label: st.label,
-          labelRow,
           isVirada: st.isVirada,
           info: (e?.label ? `${e.label} — ` : "") + st.beat.summary,
           beatIndex: st.beat.beat_index,
+          stationIndex: i,
           cut: beatCut(person, st.beat.beat_index, audioIndex),
         };
       });
-    }
 
-    if (shownMode === "all") {
-      return person.beats.map((b) => {
+      const momentDots: TimelineDot[] = momentAnchors.map(({ beat: b }, i) => {
         const e = emotion.get(b.beat_index);
+        const ox = momentSpread[i].displayX;
+        const inWindow = inMomentWindow(b.t_norm);
         return {
           key: `beat:${b.beat_index}`,
-          x: xOf(b.t_norm),
+          track: "moment",
+          overviewX: ox,
+          zoomX: momentZoomX(b.t_norm, momentLeftT, nextT),
+          zoomOpacity: inWindow ? 1 : 0.2,
           color: valenceColor(e?.valence ?? 0),
-          r: 2.6,
+          r: svgLayout.momentDotR,
           label: null,
-          labelRow: 0,
           isVirada: person.arc.virada === b.beat_index,
           info: (e?.label ? `${e.label} — ` : "") + b.summary,
           beatIndex: b.beat_index,
+          stationIndex: null,
           cut: beatCut(person, b.beat_index, audioIndex),
         };
       });
+      return [...stationDots, ...momentDots];
     }
 
-    // "element": as quotes (com t_norm) do elemento da lente ativa nesta
-    // história — os pontos onde AQUELE elemento acontece. Pessoa sem o
-    // elemento = linha vazia (honesto: ela não conta sobre isso).
-    // O índice ORIGINAL da quote (pré-ordenação) é o que casa com os
-    // arquivos q_<key>_<i> do bucket — guardado antes do sort.
     const el = person.elements?.find((e) => e.key === elementLens);
     const quotes = (el?.quotes ?? [])
       .map((q, qi) => ({ q, qi }))
@@ -294,24 +570,212 @@ export function StoryTimeline() {
       )[0];
     return quotes.map(({ q, qi }, i) => {
       const beatIndex = containing(q.t_norm)?.beat_index ?? null;
+      const x = xOf(q.t_norm);
       return {
         key: `q:${i}`,
-        x: xOf(q.t_norm),
+        track: "quote",
+        overviewX: x,
+        zoomX: x,
+        zoomOpacity: 1,
         color: ELEMENT_DOT,
-        r: 3.2,
+        r: svgLayout.quoteDotR,
         label: null,
-        labelRow: 0,
         isVirada: false,
         info: `“${q.text}”`,
         beatIndex,
+        stationIndex: null,
         cut: elementLens
           ? quoteCut(person, elementLens, qi, beatIndex, audioIndex)
           : null,
       };
     });
-  }, [person, shownMode, elementLens, emotion, audioIndex]);
+  }, [person, shownMode, elementLens, emotion, audioIndex, focusStationIdx, focusMomentT, svgLayout]);
 
-  // --- linha atraída pelo mouse (eco do menu cables), mais sutil que a v1 ---
+  useEffect(() => {
+    const prevDots = prevDotsRef.current;
+    const pf = prevFocusRef.current;
+    const focusChanged =
+      pf.station !== focusStationIdx || pf.momentT !== focusMomentT;
+
+    if (
+      focusChanged &&
+      focusStationIdx !== null &&
+      zoomK.current > 0.02 &&
+      prevDots.length > 0
+    ) {
+      const snap: Record<string, ZoomMorphSnap> = {};
+      for (const d of prevDots) {
+        snap[d.key] = { zx: d.zoomX, zo: d.zoomOpacity };
+      }
+      morphSnapshotRef.current = snap;
+      morphK.current = 0;
+    }
+
+    if (focusStationIdx === null) {
+      morphK.current = 1;
+      morphSnapshotRef.current = {};
+    }
+
+    prevFocusRef.current = { station: focusStationIdx, momentT: focusMomentT };
+    prevDotsRef.current = dots;
+  }, [dots, focusStationIdx, focusMomentT]);
+
+  const zoomOut = useCallback(() => {
+    peekLatched.current = false;
+    setPeekUi(false);
+    sessionEndRef.current = true;
+    zoomTarget.current = 0;
+    setFocusMomentT(null);
+    void player.stop();
+    setPlaying(null);
+    setActiveBeat(null);
+  }, []);
+
+  const playBeat = useCallback((beatIndex: number, cut: Cut | null) => {
+    setActiveBeat(beatIndex);
+    if (!cut) {
+      void player.stop();
+      setPlaying(null);
+      return;
+    }
+    setPlaying(cut);
+    void player
+      .play(cut.url, {
+        onEnd: () => {
+          if (useAudioIndex.getState().playing?.url === cut.url) setPlaying(null);
+        },
+      })
+      .then((ok) => {
+        if (!ok && useAudioIndex.getState().playing?.url === cut.url)
+          setPlaying(null);
+      });
+  }, []);
+
+  const playStation = useCallback(
+    (stationIdx: number, beatIndex: number, cut: Cut | null) => {
+      setFocusStationIdx(stationIdx);
+      setFocusMomentT(null);
+      peekLatched.current = false;
+      sessionEndRef.current = false;
+      zoomTarget.current = 1;
+      setActiveBeat(beatIndex);
+      if (!cut) {
+        void player.stop();
+        setPlaying(null);
+        return;
+      }
+      setPlaying(cut);
+      void player
+        .play(cut.url, {
+          onEnd: () => {
+            if (useAudioIndex.getState().playing?.url === cut.url) {
+              setPlaying(null);
+              peekLatched.current = false;
+              sessionEndRef.current = true;
+              zoomTarget.current = 0;
+              setActiveBeat(null);
+            }
+          },
+        })
+        .then((ok) => {
+          if (!ok && useAudioIndex.getState().playing?.url === cut.url)
+            setPlaying(null);
+        });
+    },
+    [],
+  );
+
+  const goStation = useCallback(
+    (idx: number) => {
+      if (!person || shownMode === "element") return;
+      clearAutoPlayTimer();
+      autoPlayFor.current = null;
+      const stations = computeStations(person);
+      const st = stations[idx];
+      if (!st) return;
+      const cut = beatCut(person, st.beat.beat_index, audioIndex);
+      setPeekUi(false);
+      peekLatched.current = false;
+      playStation(idx, st.beat.beat_index, cut);
+    },
+    [person, shownMode, audioIndex, playStation, clearAutoPlayTimer],
+  );
+
+  // Clique = compromisso (doc 04 §4.1): overview breve → zoom no 1º capítulo + voz.
+  useEffect(() => {
+    if (following === null || !person || !content || !audioReady) return;
+    if (autoPlayFor.current !== following) return;
+    if (autoPlayTimer.current !== null) return;
+
+    const expected = content.manifest.people[following];
+    if (!expected || person.id !== expected.id || personId !== expected.id)
+      return;
+    if (shownMode === "element") {
+      autoPlayFor.current = null;
+      return;
+    }
+
+    const stations = computeStations(person);
+    if (stations.length === 0) {
+      autoPlayFor.current = null;
+      return;
+    }
+
+    let stationIdx = 0;
+    for (let i = 0; i < stations.length; i++) {
+      if (beatCut(person, stations[i].beat.beat_index, audioIndex)) {
+        stationIdx = i;
+        break;
+      }
+    }
+
+    const ticket = following;
+    autoPlayTimer.current = setTimeout(() => {
+      autoPlayTimer.current = null;
+      autoPlayFor.current = null;
+      if (useFollow.getState().following !== ticket) return;
+      goStation(stationIdx);
+    }, AUTO_PLAY_OVERVIEW_MS);
+
+    return () => clearAutoPlayTimer();
+  }, [
+    following,
+    person,
+    personId,
+    content,
+    audioReady,
+    audioIndex,
+    shownMode,
+    goStation,
+    clearAutoPlayTimer,
+  ]);
+
+  const armPeek = useCallback(() => {
+    if (focusRef.current === null) return;
+    peekLatched.current = true;
+    sessionEndRef.current = false;
+    zoomTarget.current = 0;
+    setFocusMomentT(null);
+    setPeekUi(true);
+  }, []);
+
+  const releasePeek = useCallback(() => {
+    if (!peekLatched.current) return;
+    peekLatched.current = false;
+    setPeekUi(false);
+    if (focusRef.current !== null) zoomTarget.current = 1;
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || focusRef.current === null) return;
+      e.preventDefault();
+      zoomOut();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomOut]);
+
   const svgRef = useRef<SVGSVGElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
   const mouse = useRef({ x: 0, y: 0, in: 0 });
@@ -323,54 +787,185 @@ export function StoryTimeline() {
     const tick = () => {
       const m = mouse.current;
       const p = pull.current;
-      // easing: a linha persegue o mouse (entra) e relaxa reta (sai)
       p.k += (m.in - p.k) * 0.1;
       p.x += (m.x - p.x) * 0.16;
       p.y += (m.y - p.y) * 0.16;
 
-      const amp = Math.max(-7, Math.min(7, (p.y - LINE_Y) * 0.3)) * p.k;
-      const sigma2 = 2 * 95 * 95;
-      const yAt = (x: number) =>
-        LINE_Y + amp * Math.exp(-((x - p.x) * (x - p.x)) / sigma2);
+      const waveAt = (x: number) => {
+        const lineY = layoutRef.current.lineY;
+        const amp = Math.max(-6, Math.min(6, (m.y - lineY) * 0.28)) * p.k;
+        const sigma2 = 2 * 95 * 95;
+        return lineY + amp * Math.exp(-((x - p.x) * (x - p.x)) / sigma2);
+      };
+
+      const k = zoomK.current;
+      const target = zoomTarget.current;
+      const now = performance.now();
+
+      if (target !== prevZoomTarget.current) {
+        zoomAnim.current = {
+          from: k,
+          to: target,
+          start: now,
+          dur: target > k ? ZOOM_IN_MS : ZOOM_OUT_MS,
+        };
+        prevZoomTarget.current = target;
+      }
+
+      if (zoomAnim.current) {
+        const { from, to, start, dur } = zoomAnim.current;
+        const p = Math.min(1, (now - start) / dur);
+        zoomK.current = from + (to - from) * easeInOutCubic(p);
+        if (p >= 1) zoomAnim.current = null;
+      } else {
+        zoomK.current = target;
+      }
+
+      if (
+        !zoomAnim.current &&
+        Math.abs(zoomK.current - target) <= 0.002 &&
+        target === 0 &&
+        focusRef.current !== null &&
+        sessionEndRef.current &&
+        !peekLatched.current
+      ) {
+        setFocusStationIdx(null);
+        setFocusMomentT(null);
+        sessionEndRef.current = false;
+      }
+
+      const zk = zoomK.current;
+      if (zk <= 0.02) morphK.current = 1;
+      else if (morphK.current < 0.999) {
+        morphK.current += (1 - morphK.current) * ZOOM_MORPH_SPEED;
+      } else {
+        morphK.current = 1;
+      }
+      const mk = morphK.current;
+      const morphSnap = morphSnapshotRef.current;
+      const isZoomed = zk > 0.02 && shownMode !== "element";
+
+      const resolveZoom = (key: string, zxTo: number, zoTo: number) =>
+        morphZoomTarget(key, zxTo, zoTo, mk, morphSnap);
 
       if (pathRef.current) {
         const pts: string[] = [];
         for (let x = PAD_X; x <= W - PAD_X + 0.1; x += 10)
-          pts.push(`${x.toFixed(1)},${yAt(x).toFixed(2)}`);
+          pts.push(`${x.toFixed(1)},${waveAt(x).toFixed(2)}`);
         pathRef.current.setAttribute("d", "M" + pts.join(" L"));
       }
+
       const svg = svgRef.current;
-      const now = performance.now();
       const audio = player.state();
+
       if (svg) {
         svg.querySelectorAll<SVGElement>("[data-dot]").forEach((el) => {
-          const x = Number(el.dataset.x);
-          el.setAttribute("cy", yAt(x).toFixed(2));
+          const track = el.dataset.track ?? "station";
+          const morphKey = el.dataset.morphKey ?? "";
+          const ox = Number(el.dataset.overviewX);
+          const zxTo = Number(el.dataset.zoomX);
+          const zoTo = Number(el.dataset.zoomOpacity ?? 1);
+          const { zx, zo } = resolveZoom(morphKey, zxTo, zoTo);
+          const useZoom = shownMode !== "element" && zk > 0.02;
+          const x =
+            useZoom && (track === "station" || track === "moment")
+              ? lerpX(ox, zx, zk)
+              : ox;
+          const y = waveAt(x);
+          el.setAttribute("cx", x.toFixed(2));
+          el.setAttribute("cy", y.toFixed(2));
+          let baseOp = 1;
+          if (track === "station" && useZoom) baseOp = 1 - zk + zk * zo;
+          if (track === "moment" && useZoom) baseOp = 1 - zk + zk * zo;
+          if (track === "quote") baseOp = 0.85;
+          if (el.dataset.halo !== undefined || el.dataset.ring !== undefined) {
+            // halo/ring mantêm opacidade própria
+          } else {
+            el.setAttribute("opacity", baseOp.toFixed(3));
+          }
         });
+
+        svg.querySelectorAll<SVGTextElement>("[data-label]").forEach((el) => {
+          const morphKey = el.dataset.morphKey ?? "";
+          const ox = Number(el.dataset.overviewX);
+          const zxTo = Number(el.dataset.zoomX);
+          const zoTo = Number(el.dataset.zoomOpacity ?? 1);
+          const { zx, zo } = resolveZoom(morphKey, zxTo, zoTo);
+          const x = lerpX(ox, zx, zk);
+          el.setAttribute("x", x.toFixed(2));
+          el.setAttribute("y", String(layoutRef.current.labelY));
+          el.setAttribute("opacity", (1 - zk + zk * zo).toFixed(3));
+        });
+
         svg.querySelectorAll<SVGElement>("[data-tick]").forEach((el) => {
-          const y = yAt(Number(el.dataset.x));
+          const y = waveAt(Number(el.dataset.x));
           el.setAttribute("y1", (y - 3).toFixed(2));
           el.setAttribute("y2", (y + 3).toFixed(2));
         });
-        // Voz: pulso discreto (respiração de opacidade do halo) + anel de
-        // progresso que se preenche — imperativos como a onda, zero re-render.
+
         svg.querySelectorAll<SVGElement>("[data-halo]").forEach((el) => {
           el.setAttribute(
             "opacity",
             (0.16 + 0.1 * Math.sin((now / 1000) * Math.PI * 2 * 1.1)).toFixed(3),
           );
         });
+
+        const playhead = svg.querySelector<SVGLineElement>("[data-playhead]");
+        const segment = svg.querySelector<SVGLineElement>("[data-segment]");
+        const peeking = peekLatched.current;
+        if (isZoomed && !peeking && audio?.playing && audio.duration > 0) {
+          const px = PAD_X + audio.progress * (W - PAD_X * 2);
+          const y = waveAt(px);
+          if (playhead) {
+            playhead.setAttribute("x1", PAD_X.toFixed(2));
+            playhead.setAttribute("x2", px.toFixed(2));
+            playhead.setAttribute("y1", y.toFixed(2));
+            playhead.setAttribute("y2", y.toFixed(2));
+            playhead.setAttribute("opacity", "0.9");
+          }
+          if (segment) {
+            segment.setAttribute("x1", PAD_X.toFixed(2));
+            segment.setAttribute("x2", (W - PAD_X).toFixed(2));
+            segment.setAttribute("y1", y.toFixed(2));
+            segment.setAttribute("y2", y.toFixed(2));
+            segment.setAttribute("opacity", (0.25 * zk).toFixed(3));
+          }
+        } else {
+          playhead?.setAttribute("opacity", "0");
+          segment?.setAttribute("opacity", "0");
+        }
+
         svg.querySelectorAll<SVGElement>("[data-ring]").forEach((el) => {
-          const x = Number(el.dataset.x);
-          const y = yAt(x);
+          const track = el.dataset.track ?? "station";
+          const morphKey = el.dataset.morphKey ?? "";
+          const ox = Number(el.dataset.overviewX);
+          const zxTo = Number(el.dataset.zoomX);
+          const { zx } = resolveZoom(morphKey, zxTo, 1);
+          const useZoom = isZoomed && (track === "station" || track === "moment");
+          const x = useZoom ? lerpX(ox, zx, zk) : ox;
+          const y = waveAt(x);
           const c = Number(el.dataset.c);
-          const k = audio?.duration ? audio.progress : 0;
-          el.setAttribute("stroke-dashoffset", (c * (1 - k)).toFixed(2));
+          const prog =
+            isZoomed && track === "station" && audio?.duration ? audio.progress : 0;
+          el.setAttribute("stroke-dashoffset", (c * (1 - prog)).toFixed(2));
           el.setAttribute("transform", `rotate(-90 ${x} ${y.toFixed(2)})`);
+          el.setAttribute("opacity", isZoomed && !peeking ? "0" : "0.85");
+        });
+
+        svg.querySelectorAll<SVGRectElement>("[data-edge-hint]").forEach((el) => {
+          const side = el.dataset.edgeHint;
+          const active =
+            peeking &&
+            side ===
+              (mouse.current.x < PAD_X - layoutRef.current.stationHitR
+                ? "left"
+                : mouse.current.x > W - PAD_X + layoutRef.current.stationHitR
+                  ? "right"
+                  : "");
+          el.setAttribute("opacity", (peeking ? (active ? 0.14 : 0.07) : 0).toFixed(3));
         });
       }
-      // Gancho dev p/ o próximo marco (cair na morte) e a sonda headless:
-      // o beat tocando agora + posição no corte.
+
       if (import.meta.env.DEV) {
         const pl = useAudioIndex.getState().playing;
         (window as unknown as Record<string, unknown>).__limiarAudioBeat =
@@ -383,6 +978,9 @@ export function StoryTimeline() {
                 t: audio.t,
                 duration: audio.duration,
                 progress: audio.progress,
+                zoomK: zk,
+                focusStation: focusRef.current,
+                peek: peekLatched.current,
               }
             : null;
       }
@@ -391,12 +989,10 @@ export function StoryTimeline() {
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
-      // Sair do follow desmonta o loop ANTES do stop() assíncrono terminar —
-      // o gancho dev precisa zerar aqui, senão fica preso no último frame.
       if (import.meta.env.DEV)
         (window as unknown as Record<string, unknown>).__limiarAudioBeat = null;
     };
-  }, [person]);
+  }, [person, shownMode]);
 
   if (following === null || !person || !content) return null;
 
@@ -408,6 +1004,20 @@ export function StoryTimeline() {
 
   const hoveredDot =
     hoverKey !== null ? dots.find((d) => d.key === hoverKey) : undefined;
+  const focusedDot =
+    focusStationIdx !== null
+      ? dots.find((d) => d.track === "station" && d.stationIndex === focusStationIdx)
+      : undefined;
+
+  const showRuler = shownMode !== "element";
+  const showQuotes = shownMode === "element";
+
+  const isZoomUi =
+    shownMode !== "element" && focusStationIdx !== null;
+  const synopsis = person.summary?.one_liner?.trim() || null;
+  const zoomChapterLabel =
+    isZoomUi && !peekUi && focusedDot?.label ? focusedDot.label : null;
+
   const infoText = hoveredDot
     ? hoveredDot.info +
       (hoveredDot.cut === null && audioIndex !== null ? " · sem áudio ainda" : "")
@@ -415,40 +1025,78 @@ export function StoryTimeline() {
       ? person.arc.entrada.resumo
       : hoverKey === "out" && person.arc.saida
         ? person.arc.saida.resumo
-        : activeBeat !== null
-          ? (dots.find((d) => d.beatIndex === activeBeat)?.info ?? null)
-          : null;
+        : peekUi
+          ? "outros capítulos — clique para trocar"
+          : focusedDot && focusStationIdx !== null
+            ? focusedDot.info
+            : activeBeat !== null
+              ? (dots.find((d) => d.beatIndex === activeBeat)?.info ?? null)
+              : synopsis;
 
-  // Clique = consumo (Voz v1): toca/para/troca o corte. A última chamada
-  // vence dentro do player; aqui só decidimos a intenção.
   const onDotClick = (d: TimelineDot) => {
     if (d.beatIndex === null) return;
-    const isPlayingThis = playing !== null && d.cut !== null && playing.url === d.cut.url;
+
+    if (d.track === "station" && d.stationIndex !== null) {
+      const isPlayingThis =
+        playing !== null && d.cut !== null && playing.url === d.cut.url;
+      if (isPlayingThis && focusStationIdx === d.stationIndex) {
+        if (peekUi || peekLatched.current) {
+          peekLatched.current = false;
+          setPeekUi(false);
+          zoomTarget.current = 1;
+          return;
+        }
+        zoomOut();
+        return;
+      }
+      setPeekUi(false);
+      peekLatched.current = false;
+      playStation(d.stationIndex, d.beatIndex, d.cut);
+      return;
+    }
+
+    const isPlayingThis =
+      playing !== null && d.cut !== null && playing.url === d.cut.url;
+
+    if (d.track === "moment" && shownMode !== "element" && person) {
+      const beat = person.beats.find((b) => b.beat_index === d.beatIndex);
+      if (!beat) return;
+
+      const stations = computeStations(person);
+      const stationIdx = chapterIndexForT(stations, beat.t_norm);
+      const isZoomed = focusStationIdx !== null && !peekUi;
+      const momentFocused =
+        focusMomentT !== null &&
+        Math.abs(focusMomentT - beat.t_norm) < 0.0001;
+
+      if (isPlayingThis && isZoomed && momentFocused) {
+        setFocusMomentT(null);
+        return;
+      }
+      if (isPlayingThis && isZoomed) {
+        void player.stop();
+        setPlaying(null);
+        setActiveBeat(null);
+        return;
+      }
+
+      setFocusStationIdx(stationIdx);
+      setFocusMomentT(beat.t_norm);
+      setPeekUi(false);
+      peekLatched.current = false;
+      sessionEndRef.current = false;
+      zoomTarget.current = 1;
+      if (!isPlayingThis) playBeat(d.beatIndex, d.cut);
+      return;
+    }
+
     if (isPlayingThis) {
       void player.stop();
       setPlaying(null);
       setActiveBeat(null);
       return;
     }
-    setActiveBeat(d.beatIndex);
-    if (!d.cut) {
-      // Sem corte no bucket: seleção visual apenas (e silêncio honesto).
-      void player.stop();
-      setPlaying(null);
-      return;
-    }
-    const cut = d.cut;
-    setPlaying(cut);
-    void player
-      .play(cut.url, {
-        onEnd: () => {
-          if (useAudioIndex.getState().playing?.url === cut.url) setPlaying(null);
-        },
-      })
-      .then((ok) => {
-        if (!ok && useAudioIndex.getState().playing?.url === cut.url)
-          setPlaying(null);
-      });
+    playBeat(d.beatIndex, d.cut);
   };
 
   const modeButton = (m: TimelineMode, label: string) => (
@@ -476,14 +1124,35 @@ export function StoryTimeline() {
     </button>
   );
 
+  const navBtnStyle = {
+    all: "unset" as const,
+    cursor: "pointer",
+    fontSize: 9,
+    fontWeight: 300,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase" as const,
+    color: "rgba(207, 200, 190, 0.72)",
+    textShadow: TEXT_SHADOW,
+    pointerEvents: "auto" as const,
+  };
+
+  const headerTitle = zoomChapterLabel ?? name;
+  const lineY = svgLayout.lineY;
+  const labelY = svgLayout.labelY;
+  const peekLeftW = PAD_X - svgLayout.stationHitR;
+  const peekRightX = W - PAD_X + svgLayout.stationHitR;
+  const peekRightW = W - peekRightX;
+  const pxSvg = (n: number) => pxToSvg(n, svgClientWidth);
+
   return (
     <div
+      ref={shellRef}
       style={{
         position: "fixed",
         left: "50%",
-        bottom: 26,
+        bottom: tlBottom,
         transform: "translateX(-50%)",
-        width: "clamp(400px, 48vw, 660px)",
+        width: `clamp(${tlMin}px, ${tlVw}vw, ${tlMax}px)`,
         fontFamily: FONT_STACK,
         zIndex: 42,
         pointerEvents: "none",
@@ -492,10 +1161,8 @@ export function StoryTimeline() {
     >
       <style>{`@keyframes limiar-tl-fadein { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }`}</style>
 
-      {/* resumo do ponto (hover) — uma linha acima da timeline, crossfade */}
-      <InfoLine text={infoText} />
+      <InfoLine text={infoText} fontSize={infoFontPx} />
 
-      {/* acima da linha: nome à esquerda, filtro de consumo à direita */}
       <div
         style={{
           display: "flex",
@@ -506,20 +1173,34 @@ export function StoryTimeline() {
           marginBottom: 4,
         }}
       >
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 400,
-            letterSpacing: "0.22em",
-            textTransform: "uppercase",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            color: "rgba(233, 228, 220, 0.85)",
-            textShadow: TEXT_SHADOW,
-          }}
-        >
-          {name}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
+          {isZoomUi && (
+            <button
+              onClick={zoomOut}
+              title="visão geral (ESC)"
+              style={navBtnStyle}
+            >
+              ←
+            </button>
+          )}
+          <div
+            style={{
+              fontSize: headerFontPx,
+              fontWeight: 400,
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              color: "rgba(233, 228, 220, 0.85)",
+              textShadow: TEXT_SHADOW,
+            }}
+          >
+            {headerTitle}
+            {!zoomChapterLabel && person.timeline_norm?.total_s
+              ? ` · ${formatTime(person.timeline_norm.total_s)}`
+              : ""}
+          </div>
         </div>
         <div
           style={{
@@ -529,10 +1210,45 @@ export function StoryTimeline() {
             pointerEvents: "auto",
           }}
         >
-          {modeButton("stations", "estações")}
-          {modeButton("all", "momentos")}
+          {isZoomUi && focusStationIdx !== null && (
+            <>
+              <button
+                onClick={() => goStation(focusStationIdx - 1)}
+                disabled={focusStationIdx <= 0}
+                style={{
+                  ...navBtnStyle,
+                  opacity: focusStationIdx <= 0 ? 0.25 : 1,
+                  cursor: focusStationIdx <= 0 ? "default" : "pointer",
+                }}
+                title="capítulo anterior"
+              >
+                ⏮
+              </button>
+              <button
+                onClick={() => goStation(focusStationIdx + 1)}
+                disabled={focusStationIdx >= stationCount - 1}
+                style={{
+                  ...navBtnStyle,
+                  opacity: focusStationIdx >= stationCount - 1 ? 0.25 : 1,
+                  cursor:
+                    focusStationIdx >= stationCount - 1 ? "default" : "pointer",
+                }}
+                title="próximo capítulo"
+              >
+                ⏭
+              </button>
+            </>
+          )}
           {elementLabel && modeButton("element", elementLabel)}
-          {/* mute minúsculo (PT, discreto — a UI do visitante) */}
+          {shownMode === "element" && (
+            <button
+              onClick={() => setTl({ tlmode: "stations" })}
+              style={navBtnStyle}
+              title="voltar à régua"
+            >
+              régua
+            </button>
+          )}
           <button
             onClick={() => toggleMuted()}
             title={muted ? "ativar o som" : "silenciar"}
@@ -571,7 +1287,6 @@ export function StoryTimeline() {
         </div>
       </div>
 
-      {/* a linha (SVG) — flutua sem painel; sombra dá a legibilidade */}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -584,16 +1299,17 @@ export function StoryTimeline() {
         }}
         onMouseMove={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          mouse.current.x = ((e.clientX - r.left) / r.width) * W;
+          const mx = ((e.clientX - r.left) / r.width) * W;
+          mouse.current.x = mx;
           mouse.current.y = ((e.clientY - r.top) / r.height) * H;
           mouse.current.in = 1;
         }}
         onMouseLeave={() => {
           mouse.current.in = 0;
           setHoverKey(null);
+          releasePeek();
         }}
       >
-        {/* extremos: entrada/saída do arco sob demanda (tooltip, não mobília) */}
         {person.arc.entrada && (
           <rect
             x={0}
@@ -617,46 +1333,115 @@ export function StoryTimeline() {
           />
         )}
 
+        {isZoomUi && (
+          <>
+            <rect
+              x={0}
+              y={0}
+              width={peekLeftW}
+              height={H}
+              fill="transparent"
+              pointerEvents="all"
+              onMouseEnter={armPeek}
+            />
+            <rect
+              x={peekRightX}
+              y={0}
+              width={peekRightW}
+              height={H}
+              fill="transparent"
+              pointerEvents="all"
+              onMouseEnter={armPeek}
+            />
+            <rect
+              data-edge-hint="left"
+              x={0}
+              y={0}
+              width={peekLeftW}
+              height={H}
+              fill="rgba(235, 230, 222, 0.12)"
+              opacity={0}
+              pointerEvents="none"
+            />
+            <rect
+              data-edge-hint="right"
+              x={peekRightX}
+              y={0}
+              width={peekRightW}
+              height={H}
+              fill="rgba(235, 230, 222, 0.12)"
+              opacity={0}
+              pointerEvents="none"
+            />
+          </>
+        )}
+
         <path
           ref={pathRef}
-          d={`M${PAD_X},${LINE_Y} L${W - PAD_X},${LINE_Y}`}
+          d={`M${PAD_X},${lineY} L${W - PAD_X},${lineY}`}
           fill="none"
-          stroke="rgba(233, 228, 220, 0.35)"
+          stroke="rgba(233, 228, 220, 0.38)"
           strokeWidth="1"
-        />
-        {/* tiques dos extremos — a única pista de que ali mora algo */}
-        <line
-          data-tick
-          data-x={PAD_X}
-          x1={PAD_X}
-          y1={LINE_Y - 3}
-          x2={PAD_X}
-          y2={LINE_Y + 3}
-          stroke={
-            hoverKey === "in"
-              ? "rgba(235, 230, 222, 0.8)"
-              : "rgba(233, 228, 220, 0.35)"
-          }
-          strokeWidth="1"
-          style={{ transition: "stroke 0.25s ease" }}
-        />
-        <line
-          data-tick
-          data-x={W - PAD_X}
-          x1={W - PAD_X}
-          y1={LINE_Y - 3}
-          x2={W - PAD_X}
-          y2={LINE_Y + 3}
-          stroke={
-            hoverKey === "out"
-              ? "rgba(235, 230, 222, 0.8)"
-              : "rgba(233, 228, 220, 0.35)"
-          }
-          strokeWidth="1"
-          style={{ transition: "stroke 0.25s ease" }}
         />
 
-        {/* os pontos do modo ativo (crossfade na troca) */}
+        <line
+          data-segment
+          x1={PAD_X}
+          y1={lineY}
+          x2={W - PAD_X}
+          y2={lineY}
+          stroke="rgba(235, 230, 222, 0.45)"
+          strokeWidth={pxSvg(2.5)}
+          strokeLinecap="round"
+          opacity={0}
+        />
+        <line
+          data-playhead
+          x1={PAD_X}
+          y1={lineY}
+          x2={PAD_X}
+          y2={lineY}
+          stroke="rgba(235, 230, 222, 0.75)"
+          strokeWidth={pxSvg(1.5)}
+          strokeLinecap="round"
+          opacity={0}
+        />
+
+        {showRuler && (
+          <>
+            <line
+              data-tick
+              data-x={PAD_X}
+              x1={PAD_X}
+              y1={lineY - pxSvg(3)}
+              x2={PAD_X}
+              y2={lineY + pxSvg(3)}
+              stroke={
+                hoverKey === "in"
+                  ? "rgba(235, 230, 222, 0.8)"
+                  : "rgba(233, 228, 220, 0.35)"
+              }
+              strokeWidth="1"
+              style={{ transition: "stroke 0.25s ease" }}
+            />
+            <line
+              data-tick
+              data-x={W - PAD_X}
+              x1={W - PAD_X}
+              y1={lineY - pxSvg(3)}
+              x2={W - PAD_X}
+              y2={lineY + pxSvg(3)}
+              stroke={
+                hoverKey === "out"
+                  ? "rgba(235, 230, 222, 0.8)"
+                  : "rgba(233, 228, 220, 0.35)"
+              }
+              strokeWidth="1"
+              style={{ transition: "stroke 0.25s ease" }}
+            />
+          </>
+        )}
+
         <g
           style={{
             opacity: dotsVisible ? 1 : 0,
@@ -664,36 +1449,67 @@ export function StoryTimeline() {
           }}
         >
           {dots.map((d) => {
+            if (d.r <= 0) return null;
+            if (d.track !== "quote" && !showRuler) return null;
+            if (d.track === "quote" && !showQuotes) return null;
+            const baseOpacity = 1;
             const active =
               d.beatIndex !== null && activeBeat === d.beatIndex;
             const hovered = hoverKey === d.key;
             const isPlaying =
               playing !== null && d.cut !== null && playing.url === d.cut.url;
-            const ringR = d.r + 3.6;
+            const stR = svgLayout.stationDotR;
+            const moR = svgLayout.momentDotR;
+            const dotR =
+              d.track === "station"
+                ? active
+                  ? stR + pxSvg(2)
+                  : hovered
+                    ? stR + pxSvg(1.2)
+                    : stR
+                : active
+                  ? stR + pxSvg(1)
+                  : hovered
+                    ? stR
+                    : moR;
+            const hitR =
+              d.track === "station" || hovered
+                ? svgLayout.stationHitR
+                : svgLayout.momentHitR;
+            const ringR = dotR + pxSvg(3.6);
             const ringC = 2 * Math.PI * ringR;
             return (
               <g key={d.key}>
-                {d.isVirada && (
+                {d.isVirada && d.track === "station" && (
                   <circle
                     data-dot
-                    data-x={d.x}
-                    cx={d.x}
-                    cy={LINE_Y}
-                    r={d.r + 4}
+                    data-morph-key={d.key}
+                    data-track={d.track}
+                    data-overview-x={d.overviewX}
+                    data-zoom-x={d.zoomX}
+                    data-zoom-opacity={d.zoomOpacity}
+                    data-base-opacity={baseOpacity}
+                    cx={d.overviewX}
+                    cy={lineY}
+                    r={dotR + pxSvg(4)}
                     fill="none"
                     stroke="rgba(233, 228, 220, 0.55)"
-                    strokeWidth="0.8"
+                    strokeWidth={pxSvg(0.8)}
                   />
                 )}
-                {/* voz: halo que respira enquanto o corte toca */}
                 {isPlaying && (
                   <circle
                     data-dot
                     data-halo
-                    data-x={d.x}
-                    cx={d.x}
-                    cy={LINE_Y}
-                    r={d.r + 2.4}
+                    data-morph-key={d.key}
+                    data-track={d.track}
+                    data-overview-x={d.overviewX}
+                    data-zoom-x={d.zoomX}
+                    data-zoom-opacity={d.zoomOpacity}
+                    data-base-opacity={baseOpacity}
+                    cx={d.overviewX}
+                    cy={lineY}
+                    r={dotR + pxSvg(2.4)}
                     fill={d.color}
                     opacity={0.2}
                     pointerEvents="none"
@@ -701,41 +1517,50 @@ export function StoryTimeline() {
                 )}
                 <circle
                   data-dot
-                  data-x={d.x}
-                  cx={d.x}
-                  cy={LINE_Y}
-                  r={active ? d.r + 2 : hovered ? d.r + 1.2 : d.r}
+                  data-morph-key={d.key}
+                  data-track={d.track}
+                  data-overview-x={d.overviewX}
+                  data-zoom-x={d.zoomX}
+                  data-zoom-opacity={d.zoomOpacity}
+                  data-base-opacity={baseOpacity}
+                  cx={d.overviewX}
+                  cy={lineY}
+                  r={dotR}
                   fill={d.color}
                   style={{ transition: "r 0.18s ease" }}
                 />
-                {/* voz: o ponto vira um anel que se preenche (progresso) */}
-                {isPlaying && (
+                {isPlaying && d.track !== "station" && (
                   <circle
                     data-ring
-                    data-x={d.x}
+                    data-morph-key={d.key}
+                    data-track={d.track}
+                    data-overview-x={d.overviewX}
+                    data-zoom-x={d.zoomX}
                     data-c={ringC.toFixed(2)}
-                    cx={d.x}
-                    cy={LINE_Y}
+                    cx={d.overviewX}
+                    cy={lineY}
                     r={ringR}
                     fill="none"
                     stroke={d.color}
-                    strokeWidth="1.1"
+                    strokeWidth={pxSvg(1.1)}
                     strokeLinecap="round"
                     strokeDasharray={ringC.toFixed(2)}
                     strokeDashoffset={ringC.toFixed(2)}
-                    transform={`rotate(-90 ${d.x} ${LINE_Y})`}
+                    transform={`rotate(-90 ${d.overviewX} ${lineY})`}
                     opacity={0.85}
                     pointerEvents="none"
                   />
                 )}
-                {/* alvo de clique generoso (o ponto é pequeno) */}
                 <circle
                   data-dot
-                  data-x={d.x}
-                  data-dot-click={d.key}
-                  cx={d.x}
-                  cy={LINE_Y}
-                  r={10}
+                  data-morph-key={d.key}
+                  data-track={d.track}
+                  data-overview-x={d.overviewX}
+                  data-zoom-x={d.zoomX}
+                  data-zoom-opacity={d.zoomOpacity}
+                  cx={d.overviewX}
+                  cy={lineY}
+                  r={hitR}
                   fill="transparent"
                   pointerEvents="all"
                   style={{ cursor: "pointer" }}
@@ -745,21 +1570,26 @@ export function StoryTimeline() {
                   }
                   onClick={() => onDotClick(d)}
                 />
-                {d.label && (
+                {d.label && d.track === "station" && (
                   <text
-                    x={d.x}
-                    y={LABEL_Y0 + d.labelRow * LABEL_ROW_DY}
+                    data-label
+                    data-morph-key={d.key}
+                    data-overview-x={d.overviewX}
+                    data-zoom-x={d.zoomX}
+                    data-zoom-opacity={d.zoomOpacity}
+                    x={d.overviewX}
+                    y={labelY}
                     textAnchor="middle"
                     style={{
                       fontFamily: FONT_STACK,
-                      fontSize: active || hovered ? 8.5 : 7.5,
-                      fontWeight: active ? 400 : 300,
-                      letterSpacing: "0.16em",
+                      fontSize: svgLayout.labelFont,
+                      fontWeight: active || hovered ? 400 : 300,
+                      letterSpacing: "0.14em",
                       textTransform: "uppercase",
                       fill:
                         active || hovered
                           ? "rgba(235, 230, 222, 0.95)"
-                          : "rgba(207, 200, 190, 0.62)",
+                          : "rgba(207, 200, 190, 0.72)",
                       pointerEvents: "none",
                       transition: "fill 0.2s ease",
                     }}

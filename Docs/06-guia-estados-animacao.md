@@ -151,18 +151,26 @@ vezes no mesmo segundo.
 
 ### Vida sem gravidade (o Campo em repouso)
 
-| Controle | Default | O que faz |
-|---|---|---|
-| `wander pauses` | 0.45 | Fração de pausa orgânica no vagar: cada agente alterna andar/parar num ritmo próprio (dente-de-serra por agente). 0 = ninguém para (formigueiro); 1 = quase todos parados. É o que faz a multidão parecer VIVA sem script |
-| `dormant: speed ×` | 0.7 | Multiplicador de velocidade dos **dormentes** (agentes sem história — os slots além das pessoas reais do manifest) |
-| `dormant: wander ×` | 0.8 | Multiplicador do wander dos dormentes. Os dois juntos fazem o fundo mais lento/contemplativo que as pessoas reais — hierarquia de leitura sem esconder ninguém |
+| Controle | Default | Chave | O que faz |
+|---|---|---|---|
+| `wander pauses` (Dormants) | 0.45 | `pausas` | Pausa orgânica por agente; desliga com seek (formação/migração) |
+| `wander pauses` (Witnesses) | 0.2 | `Witnesses.pausas` | Idem nas testemunhas; desliga enquanto migra |
+| `speed variance` (Dormants) | 0.25 | — | Teto de velocidade por agente: 0 = uniforme; 1 = ±100% do `speed ×` |
+| `speed variance` (Witnesses) | 0.2 | — | Idem nas testemunhas |
+| `wander variance` (Dormants) | 0.25 | — | Força do curl por agente |
+| `wander variance` (Witnesses) | 0.15 | — | Idem nas testemunhas |
+| `speed ×` (Dormants) | 0.7 | — | × `max speed` dos dormentes |
+| `speed ×` (Witnesses) | 1 | — | × `max speed` das testemunhas |
 
 ### O que NÃO está neste grupo mas muda tudo
 
 | Onde | Controle | Efeito nos estados |
 |---|---|---|
 | Simulation | `max speed` | Teto geral — decide se `v1` é alcançável |
-| Simulation | `wander (weight)` | Quanta vontade própria os corpos têm |
+| Simulation | `max speed` | Teto de velocidade global |
+| Witnesses | `wander weight` / `speed ×` | Vontade própria e ritmo das testemunhas |
+| Dormants | `wander weight` / `speed ×` / `wander variance` / `speed variance` / `wander pauses` | Ritmo e vida dos dormentes |
+| Witnesses | `wander weight` / `speed ×` / `wander variance` / `speed variance` / `wander pauses` / `pause on hover` | Ritmo e vida das testemunhas (pausas off na migração; hover freeze facilita clique) |
 | Simulation | `stride/unit` | Frames de walk por unidade andada (pés não patinam). Não muda ESTADO, muda a cadência visual do passo |
 | Simulation | `debug color` → `state` | **A ferramenta de leitura**: pinta cada agente pelo estado (cinza=idle, verde=walk, laranja=run, azul=settled, roxo=pray). Ligue isto sempre que for calibrar |
 | Data (M3) | `gravity (UMAP)` / `lens` | Sem um dos dois, não existe assentar/rezar |

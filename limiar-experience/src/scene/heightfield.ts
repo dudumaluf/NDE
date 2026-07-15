@@ -102,20 +102,23 @@ export const terrainU = {
    *  h(x+scroll) nos DOIS lados (TSL e JS — paridade obrigatória). */
   scrollX: uniform(0),
   scrollZ: uniform(0),
-  /** Wrap universal (mundo-toro, doc 03 §14.8): período L da área canônica
-   *  (0 = off). Com wrap ligado o noise é TILEADO no período L (lattice do
-   *  value-noise wrappada mod P por oitava, P = round(L×freq) — frequência
-   *  levemente quantizada para P inteiro) e o FLATTEN passa a viver no
-   *  domínio scrollado+wrappado (o anfiteatro viaja com o mundo): o chão na
-   *  costura combina exatamente — ilusão de espaço infinito sem degrau. */
+  /** Wrap dos AGENTES (mundo-toro sim): 0 = off, contenção radial volta. */
   wrapLen: uniform(0),
+  /** Tile do NOISE do chão — independente do wrap dos agentes (doc 03 §14.8b). */
+  terrainTileLen: uniform(42),
+  /** Grid TSL no chão (Terrain): espaçamento das linhas e raio do disco. */
+  gridCell: uniform(0.25),
+  gridRadius: uniform(21),
 };
 
 /** Espelho JS do scroll (heightJS lê daqui — mesma paridade dos uniforms). */
 const scrollJS = { x: 0, z: 0 };
 
-/** Espelho JS do wrap (helpers de labels/câmera leem daqui). */
+/** Espelho JS do wrap dos agentes (groundToView, FollowCamera…). */
 const wrapJS = { len: 0 };
+
+/** Espelho JS do período de tile do noise do terreno (heightJS). */
+const tileJS = { len: 42 };
 
 /** Avança/zera o scroll do palco nos DOIS lados (GPU + JS) de uma vez. */
 export function setTerrainScroll(x: number, z: number): void {
@@ -129,7 +132,7 @@ export function getTerrainScroll(): { x: number; z: number } {
   return scrollJS;
 }
 
-/** Liga/desliga o wrap universal nos DOIS lados (GPU + JS). 0 = off. */
+/** Liga/desliga o wrap dos AGENTES (GPU + JS). 0 = off. */
 export function setWorldWrap(len: number): void {
   terrainU.wrapLen.value = len;
   wrapJS.len = len;
@@ -137,6 +140,32 @@ export function setWorldWrap(len: number): void {
 
 export function getWorldWrapLen(): number {
   return wrapJS.len;
+}
+
+/**
+ * Período de tile do value-noise do chão — desacoplado do wrap dos agentes.
+ * Default efetivo: 2× contenção (CrowdMesh). 0 = noise contínuo sem tile.
+ */
+export function setTerrainTileLen(len: number): void {
+  terrainU.terrainTileLen.value = len;
+  tileJS.len = len;
+}
+
+export function getTerrainTileLen(): number {
+  return tileJS.len;
+}
+
+/** Raio do disco do grid no chão (= contenção quando auto). */
+export function setGroundGridRadius(radius: number): void {
+  terrainU.gridRadius.value = radius;
+}
+
+export function setGroundGridCell(cell: number): void {
+  terrainU.gridCell.value = cell;
+}
+
+export function getGroundGridRadius(): number {
+  return terrainU.gridRadius.value as number;
 }
 
 /** Delta toroidal: menor caminho no toro de período L → [−L/2, L/2). */
@@ -235,21 +264,19 @@ export function heightJS(
   const amp = p.enabled ? p.amplitude : 0;
   if (amp === 0) return 0;
   const seed = Math.round(p.seed);
-  const L = wrapJS.len;
+  const tileL = tileJS.len;
+  const wrapL = wrapJS.len;
 
   // Scroll do palco: desloca o DOMÍNIO do noise (o flatten usa o x/z do
   // mundo, mais abaixo — o anfiteatro não anda com a esteira).
   const xs = x + scrollJS.x;
   const zs = z + scrollJS.z;
 
-  // Mundo-toro (wrap ON): cada escala de noise é TILEADA no período L —
-  // P = floor(L×freq+0,5) células por volta, frequência quantizada P/L para
-  // P inteiro (h(x+L)=h(x) EXATO na costura). floor(v+0,5) e não round():
-  // round() de half é implementation-defined na GPU — paridade primeiro.
+  // Tile do noise (independente do wrap dos agentes).
   const quant = (freq: number): { f: number; P: number } => {
-    if (L <= 0) return { f: freq, P: 0 };
-    const P = Math.max(1, Math.floor(L * freq + 0.5));
-    return { f: P / L, P };
+    if (tileL <= 0) return { f: freq, P: 0 };
+    const P = Math.max(1, Math.floor(tileL * freq + 0.5));
+    return { f: P / tileL, P };
   };
 
   // domain warp: um vnoise por eixo em meia frequência
@@ -274,11 +301,9 @@ export function heightJS(
   }
   const n = sum / Math.max(ampSum, 1e-5);
 
-  // anfiteatro: centro plano, colinas sobem na banda. Com wrap ON o flatten
-  // vive no domínio scrollado+wrappado (viaja com o mundo e repete por tile
-  // — senão quebraria a periodicidade da costura).
+  // Anfiteatro: com wrap dos AGENTES ligado, flatten viaja no domínio toroidal.
   const dist =
-    L > 0 ? Math.hypot(wrapDeltaJS(xs), wrapDeltaJS(zs)) : Math.hypot(x, z);
+    wrapL > 0 ? Math.hypot(wrapDeltaJS(xs), wrapDeltaJS(zs)) : Math.hypot(x, z);
   const t = Math.min(
     1,
     Math.max(0, (dist - p.flattenRadius) / Math.max(p.flattenBand, 1e-5)),
@@ -345,6 +370,27 @@ export const wrapDeltaTSL = (d: N, L: N): N =>
   );
 
 /**
+ * Wrap de POSIÇÃO com histerese na costura (2026-07-15): só teleporta quando
+ * |coord| > L/2 + h — evita oscilar no limiar. h=0 ≈ wrap imediato em ±L/2.
+ */
+export const wrapPosTSL = (xz: N, L: N, h: N): N => {
+  const half: N = L.mul(0.5);
+  const on: N = L.greaterThan(0.5);
+  const lim: N = half.add(h);
+  const wx: N = select(
+    on.and(xz.x.abs().greaterThan(lim)),
+    wrapDeltaTSL(xz.x, L),
+    xz.x,
+  );
+  const wz: N = select(
+    on.and(xz.y.abs().greaterThan(lim)),
+    wrapDeltaTSL(xz.y, L),
+    xz.y,
+  );
+  return vec2(wx, wz);
+};
+
+/**
  * Altura do terreno — lado GPU (mesmos uniforms do chão e da sim).
  * Uso: `heightTSL(pos.x, pos.z)` dentro de qualquer Fn/material.
  */
@@ -360,21 +406,21 @@ if (import.meta.env?.DEV && typeof window !== "undefined") {
 export const heightTSL = /* @__PURE__ */ Fn(([x, z]: N[]) => {
   const u = terrainU;
   const seed: N = u.seed.round().toInt().toUint().mul(uint(8));
-  const L: N = u.wrapLen;
-  const wrapOn: N = L.greaterThan(0.5);
+  const tileL: N = u.terrainTileLen;
+  const tileOn: N = tileL.greaterThan(0.5);
+  const wrapL: N = u.wrapLen;
+  const wrapOn: N = wrapL.greaterThan(0.5);
 
   // Scroll do palco (paridade com heightJS): noise anda, flatten fica.
   const xs: N = x.add(u.scrollX);
   const zs: N = z.add(u.scrollZ);
 
-  // Mundo-toro: frequência quantizada P/L (P = floor(L×freq+0,5) — mesma
-  // conta do quant() JS; floor(v+0,5), nunca round(): half é
-  // implementation-defined na GPU).
+  // Tile do noise — período terrainTileLen (desacoplado do wrap dos agentes).
   const quant = (freq: N): { f: N; P: N } => {
-    const P: N = L.mul(freq).add(0.5).floor().max(1);
+    const P: N = tileL.mul(freq).add(0.5).floor().max(1);
     return {
-      f: select(wrapOn, P.div(L.max(1e-5)), freq),
-      P: select(wrapOn, P, float(0)),
+      f: select(tileOn, P.div(tileL.max(1e-5)), freq),
+      P: select(tileOn, P, float(0)),
     };
   };
 
@@ -402,10 +448,10 @@ export const heightTSL = /* @__PURE__ */ Fn(([x, z]: N[]) => {
   }
   const n: N = sum.div(ampSum.max(1e-5));
 
-  // Flatten: no toro vive no domínio scrollado+wrappado (paridade heightJS).
+  // Flatten: anfiteatro segue o wrap dos AGENTES (esteira), não o tile do noise.
   const dist: N = select(
     wrapOn,
-    vec2(wrapDeltaTSL(xs, L), wrapDeltaTSL(zs, L)).length(),
+    vec2(wrapDeltaTSL(xs, wrapL), wrapDeltaTSL(zs, wrapL)).length(),
     vec2(x, z).length(),
   );
   const flat: N = smoothstep(u.flatR, u.flatR.add(u.flatBand.max(1e-5)), dist);

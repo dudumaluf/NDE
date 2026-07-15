@@ -11,8 +11,9 @@ import { mouseTarget, type MouseMode } from "../sim/mouseTarget";
 import { buildCrowdMaterial } from "./crowdMaterial";
 import { fillContentAttributes, fillStaticAttributes } from "./spawn";
 import { applyColorEmphasis } from "./colorEmphasis";
-import { qpNum } from "../lib/urlParams";
+import { qpHas, qpNum } from "../lib/urlParams";
 import { pref, prefBool, prefNum, prefStr } from "../lib/prefs";
+import { levaVal } from "../lib/levaRead";
 import { useContent } from "../data/contentStore";
 import {
   DORMANT_FORMATIONS,
@@ -41,13 +42,21 @@ import {
   getTerrainScroll,
   heightJS,
   setTerrainScroll,
+  setGroundGridRadius,
+  setTerrainTileLen,
   setWorldWrap,
 } from "../scene/heightfield";
 import { DebugAreas } from "../render/DebugAreas";
 import { useFollow } from "../ui/followStore";
+import { useHover } from "../ui/hoverStore";
 import { positionMirror } from "../sim/positionMirror";
 
 const NO_LENS = "nenhuma";
+
+/** Diâmetro do disco de jogo: 2×contenção; `?area=` ainda vence p/ screenshots. */
+function playDiameter(contRaio: number): number {
+  return qpHas("area") ? qpNum("area", contRaio * 2) : contRaio * 2;
+}
 
 const MAX_GRID = 64; // 4096 pessoas — teto do protótipo
 
@@ -77,88 +86,93 @@ export function CrowdMesh() {
     [posTex, nrmTex, attrs, sim],
   );
 
-  // Defaults dos controles passam por pref(): padrão salvo (grupo
-  // Preferences) sobrescreve a fábrica; query param na URL vence os dois.
-  // Painel em INGLÊS (pedido do Dudu, 2026-07-13); valores/keys internos e
-  // query params ficam como eram — só o que se LÊ muda (ver Docs/06).
-  const c = useControls("Crowd", {
+  // Painel reorganizado (2026-07-15): física · testemunhas · dormentes · acoplamento.
+  const phy = useControls("Field · physics", {
     grid: {
-      value: Math.min(prefNum("grid", "Crowd.grid", 32), MAX_GRID),
+      value: Math.min(prefNum("grid", "Field · physics.grid", 32), MAX_GRID),
       min: 4,
       max: MAX_GRID,
       step: 4,
       label: "grid (N×N)",
+      hint: "agent count = N² — spacing follows containment radius (spawn fills the play disc)",
     },
-    area: {
-      value: prefNum("area", "Crowd.area", 40),
-      min: 10,
-      max: 80,
-      label: "spawn area",
+    ruido: {
+      value: pref("Field · physics.ruido", 0.6),
+      min: 0,
+      max: 2,
+      label: "spawn noise",
     },
-    ruido: { value: pref("Crowd.ruido", 0.6), min: 0, max: 2, label: "spawn noise" },
-    seed: { value: pref("Crowd.seed", 3), min: 1, max: 9999, step: 1, label: "seed" },
-    escala: { value: pref("Crowd.escala", 2.5), min: 0.5, max: 5, label: "person scale" },
-    paleta: { value: pref("Crowd.paleta", true), label: "palette (vs. dormant)" },
-    soHistorias: {
-      value: prefBool("onlyPeople", "Crowd.soHistorias", false),
-      label: "only people with stories",
-      hint: "hides the dormant agents: draws only the first slots (the real people in the manifest) — the sim keeps running for everyone, wires and labels stay valid",
+    seed: {
+      value: pref("Field · physics.seed", 3),
+      min: 1,
+      max: 9999,
+      step: 1,
+      label: "seed",
     },
-    reset: button(() => {
-      resetRef.current = true;
-    }),
-  });
-
-  const s = useControls("Simulation", {
+    escala: {
+      value: pref("Field · physics.escala", 2.5),
+      min: 0.5,
+      max: 5,
+      label: "person scale",
+    },
+    paleta: {
+      value: pref("Field · physics.paleta", true),
+      label: "palette (vs. dormant)",
+    },
     maxSpeed: {
-      value: prefNum("speed2", "Simulation.maxSpeed", 0.8),
+      value: prefNum("speed2", "Field · physics.maxSpeed", 0.8),
       min: 0,
       max: 3,
       label: "max speed",
-    },
-    wander: { value: pref("Simulation.wander", 1), min: 0, max: 3, label: "wander (weight)" },
-    wanderScale: {
-      value: pref("Simulation.wanderScale", 0.12),
-      min: 0.005,
-      max: 0.4,
-      label: "wander scale",
-    },
-    wanderEvolve: {
-      value: pref("Simulation.wanderEvolve", 0.12),
-      min: 0,
-      max: 0.5,
-      label: "wander evolution",
+      hint: "speed cap for everyone — multiply per group with speed × in Witnesses / Dormants",
     },
     separacao: {
-      value: prefNum("sep", "Simulation.separacao", 1.6),
+      value: prefNum("sep", "Field · physics.separacao", 1.6),
       min: 0,
       max: 4,
       label: "separation (weight)",
     },
-    sepRaio: { value: pref("Simulation.sepRaio", 0.7), min: 0.1, max: 2.5, label: "separation radius" },
+    sepRaio: {
+      value: pref("Field · physics.sepRaio", 0.7),
+      min: 0.1,
+      max: 2.5,
+      label: "separation radius",
+    },
     contRaio: {
-      value: prefNum("contain", "Simulation.contRaio", 21),
+      value: prefNum("contain", "Field · physics.contRaio", 21),
       min: 5,
       max: 45,
       label: "containment radius",
+      hint: "play disc radius — spawn, ground grid and wrap square (side = 2×) all follow this",
     },
     worldWrap: {
-      value: prefBool("wrap", "Simulation.worldWrap", true),
+      value: prefBool("wrap", "Field · physics.worldWrap", true),
       label: "world wrap",
       hint: "the world is a torus: a canonical square area (side = 2× containment radius) where anyone crossing an edge reappears on the opposite side — the containment force turns off. The foundation of the infinite-space illusion",
     },
+    wrapToroidalSep: {
+      value: prefBool("wrapSep", "Field · physics.wrapToroidalSep", true),
+      label: "toroidal separation",
+      hint: "when wrap is on: neighbors across the seam push each other (fixes edge pile-up). Off = legacy euclidean separation",
+    },
+    wrapHysteresis: {
+      value: prefNum("wrapHyst", "Field · physics.wrapHysteresis", 0.8),
+      min: 0,
+      max: 3,
+      label: "wrap seam margin (m)",
+      hint: "extra meters past L/2 before teleport — kills threshold flicker. 0 = immediate wrap at the edge",
+    },
     debugAreas: {
-      value: prefBool("debugAreas", "Simulation.debugAreas", false),
+      value: prefBool("debugAreas", "Field · physics.debugAreas", false),
       label: "debug areas",
       hint: "wireframe overlays: canonical wrap square, containment circle (wrap off), cluster-core rings, active field circle and the travel heading",
     },
     mouseModo: {
-      value: prefStr<MouseMode>("mouse", "Simulation.mouseModo", "atrair", [
+      value: prefStr<MouseMode>("mouse", "Field · physics.mouseModo", "atrair", [
         "off",
         "atrair",
         "repelir",
       ]),
-      // Valores internos (e da URL ?mouse=) seguem PT; só o rótulo é EN.
       options: { off: "off", attract: "atrair", repel: "repelir" } as Record<
         string,
         MouseMode
@@ -166,22 +180,37 @@ export function CrowdMesh() {
       label: "mouse",
     },
     mouseRaio: {
-      value: prefNum("mouseR", "Simulation.mouseRaio", 7),
+      value: prefNum("mouseR", "Field · physics.mouseRaio", 7),
       min: 1,
       max: 30,
       label: "mouse radius",
     },
-    mouseForca: { value: pref("Simulation.mouseForca", 1.2), min: 0, max: 4, label: "mouse force" },
-    giro: { value: pref("Simulation.giro", 6), min: 0.5, max: 20, label: "turn smoothing" },
-    passo: { value: pref("Simulation.passo", 34), min: 5, max: 90, label: "stride/unit" },
+    mouseForca: {
+      value: pref("Field · physics.mouseForca", 1.2),
+      min: 0,
+      max: 4,
+      label: "mouse force",
+    },
+    giro: {
+      value: pref("Field · physics.giro", 6),
+      min: 0.5,
+      max: 20,
+      label: "turn smoothing",
+    },
+    passo: {
+      value: pref("Field · physics.passo", 34),
+      min: 5,
+      max: 90,
+      label: "stride/unit",
+    },
     faceFlip: {
-      value: prefBool("faceflip", "Simulation.faceFlip", false),
+      value: prefBool("faceflip", "Field · physics.faceFlip", false),
       label: "flip facing",
     },
     debug: {
       value: prefStr<"off" | "velocidade" | "direção" | "alvo" | "estado">(
         "debug",
-        "Simulation.debug",
+        "Field · physics.debug",
         "off",
         ["off", "velocidade", "direção", "alvo", "estado"],
       ),
@@ -194,77 +223,106 @@ export function CrowdMesh() {
       },
       label: "debug color",
     },
+    reset: button(() => {
+      resetRef.current = true;
+    }),
   });
 
-  // --- Estados por agente (doc 04 §5.5): a animação lê a física ---
-  // Transições parado⇄andando⇄correndo pela velocidade REAL (histerese);
-  // chegada assenta em idle/rezar; onda de chegada; dormentes contemplativos.
-  // Master off = modo global antigo (botões "States (seamless morph)").
-  // Guia de uso dos parâmetros: Docs/06-guia-estados-animacao.md.
-  const e = useControls("States (per agent)", {
-    auto: {
-      value: prefBool("estados", "States (per agent).auto", true),
-      label: "automatic states",
+  const dorm = useControls("Dormants", {
+    formation: {
+      value: prefStr<DormantFormation>(
+        "formation",
+        "Dormants.formation",
+        "wander",
+        DORMANT_FORMATIONS,
+      ),
+      options: {
+        wander: "wander",
+        circle: "circle",
+        corridor: "corridor",
+        clear: "clear",
+      } as Record<string, DormantFormation>,
+      label: "formation",
+      hint: "wander (loose) · circle (ring) · corridor (rows flanking follow — needs active follow) · clear (rim)",
     },
-    v0: {
-      value: prefNum("v0", "States (per agent).v0", 0.12),
-      min: 0.01,
-      max: 0.6,
-      label: "v0 idle⇄walk",
+    spacing: {
+      value: prefNum("formSpacing", "Dormants.spacing", 1.2),
+      min: 0.4,
+      max: 4,
+      label: "formation spacing",
     },
-    v1: {
-      value: prefNum("v1", "States (per agent).v1", 1.15),
-      min: 0.2,
-      max: 3,
-      label: "v1 walk⇄run",
-    },
-    histerese: {
-      value: pref("States (per agent).histerese", 0.12),
+    rimInset: {
+      value: prefNum("rimInset", "Dormants.rimInset", 1.5),
       min: 0,
-      max: 0.3,
-      label: "hysteresis (±)",
+      max: 6,
+      label: "rim inset (wrap)",
+      hint: "pull formation ring inward from the wrap seam — only when world wrap is on",
     },
-    fadeEstado: {
-      value: pref("States (per agent).fadeEstado", 0.3),
-      min: 0.1,
+    wanderWhileForm: {
+      value: pref("Dormants.wanderWhileForm", 0.35),
+      min: 0,
       max: 1,
-      label: "crossfade (s)",
+      label: "wander while forming",
+      hint: "curl strength en route to formation slots — 0 = march, 1 = full wind",
     },
-    pesoIdle: {
-      value: pref("States (per agent).pesoIdle", 1),
-      min: 0,
-      max: 4,
-      label: "settle: idle weight",
+    lockAtForm: {
+      value: prefBool("formLock", "Dormants.lockAtForm", true),
+      label: "lock at formation",
+      hint: "near the ring/corridor slot, curl off — clean moldura",
     },
-    pesoRezar: {
-      value: pref("States (per agent).pesoRezar", 0.6),
-      min: 0,
-      max: 4,
-      label: "settle: pray weight",
-    },
-    onda: {
-      value: prefNum("onda", "States (per agent).onda", 0.9),
+    wanderW: {
+      value: pref("Dormants.wanderW", 0.8),
       min: 0,
       max: 3,
-      label: "arrival wave",
+      label: "wander weight",
+      hint: "curl force (dormentes only)",
+    },
+    wanderScale: {
+      value: pref("Dormants.wanderScale", 0.12),
+      min: 0.005,
+      max: 0.8,
+      label: "wander scale",
+      hint: "noise frequency — low = wide lazy curves; high = tight restless eddies",
+    },
+    wanderEvolve: {
+      value: pref("Dormants.wanderEvolve", 0.12),
+      min: 0,
+      max: 0.5,
+      label: "wander evolution",
+      hint: "how fast the wind field changes over time",
+    },
+    wanderVariance: {
+      value: pref("Dormants.wanderVariance", 0.25),
+      min: 0,
+      max: 1,
+      label: "wander variance",
+      hint: "per-agent curl spread — 0 = uniform; 1 = ±100% of wander weight",
     },
     pausas: {
-      value: prefNum("pausas", "States (per agent).pausas", 0.45),
+      value: prefNum("pausas", "Dormants.pausas", 0.45),
       min: 0,
       max: 1,
       label: "wander pauses",
+      hint: "organic stop/go per agent — off while seeking a formation slot",
+    },
+    speedVariance: {
+      value: pref("Dormants.speedVariance", 0.25),
+      min: 0,
+      max: 1,
+      label: "speed variance",
+      hint: "per-agent walk speed spread — 0 = uniform; 1 = ±100% of speed ×",
     },
     dormVel: {
-      value: pref("States (per agent).dormVel", 0.7),
-      min: 0.2,
+      value: pref("Dormants.dormVel", 0.7),
+      min: 0,
       max: 1.5,
-      label: "dormant: speed ×",
+      label: "speed ×",
+      hint: "× max speed cap for dormants only",
     },
-    dormWander: {
-      value: pref("States (per agent).dormWander", 0.8),
-      min: 0.2,
-      max: 1.5,
-      label: "dormant: wander ×",
+    soHistorias: {
+      value: prefBool("onlyPeople", "Dormants.soHistorias", false),
+      label: "hide (draw only witnesses)",
+      hint: "sim keeps running for everyone — wires and labels stay valid",
     },
   });
 
@@ -401,202 +459,281 @@ export function CrowdMesh() {
     return rules;
   }, [v.rule1El, v.rule1Clip, v.rule1W, v.rule2El, v.rule2Clip, v.rule2W]);
 
-  // --- M3: o Campo dirigido pelos dados reais (só aparece com content/) ---
-  // Rótulo "none" para NO_LENS; as keys dos elementos são dados (ficam PT).
+  // --- Testemunhas (com história): dados, lentes, estados de chegada ---
   const lensOptions = useMemo(() => {
     const opts: Record<string, string> = { none: NO_LENS };
     if (content) for (const el of content.taxonomy.elementos) opts[el.key] = el.key;
     return opts;
   }, [content]);
-  const [d, setD] = useControls(
-    "Data (M3)",
-    () => ({
-      gravidade: {
-        value: prefBool("gravity", "Data (M3).gravidade", false),
-        label: "gravity (UMAP)",
-      },
-      mapScale: {
-        value: prefNum("mapScale", "Data (M3).mapScale", 14),
-        min: 4,
-        max: 30,
-        label: "map scale",
-      },
-      gravForca: {
-        value: prefNum("gravForca", "Data (M3).gravForca", 2.2),
-        min: 0.3,
-        max: 6,
-        label: "gravity force",
-      },
-      lente: {
-        value: prefStr("lens", "Data (M3).lente", NO_LENS),
-        options: lensOptions,
-        label: "lens (element)",
-      },
-      fios: { value: prefBool("wires", "Data (M3).fios", true), label: "wires (graph)" },
-      fiosAlpha: {
-        value: prefNum("wiresAlpha", "Data (M3).fiosAlpha", 0.22),
-        min: 0,
-        max: 0.5,
-        label: "wires alpha",
-      },
-      fiosAltura: {
-        value: pref("Data (M3).fiosAltura", 1.05),
-        min: 0,
-        max: 2,
-        label: "wires height",
-      },
-      // --- leitura visual (M3.5) ---
-      fiosFadePerto: {
-        value: prefNum("wiresNear", "Data (M3).fiosFadePerto", 6),
-        min: 0.5,
-        max: 25,
-        label: "wires fade: near",
-      },
-      fiosFadeLonge: {
-        value: prefNum("wiresFar", "Data (M3).fiosFadeLonge", 14),
-        min: 2,
-        max: 45,
-        label: "wires fade: far",
-      },
-      fiosPeso: {
-        value: prefNum("wiresGamma", "Data (M3).fiosPeso", 1.6),
-        min: 0.4,
-        max: 4,
-        label: "wires weight (gamma)",
-      },
-      fiosSoNucleos: {
-        value: prefBool("wiresFormed", "Data (M3).fiosSoNucleos", false),
-        label: "wires only formed clusters",
-      },
-      palavras: {
-        value: prefBool("labels", "Data (M3).palavras", true),
-        label: "words (clusters)",
-      },
-      formRaio: {
-        value: prefNum("formRaio", "Data (M3).formRaio", 2.4),
-        min: 0.8,
-        max: 8,
-        label: "formation radius (cohesion)",
-      },
-    }),
-    [lensOptions],
-  );
-
-  // --- Lentes demográficas: eixos não-fenomenológicos (sexo, década, …) ---
   const dlensOptions = useMemo(() => {
     const opts: Record<string, string> = { none: NO_LENS };
     for (const k of DEMO_LENS_KEYS) opts[DEMO_LENS_LABELS[k]] = k;
     return opts;
   }, []);
-  const [dl, setDl] = useControls(
-    "Demographic lens",
+  const [wit, setWit] = useControls(
+    "Witnesses",
     () => ({
+      auto: {
+        value: prefBool("estados", "Witnesses.auto", true),
+        label: "automatic states",
+      },
+      v0: {
+        value: prefNum("v0", "Witnesses.v0", 0.12),
+        min: 0.01,
+        max: 0.6,
+        label: "v0 idle⇄walk",
+      },
+      v1: {
+        value: prefNum("v1", "Witnesses.v1", 1.15),
+        min: 0.2,
+        max: 3,
+        label: "v1 walk⇄run",
+      },
+      histerese: {
+        value: pref("Witnesses.histerese", 0.12),
+        min: 0,
+        max: 0.3,
+        label: "hysteresis (±)",
+      },
+      fadeEstado: {
+        value: pref("Witnesses.fadeEstado", 0.3),
+        min: 0.1,
+        max: 1,
+        label: "crossfade (s)",
+      },
+      pesoIdle: {
+        value: pref("Witnesses.pesoIdle", 1),
+        min: 0,
+        max: 4,
+        label: "settle: idle weight",
+      },
+      pesoRezar: {
+        value: pref("Witnesses.pesoRezar", 0.6),
+        min: 0,
+        max: 4,
+        label: "settle: pray weight",
+      },
+      onda: {
+        value: prefNum("onda", "Witnesses.onda", 0.9),
+        min: 0,
+        max: 3,
+        label: "arrival wave",
+      },
+      wanderWhileSeek: {
+        value: pref("Witnesses.wanderWhileSeek", 0.35),
+        min: 0,
+        max: 1,
+        label: "wander while seeking",
+        hint: "curl en route to UMAP/lens target — 0 = direct migration",
+      },
+      lockAtCluster: {
+        value: prefBool("clusterLock", "Witnesses.lockAtCluster", true),
+        label: "lock at cluster",
+        hint: "near nucleus/lens slot, curl off — they settle still",
+      },
+      wanderW: {
+        value: pref("Witnesses.wanderW", 1),
+        min: 0,
+        max: 3,
+        label: "wander weight",
+        hint: "curl force (witnesses only)",
+      },
+      wanderScale: {
+        value: pref("Witnesses.wanderScale", 0.12),
+        min: 0.005,
+        max: 0.4,
+        label: "wander scale",
+      },
+      wanderEvolve: {
+        value: pref("Witnesses.wanderEvolve", 0.12),
+        min: 0,
+        max: 0.5,
+        label: "wander evolution",
+      },
+      wanderVariance: {
+        value: pref("Witnesses.wanderVariance", 0.15),
+        min: 0,
+        max: 1,
+        label: "wander variance",
+        hint: "per-agent curl spread — 0 = uniform; 1 = ±100% of wander weight",
+      },
+      pausas: {
+        value: prefNum("witPausas", "Witnesses.pausas", 0.2),
+        min: 0,
+        max: 1,
+        label: "wander pauses",
+        hint: "organic stop/go per agent — off while migrating to a target",
+      },
+      speedVariance: {
+        value: pref("Witnesses.speedVariance", 0.2),
+        min: 0,
+        max: 1,
+        label: "speed variance",
+        hint: "per-agent walk speed spread — 0 = uniform; 1 = ±100% of speed ×",
+      },
+      speedMul: {
+        value: pref("Witnesses.speedMul", 1),
+        min: 0,
+        max: 1.5,
+        label: "speed ×",
+        hint: "× max speed cap for witnesses only",
+      },
+      hoverFreeze: {
+        value: prefBool("hoverFreeze", "Witnesses.hoverFreeze", true),
+        label: "pause on hover",
+        hint: "stops own movement on hover — still rides the follow treadmill",
+      },
+      gravidade: {
+        value: prefBool("gravity", "Witnesses.gravidade", false),
+        label: "gravity (UMAP)",
+      },
+      mapScale: {
+        value: prefNum("mapScale", "Witnesses.mapScale", 14),
+        min: 4,
+        max: 30,
+        label: "map scale",
+      },
+      gravForca: {
+        value: prefNum("gravForca", "Witnesses.gravForca", 2.2),
+        min: 0.3,
+        max: 6,
+        label: "gravity force",
+      },
+      lente: {
+        value: prefStr("lens", "Witnesses.lente", NO_LENS),
+        options: lensOptions,
+        label: "lens (element)",
+      },
       dlente: {
-        value: prefStr("dlens", "Demographic lens.dlente", NO_LENS, [
+        value: prefStr("dlens", "Witnesses.dlente", NO_LENS, [
           NO_LENS,
           ...DEMO_LENS_KEYS,
         ]),
         options: dlensOptions,
-        label: "lens",
+        label: "lens (demographic)",
+      },
+      fios: {
+        value: prefBool("wires", "Witnesses.fios", true),
+        label: "wires (graph)",
+      },
+      fiosAlpha: {
+        value: prefNum("wiresAlpha", "Witnesses.fiosAlpha", 0.22),
+        min: 0,
+        max: 0.5,
+        label: "wires alpha",
+      },
+      fiosAltura: {
+        value: pref("Witnesses.fiosAltura", 1.05),
+        min: 0,
+        max: 2,
+        label: "wires height",
+      },
+      fiosFadePerto: {
+        value: prefNum("wiresNear", "Witnesses.fiosFadePerto", 6),
+        min: 0.5,
+        max: 25,
+        label: "wires fade: near",
+      },
+      fiosFadeLonge: {
+        value: prefNum("wiresFar", "Witnesses.fiosFadeLonge", 14),
+        min: 2,
+        max: 45,
+        label: "wires fade: far",
+      },
+      fiosPeso: {
+        value: prefNum("wiresGamma", "Witnesses.fiosPeso", 1.6),
+        min: 0.4,
+        max: 4,
+        label: "wires weight (gamma)",
+      },
+      fiosSoNucleos: {
+        value: prefBool("wiresFormed", "Witnesses.fiosSoNucleos", false),
+        label: "wires only formed clusters",
+      },
+      palavras: {
+        value: prefBool("labels", "Witnesses.palavras", true),
+        label: "words (clusters)",
+      },
+      formRaio: {
+        value: prefNum("formRaio", "Witnesses.formRaio", 2.4),
+        min: 0.8,
+        max: 8,
+        label: "formation radius (cohesion)",
       },
     }),
-    [dlensOptions],
+    [lensOptions, dlensOptions],
   );
 
-  // --- Campo do ativo (2026-07-14, doc 04): quem está ativo abre espaço ---
-  // Opção com sliders, não comportamento fixo — o Dudu gosta do caos vivo
-  // (NYC); o campo existe para as cenas em que a legibilidade vence.
-  const af = useControls("Active field", {
+  const couple = useControls("Field · coupling", {
     fieldOn: {
-      value: prefBool("field", "Active field.fieldOn", false),
+      value: prefBool("field", "Field · coupling.fieldOn", false),
       label: "field (follow)",
-      hint: "the followed person radiates a soft repulsion — others step aside instead of crowding through",
+      hint: "the followed witness radiates soft repulsion — others step aside",
     },
     fieldRadius: {
-      value: prefNum("fieldR", "Active field.fieldRadius", 2.5),
+      value: prefNum("fieldR", "Field · coupling.fieldRadius", 2.5),
       min: 0.5,
       max: 8,
       label: "field radius",
+      render: (get) => Boolean(get("Field · coupling.fieldOn")),
     },
     fieldStrength: {
-      value: prefNum("fieldF", "Active field.fieldStrength", 1.2),
+      value: prefNum("fieldF", "Field · coupling.fieldStrength", 1.2),
       min: 0,
       max: 4,
       label: "field strength",
+      render: (get) => Boolean(get("Field · coupling.fieldOn")),
     },
     yieldW: {
-      value: prefNum("yield", "Active field.yieldW", 2),
+      value: prefNum("yield", "Field · coupling.yieldW", 2),
       min: 1,
       max: 3,
       label: "yield to travelers",
-      hint: "asymmetric separation: agents WITH a target (migrating to a cluster) push targetless ones up to this much harder — WebGPU only (the WebGL2 fallback has no separation since M2)",
+      hint: "witnesses WITH a target push dormants harder — WebGPU only",
     },
     selInertia: {
-      value: prefNum("selInertia", "Active field.selInertia", 0.15),
+      value: prefNum("selInertia", "Field · coupling.selInertia", 0.15),
       min: 0,
       max: 1,
       label: "selected inertia",
-      hint: "how much separation/containment the FOLLOWED person receives back: 0 = immune (walks through like a train), 1 = same as everyone. The others always yield fully — fixes the mid-crowd stutter",
-    },
-    steerOn: {
-      value: prefBool("steer", "Active field.steerOn", true),
-      label: "mouse steering",
-      hint: "during follow the mouse is the rudder: the pointer's direction (ground ray, relative to the person) sets where the journey goes. Point AT the person (deadzone ~1.5 m) to stop",
-    },
-    steerStrength: {
-      value: prefNum("steerK", "Active field.steerStrength", 1),
-      min: 0,
-      max: 2,
-      label: "steer strength",
-      hint: "how sharply the rudder turns the journey heading (treadmill mode) or pushes the person (legacy mode)",
+      hint: "how much separation/containment the FOLLOWED person receives — fixes stutter",
     },
     storyField: {
-      value: prefStr("storyField", "Active field.storyField", "off", [
+      value: prefStr("storyField", "Field · coupling.storyField", "off", [
         "off",
-        "attract",
+        "social",
         "repel",
       ]),
-      options: { off: "off", attract: "attract", repel: "repel" },
+      options: {
+        off: "off",
+        social: "social (attract + bubble)",
+        repel: "repel",
+      },
       label: "story field",
-      hint: "free-mode field of the agents WITH data over the dormant ones: attract = small gatherings around the witnesses; repel = a legibility halo. Lives in the separation loop — WebGPU only",
+      hint: "social = dormentes orbitam testemunhas com bolha interna — WebGPU only",
     },
     storyRadius: {
-      value: prefNum("storyR", "Active field.storyRadius", 2),
+      value: prefNum("storyR", "Field · coupling.storyRadius", 2),
       min: 0.5,
       max: 6,
-      label: "story field radius",
+      label: "story attract radius",
+      hint: "outer pull toward witnesses (social mode)",
+      render: (get) => get("Field · coupling.storyField") !== "off",
+    },
+    storyRepelRadius: {
+      value: prefNum("storyBubble", "Field · coupling.storyRepelRadius", 0.55),
+      min: 0.2,
+      max: 2,
+      label: "story bubble radius",
+      hint: "inner repulsion — keeps dormants from tunneling through witnesses",
+      render: (get) => get("Field · coupling.storyField") === "social",
     },
     storyStrength: {
-      value: prefNum("storyF", "Active field.storyStrength", 0.6),
+      value: prefNum("storyF", "Field · coupling.storyStrength", 0.6),
       min: 0,
       max: 2,
       label: "story field strength",
-    },
-  });
-
-  // --- Formações dos dormentes (2026-07-14, doc 04): moldar a multidão ---
-  const fo = useControls("Formations", {
-    formation: {
-      value: prefStr<DormantFormation>(
-        "formation",
-        "Formations.formation",
-        "wander",
-        DORMANT_FORMATIONS,
-      ),
-      options: {
-        wander: "wander",
-        circle: "circle",
-        corridor: "corridor",
-        clear: "clear",
-      } as Record<string, DormantFormation>,
-      label: "dormant formation",
-      hint: "what the story-less crowd does: wander (loose), circle (big ring around everything), corridor (two rows flanking the FOLLOWED person's path — needs an active follow, falls back to wander), clear (recede to the rim)",
-    },
-    spacing: {
-      value: prefNum("formSpacing", "Formations.spacing", 1.2),
-      min: 0.4,
-      max: 4,
-      label: "formation spacing",
+      render: (get) => get("Field · coupling.storyField") !== "off",
     },
   });
 
@@ -616,6 +753,18 @@ export function CrowdMesh() {
       label: "treadmill speed",
       hint: "journey speed — also the steer speed cap in legacy (no-pin) mode",
     },
+    steerOn: {
+      value: prefBool("steer", "Stage (treadmill).steerOn", true),
+      label: "mouse steering",
+      hint: "during follow the mouse is the rudder: the pointer's direction (ground ray, relative to the person) sets where the journey goes. Point AT the person (deadzone ~1.5 m) to stop",
+    },
+    steerStrength: {
+      value: prefNum("steerK", "Stage (treadmill).steerStrength", 1),
+      min: 0,
+      max: 2,
+      label: "steer strength",
+      hint: "how sharply the rudder turns the journey heading (treadmill mode) or pushes the person (legacy mode)",
+    },
   });
 
   // Exclusão mútua: ativar uma lente desativa a outra (a que MUDOU vence).
@@ -623,24 +772,24 @@ export function CrowdMesh() {
   const prevLens = useRef(NO_LENS);
   const prevDlens = useRef(NO_LENS);
   useEffect(() => {
-    const lensChanged = d.lente !== prevLens.current;
-    const dlensChanged = dl.dlente !== prevDlens.current;
-    prevLens.current = d.lente;
-    prevDlens.current = dl.dlente;
-    if (dlensChanged && dl.dlente !== NO_LENS && d.lente !== NO_LENS) {
-      setD({ lente: NO_LENS });
-    } else if (lensChanged && d.lente !== NO_LENS && dl.dlente !== NO_LENS) {
-      setDl({ dlente: NO_LENS });
+    const lensChanged = wit.lente !== prevLens.current;
+    const dlensChanged = wit.dlente !== prevDlens.current;
+    prevLens.current = wit.lente;
+    prevDlens.current = wit.dlente;
+    if (dlensChanged && wit.dlente !== NO_LENS && wit.lente !== NO_LENS) {
+      setWit({ lente: NO_LENS });
+    } else if (lensChanged && wit.lente !== NO_LENS && wit.dlente !== NO_LENS) {
+      setWit({ dlente: NO_LENS });
     }
-  }, [d.lente, dl.dlente, setD, setDl]);
+  }, [wit.lente, wit.dlente, setWit]);
 
   // Classificação da lente ativa (46 pessoas, CPU) + legenda para o HUD.
   const demoCls = useMemo(
     () =>
-      content && dl.dlente !== NO_LENS
-        ? classifyDemoLens(dl.dlente as DemoLensKey, content)
+      content && wit.dlente !== NO_LENS
+        ? classifyDemoLens(wit.dlente as DemoLensKey, content)
         : null,
-    [content, dl.dlente],
+    [content, wit.dlente],
   );
   useEffect(() => {
     useDemoLens.setState({ cls: demoCls });
@@ -650,9 +799,9 @@ export function CrowdMesh() {
   // Publica a lente de ELEMENTO para a Legenda (src/ui/Legend.tsx) e escuta
   // o destaque temporário disparado por clique num chip dela.
   useEffect(() => {
-    setElementLens(content && d.lente !== NO_LENS ? d.lente : null);
+    setElementLens(content && wit.lente !== NO_LENS ? wit.lente : null);
     return () => setElementLens(null);
-  }, [content, d.lente]);
+  }, [content, wit.lente]);
   const legendFlash = useLegend((s) => s.flash);
 
   const resetRef = useRef(true);
@@ -680,12 +829,12 @@ export function CrowdMesh() {
   const dormentesCor = useAppearance((st) => st.dormentes);
   const cinzaDestaque = useAppearance((st) => st.cinzaDestaque);
   const paintColors = (flashK: number) => {
-    const count = c.grid * c.grid;
+    const count = phy.grid * phy.grid;
     if (content) {
       fillContentAttributes(
         attrs,
         count,
-        c.seed,
+        phy.seed,
         content,
         demoCls,
         hexToRgb01(dormentesCor),
@@ -700,14 +849,14 @@ export function CrowdMesh() {
         );
       }
       applyColorEmphasis(attrs, count, content, demoCls, {
-        elementLens: d.lente === NO_LENS ? null : d.lente,
+        elementLens: wit.lente === NO_LENS ? null : wit.lente,
         flash: legendFlash,
         flashK,
         flashIntensity: destaqueIntensidade,
         mutedGray: hexToRgb01(cinzaDestaque),
       });
     } else {
-      fillStaticAttributes(attrs, count, c.seed);
+      fillStaticAttributes(attrs, count, phy.seed);
       if (!isHsbIdentity(hsb)) {
         applyHsbToColorScale(
           attrs.colorScale.array as Float32Array,
@@ -731,9 +880,9 @@ export function CrowdMesh() {
     attrs,
     content,
     demoCls,
-    c.grid,
-    c.seed,
-    d.lente,
+    phy.grid,
+    phy.seed,
+    wit.lente,
     legendFlash,
     hsb,
     destaqueIntensidade,
@@ -743,14 +892,16 @@ export function CrowdMesh() {
 
   // Parâmetros de spawn mudaram → uniforms da sim e agenda reset GPU.
   useEffect(() => {
-    const count = c.grid * c.grid;
+    const count = phy.grid * phy.grid;
+    const diam = playDiameter(phy.contRaio);
     sim.u.count.value = count;
-    sim.u.gridN.value = c.grid;
-    sim.u.spawnArea.value = c.area;
-    sim.u.spawnNoise.value = c.ruido;
-    sim.u.seed.value = c.seed;
+    sim.u.gridN.value = phy.grid;
+    sim.u.spawnArea.value = diam;
+    sim.u.spawnRadius.value = diam * 0.5;
+    sim.u.spawnNoise.value = phy.ruido;
+    sim.u.seed.value = phy.seed;
     resetRef.current = true;
-  }, [sim, content, c.grid, c.area, c.ruido, c.seed]);
+  }, [sim, content, phy.grid, phy.contRaio, phy.ruido, phy.seed]);
 
   // "Só quem tem história": desenha apenas os primeiros N slots (as pessoas
   // reais — pessoa i = instância i por construção do M3; a permutação de
@@ -759,9 +910,9 @@ export function CrowdMesh() {
   // espaço) — é corte de DESENHO, sem tocar na lógica da simulação. Efeito
   // separado do reset: alternar o toggle não respawna ninguém.
   const drawCount =
-    c.soHistorias && content
-      ? Math.min(content.manifest.people.length, c.grid * c.grid)
-      : c.grid * c.grid;
+    dorm.soHistorias && content
+      ? Math.min(content.manifest.people.length, phy.grid * phy.grid)
+      : phy.grid * phy.grid;
   useEffect(() => {
     if (meshRef.current) meshRef.current.count = drawCount;
   }, [drawCount]);
@@ -771,14 +922,14 @@ export function CrowdMesh() {
   // Vocabulary) — CPU escreve, nada por frame.
   useEffect(() => {
     computeAgentMeta(content, MAX_GRID * MAX_GRID, sim.agentMetaArray, {
-      pesoIdle: e.pesoIdle,
-      pesoRezar: e.pesoRezar,
+      pesoIdle: wit.pesoIdle,
+      pesoRezar: wit.pesoRezar,
       boostTransformacao: 2,
       prayClip: effPray,
       rules: vocabRules,
     });
     sim.commitAgentMeta();
-  }, [content, sim, e.pesoIdle, e.pesoRezar, effPray, vocabRules]);
+  }, [content, sim, wit.pesoIdle, wit.pesoRezar, effPray, vocabRules]);
 
   // --- follow: pessoa seguida + heading estimado (campo/corredor/palco) ---
   const following = useFollow((fs) => fs.following);
@@ -839,11 +990,11 @@ export function CrowdMesh() {
   const headingTmp = useMemo(() => new THREE.Vector2(), []);
   const applyDormantTargets = () => {
     if (!content) return;
-    const agentCount = c.grid * c.grid;
+    const agentCount = phy.grid * phy.grid;
     const peopleCount = Math.min(content.manifest.people.length, agentCount);
     const corridorReady = following !== null && followValid.current;
     const mode: DormantFormation =
-      fo.formation === "corridor" && !corridorReady ? "wander" : fo.formation;
+      dorm.formation === "corridor" && !corridorReady ? "wander" : dorm.formation;
     const a = corridorAnchor.current;
     if (mode === "corridor" && !a.valid) {
       // (Re-)ancora o corredor AQUI: alvos fixos no MUNDO (ground frame —
@@ -863,8 +1014,10 @@ export function CrowdMesh() {
       a.valid = true;
     }
     computeDormantTargets(mode, peopleCount, agentCount, sim.targetsArray, {
-      containRadius: s.contRaio,
-      spacing: fo.spacing,
+      containRadius: phy.contRaio,
+      rimInset: dorm.rimInset,
+      worldWrap: phy.worldWrap,
+      spacing: dorm.spacing,
       followPos: mode === "corridor" ? { x: a.x, z: a.z } : null,
       followHeading: mode === "corridor" ? { x: a.hx, z: a.hz } : null,
       corridorLength: CORRIDOR_LENGTH,
@@ -876,16 +1029,18 @@ export function CrowdMesh() {
   const [targetsVersion, setTargetsVersion] = useState(0);
   useEffect(() => {
     if (!content) return;
+    const witnessSeek = wit.gravidade || wit.lente !== NO_LENS;
     if (demoCls) {
       computeDemoTargets(demoCls, MAX_GRID * MAX_GRID, sim.targetsArray, {
-        mapScale: d.mapScale,
-        containRadius: s.contRaio,
+        mapScale: wit.mapScale,
+        containRadius: phy.contRaio,
       });
     } else {
       computeTargets(content, MAX_GRID * MAX_GRID, sim.targetsArray, {
-        mapScale: d.mapScale,
-        containRadius: s.contRaio,
-        lens: d.lente === NO_LENS ? null : d.lente,
+        mapScale: wit.mapScale,
+        containRadius: phy.contRaio,
+        lens: wit.lente === NO_LENS ? null : wit.lente,
+        witnessSeek,
       });
     }
     corridorAnchor.current.valid = false; // formação/follow mudou → re-ancora
@@ -897,49 +1052,71 @@ export function CrowdMesh() {
     content,
     sim,
     demoCls,
-    d.mapScale,
-    d.lente,
-    s.contRaio,
-    c.grid,
-    fo.formation,
-    fo.spacing,
+    wit.mapScale,
+    wit.lente,
+    wit.gravidade,
+    phy.contRaio,
+    phy.grid,
+    phy.worldWrap,
+    dorm.formation,
+    dorm.spacing,
+    dorm.rimInset,
     following,
   ]);
 
   useFrame((_, delta) => {
-    mouseTarget.mode = s.mouseModo;
+    mouseTarget.mode = phy.mouseModo;
 
-    sim.u.maxSpeed.value = s.maxSpeed;
-    sim.u.wanderWeight.value = s.wander;
-    sim.u.wanderScale.value = s.wanderScale;
-    sim.u.wanderEvolve.value = s.wanderEvolve;
-    sim.u.sepWeight.value = s.separacao;
-    sim.u.sepRadius.value = s.sepRaio;
-    sim.u.containRadius.value = s.contRaio;
-    sim.u.mouseRadius.value = s.mouseRaio;
-    sim.u.mouseWeight.value = s.mouseForca;
-    sim.u.turnRate.value = s.giro;
-    sim.u.phasePerUnit.value = s.passo;
-    sim.u.perAgentOn.value = e.auto ? 1 : 0;
-    sim.u.v0.value = e.v0;
-    sim.u.v1.value = e.v1;
-    sim.u.hyst.value = e.histerese;
-    sim.u.stateFade.value = e.fadeEstado;
+    sim.u.maxSpeed.value = phy.maxSpeed;
+    sim.u.witWanderWeight.value = wit.wanderW;
+    sim.u.witWanderScale.value = wit.wanderScale;
+    sim.u.witWanderEvolve.value = wit.wanderEvolve;
+    sim.u.witWanderVariance.value = wit.wanderVariance;
+    sim.u.witSpeedMul.value = wit.speedMul;
+    sim.u.witSpeedVariance.value = wit.speedVariance;
+    sim.u.witPauseAmount.value = wit.pausas;
+    const hovered = useHover.getState().hovered;
+    sim.u.hoverFreezeOn.value = wit.hoverFreeze ? 1 : 0;
+    sim.u.hoverFreezeAgent.value =
+      wit.hoverFreeze && hovered !== null ? hovered : -1;
+    sim.u.wanderWhileSeek.value = wit.wanderWhileSeek;
+    sim.u.lockAtCluster.value = wit.lockAtCluster ? 1 : 0;
+    sim.u.dormWanderWeight.value = dorm.wanderW;
+    sim.u.dormWanderScale.value = dorm.wanderScale;
+    sim.u.dormWanderEvolve.value = dorm.wanderEvolve;
+    sim.u.dormWanderVariance.value = dorm.wanderVariance;
+    sim.u.dormSpeedVariance.value = dorm.speedVariance;
+    sim.u.dormPauseAmount.value = dorm.pausas;
+    sim.u.wanderWhileForm.value = dorm.wanderWhileForm;
+    sim.u.lockAtForm.value = dorm.lockAtForm ? 1 : 0;
+    sim.u.sepWeight.value = phy.separacao;
+    sim.u.sepRadius.value = phy.sepRaio;
+    sim.u.containRadius.value = phy.contRaio;
+    sim.u.wrapToroidalSep.value =
+      phy.worldWrap && phy.wrapToroidalSep ? 1 : 0;
+    sim.u.wrapHysteresis.value = phy.wrapHysteresis;
+    sim.u.mouseRadius.value = phy.mouseRaio;
+    sim.u.mouseWeight.value = phy.mouseForca;
+    sim.u.turnRate.value = phy.giro;
+    sim.u.phasePerUnit.value = phy.passo;
+    sim.u.perAgentOn.value = wit.auto ? 1 : 0;
+    sim.u.v0.value = wit.v0;
+    sim.u.v1.value = wit.v1;
+    sim.u.hyst.value = wit.histerese;
+    sim.u.stateFade.value = wit.fadeEstado;
     sim.u.idlePlayback.value = v.idlePlayback;
     sim.u.settlePlayback.value = v.settlePlayback;
-    sim.u.waveGain.value = e.onda;
-    sim.u.pauseAmount.value = e.pausas;
-    sim.u.dormantSpeedMul.value = e.dormVel;
-    sim.u.dormantWanderMul.value = e.dormWander;
-    // Gravidade: lente ativa (elemento OU demográfica) força o seek mesmo com
-    // o toggle desligado — aplicar uma lente sem gravidade não teria efeito.
-    // Formação ativa idem (os dormentes precisam do seek para FORMAR).
+    sim.u.waveGain.value = wit.onda;
+    sim.u.dormantSpeedMul.value = dorm.dormVel;
+    // Gravidade/lente/demográfica: testemunhas com w=1 no buffer (efeito).
+    // Formação ativa liga seekWeight só para os DORMENTES (w=1 nos slots ≥
+    // peopleCount — witnessSeek false zera w das testemunhas no commit).
     const formationSeek =
-      fo.formation !== "wander" &&
-      !(fo.formation === "corridor" && following === null);
+      dorm.formation !== "wander" &&
+      !(dorm.formation === "corridor" && following === null);
     const seekOn =
-      content && (d.gravidade || d.lente !== NO_LENS || demoCls || formationSeek);
-    sim.u.seekWeight.value = seekOn ? d.gravForca : 0;
+      content && (wit.gravidade || wit.lente !== NO_LENS || demoCls || formationSeek);
+    sim.u.seekWeight.value = seekOn ? wit.gravForca : 0;
 
     // --- pessoa seguida: posição do espelho + trilha p/ heading ---
     const dtc = Math.min(delta, 1 / 20); // mesmo clamp do dt da sim
@@ -964,24 +1141,37 @@ export function CrowdMesh() {
 
     // --- wrap universal (mundo-toro): L = 2×contenção, um só lugar ---
     // (heightfield + sim leem o mesmo uniform via setWorldWrap).
-    setWorldWrap(s.worldWrap ? s.contRaio * 2 : 0);
+    setWorldWrap(phy.worldWrap ? phy.contRaio * 2 : 0);
+    const tileOverride = levaVal("Terrain.tilePeriod", 0);
+    setTerrainTileLen(
+      tileOverride > 0 ? tileOverride : phy.contRaio * 2,
+    );
+    setGroundGridRadius(phy.contRaio);
 
     // --- campo do ativo: uniforms por frame (zero custo de buffer) ---
-    const fieldActive = af.fieldOn && followValid.current;
+    const fieldActive = couple.fieldOn && followValid.current;
     sim.u.fieldOn.value = fieldActive ? 1 : 0;
     sim.u.fieldAgent.value = fieldActive ? (following as number) : -1;
     if (fieldActive) sim.u.fieldPos.value.copy(followPos.current);
-    sim.u.fieldRadius.value = af.fieldRadius;
-    sim.u.fieldStrength.value = af.fieldStrength;
-    sim.u.yieldWeight.value = af.yieldW;
+    sim.u.fieldRadius.value = couple.fieldRadius;
+    sim.u.fieldStrength.value = couple.fieldStrength;
+    sim.u.yieldWeight.value = couple.yieldW;
     // Inércia do selecionado vale SEMPRE que há follow (campo on ou off).
     sim.u.selAgent.value = followValid.current ? (following as number) : -1;
-    sim.u.selInertia.value = af.selInertia;
+    sim.u.selInertia.value = couple.selInertia;
     // Story field (modo livre): com-história atraem/repelem dormentes.
     sim.u.storyMode.value =
-      af.storyField === "attract" ? 1 : af.storyField === "repel" ? -1 : 0;
-    sim.u.storyRadius.value = af.storyRadius;
-    sim.u.storyStrength.value = af.storyStrength;
+      couple.storyField === "social"
+        ? 1
+        : couple.storyField === "repel"
+          ? -1
+          : 0;
+    sim.u.storyRadius.value = couple.storyRadius;
+    sim.u.storyRepelRadius.value = Math.min(
+      couple.storyRepelRadius,
+      couple.storyRadius - 0.05,
+    );
+    sim.u.storyStrength.value = couple.storyStrength;
 
     // --- corridor dinâmico: checa a cada ~0,8 s se precisa RE-ANCORAR ---
     // (nunca por frame: alvo que persegue a pessoa vira turba). Re-ancora
@@ -989,7 +1179,7 @@ export function CrowdMesh() {
     // virou de verdade (>~70°).
     corridorClock.current += delta;
     if (
-      fo.formation === "corridor" &&
+      dorm.formation === "corridor" &&
       followValid.current &&
       content &&
       corridorClock.current >= 0.8
@@ -1035,7 +1225,7 @@ export function CrowdMesh() {
     // apontar NELA (deadzone ~1,5 m) = parar. O mundo responde: todos os
     // outros agentes recuam (update pass), o chão scrolla no mesmo passo e
     // o wrap fecha a ilusão (quem sai por trás reaparece na frente).
-    const stageActive = st.stage && followValid.current && e.auto;
+    const stageActive = st.stage && followValid.current && wit.auto;
     if (stageActive && !stageWasOn.current) {
       effectiveHeading(stageHeading.current);
       stageSpeedCur.current = 0; // a viagem ACELERA do zero — sem tranco
@@ -1047,7 +1237,7 @@ export function CrowdMesh() {
     let steerLen = 0;
     let steerX = 0;
     let steerZ = 0;
-    if (af.steerOn && followValid.current && mouseTarget.moved) {
+    if (st.steerOn && followValid.current && mouseTarget.moved) {
       steerX = mouseTarget.point.x - followPos.current.x;
       steerZ = mouseTarget.point.z - followPos.current.z;
       steerLen = Math.hypot(steerX, steerZ);
@@ -1056,14 +1246,14 @@ export function CrowdMesh() {
     if (stageActive) {
       // Leme → heading da esteira (giro suavizado por steer strength).
       if (steerLen > STEER_DEADZONE) {
-        const k = 1 - Math.exp(-2 * af.steerStrength * dtc);
+        const k = 1 - Math.exp(-2 * st.steerStrength * dtc);
         stageHeading.current.x += (steerX / steerLen - stageHeading.current.x) * k;
         stageHeading.current.y += (steerZ / steerLen - stageHeading.current.y) * k;
         stageHeading.current.normalize();
       }
       // Rampa de velocidade: deadzone (ou leme off sem rumo) → 0 suave.
       const wantSpeed =
-        af.steerOn && mouseTarget.moved && steerLen <= STEER_DEADZONE
+        st.steerOn && mouseTarget.moved && steerLen <= STEER_DEADZONE
           ? 0
           : st.stageSpeed;
       stageSpeedCur.current +=
@@ -1085,9 +1275,9 @@ export function CrowdMesh() {
     // Steering DIRETO (kill-switch: treadmill OFF durante o follow) — o
     // leme empurra a própria pessoa (modo legado, para comparação).
     const legacySteer =
-      !stageActive && af.steerOn && followValid.current && steerLen > 0;
+      !stageActive && st.steerOn && followValid.current && steerLen > 0;
     sim.u.steerOn.value = legacySteer ? 1 : 0;
-    sim.u.steerStrength.value = af.steerStrength;
+    sim.u.steerStrength.value = st.steerStrength;
     (sim.u.steerDir.value as THREE.Vector2).set(
       legacySteer && steerLen > STEER_DEADZONE ? steerX / steerLen : 0,
       legacySteer && steerLen > STEER_DEADZONE ? steerZ / steerLen : 0,
@@ -1096,9 +1286,9 @@ export function CrowdMesh() {
       const w = window as unknown as Record<string, unknown>;
       w.__limiarSim = {
         seekWeight: sim.u.seekWeight.value,
-        lente: d.lente,
-        dlente: dl.dlente,
-        gravidade: d.gravidade,
+        lente: wit.lente,
+        dlente: wit.dlente,
+        gravidade: wit.gravidade,
         tgt0: Array.from(sim.targetsArray.slice(0, 4)),
         tgt45: Array.from(sim.targetsArray.slice(45 * 4, 45 * 4 + 4)),
         tgtVersion: (sim.targets.value as THREE.BufferAttribute).version,
@@ -1107,15 +1297,15 @@ export function CrowdMesh() {
       w.__limiarReadTargets = (i0: number, n: number) =>
         Array.from(sim.targetsArray.slice(i0 * 4, (i0 + n) * 4));
       w.__limiarStageState = {
-        formation: fo.formation,
+        formation: dorm.formation,
         fieldOn: fieldActive ? 1 : 0,
         stageOn: stageActive ? 1 : 0,
         scroll: { ...getTerrainScroll() },
         heading: [stageHeading.current.x, stageHeading.current.y],
         followPos: followValid.current ? followPos.current.toArray() : null,
-        wrapLen: s.worldWrap ? s.contRaio * 2 : 0,
+        wrapLen: phy.worldWrap ? phy.contRaio * 2 : 0,
         stageSpeed: stageActive ? stageSpeedCur.current : 0,
-        steerOn: af.steerOn ? 1 : 0,
+        steerOn: st.steerOn ? 1 : 0,
         storyMode: sim.u.storyMode.value,
       };
       w.__limiarReadPositions = async (n: number) => {
@@ -1155,21 +1345,21 @@ export function CrowdMesh() {
     sim.update(gl, delta, isWebGPU(gl));
 
     bundle.sampler.applyState(vatPlayer.getState());
-    bundle.setScale(c.escala);
-    bundle.setPaletteAmount(c.paleta ? 1 : 0);
+    bundle.setScale(phy.escala);
+    bundle.setPaletteAmount(phy.paleta ? 1 : 0);
     bundle.setDebugMode(
-      s.debug === "velocidade"
+      phy.debug === "velocidade"
         ? 1
-        : s.debug === "direção"
+        : phy.debug === "direção"
           ? 2
-          : s.debug === "alvo"
+          : phy.debug === "alvo"
             ? 3
-            : s.debug === "estado"
+            : phy.debug === "estado"
               ? 4
               : 0,
     );
-    bundle.setFaceFlip(s.faceFlip ? -1 : 1);
-    bundle.setPerAgentStates(e.auto);
+    bundle.setFaceFlip(phy.faceFlip ? -1 : 1);
+    bundle.setPerAgentStates(wit.auto);
     bundle.tickAgentClock(delta);
 
     // Envelope do destaque da legenda: 1 no hold (nenhum repaint) → fade
@@ -1188,7 +1378,7 @@ export function CrowdMesh() {
       // O raycast acontece na malha CPU (flat) — o y real vem do heightfield.
       markerRef.current.position.y =
         0.05 + heightJS(mouseTarget.point.x, mouseTarget.point.z);
-      markerRef.current.visible = s.mouseModo !== "off";
+      markerRef.current.visible = phy.mouseModo !== "off";
     }
   });
 
@@ -1203,43 +1393,43 @@ export function CrowdMesh() {
         <CrowdWires
           sim={sim}
           content={content}
-          visible={d.fios}
+          visible={wit.fios}
           // No modo "só núcleos formados" sobram poucos fios acesos — o ganho
           // compensa para a estrutura interna dos núcleos continuar legível.
-          alpha={d.fiosSoNucleos ? Math.min(d.fiosAlpha * 1.9, 1) : d.fiosAlpha}
-          lift={d.fiosAltura}
-          fadeNear={d.fiosFadePerto}
-          fadeFar={d.fiosFadeLonge}
-          weightGamma={d.fiosPeso}
-          onlyFormed={d.fiosSoNucleos}
+          alpha={wit.fiosSoNucleos ? Math.min(wit.fiosAlpha * 1.9, 1) : wit.fiosAlpha}
+          lift={wit.fiosAltura}
+          fadeNear={wit.fiosFadePerto}
+          fadeFar={wit.fiosFadeLonge}
+          weightGamma={wit.fiosPeso}
+          onlyFormed={wit.fiosSoNucleos}
           // 2× o raio de formação: o fio começa a acender ANTES do rótulo
           // aparecer — a chegada se anuncia, a palavra confirma.
-          cohesionRadius={d.formRaio * 2}
+          cohesionRadius={wit.formRaio * 2}
           targetsVersion={targetsVersion}
         />
       )}
-      {content && d.palavras && (
+      {content && wit.palavras && (
         <ClusterLabels
           sim={sim}
           content={content}
-          active={d.gravidade && d.lente === NO_LENS && !demoCls}
-          mapScale={d.mapScale}
-          formRadius={d.formRaio}
+          active={wit.gravidade && wit.lente === NO_LENS && !demoCls}
+          mapScale={wit.mapScale}
+          formRadius={wit.formRaio}
         />
       )}
       {content && (
-        <PersonHover sim={sim} content={content} personScale={c.escala} />
+        <PersonHover sim={sim} content={content} personScale={phy.escala} />
       )}
       {content && <FollowCamera sim={sim} content={content} />}
       <DebugAreas
-        visible={s.debugAreas}
+        visible={phy.debugAreas}
         content={content}
-        mapScale={d.mapScale}
-        formRadius={d.formRaio}
-        containRadius={s.contRaio}
-        worldWrap={s.worldWrap}
-        fieldOn={af.fieldOn}
-        fieldRadius={af.fieldRadius}
+        mapScale={wit.mapScale}
+        formRadius={wit.formRaio}
+        containRadius={phy.contRaio}
+        worldWrap={phy.worldWrap}
+        fieldOn={couple.fieldOn}
+        fieldRadius={couple.fieldRadius}
         followPos={followPos}
         followValid={followValid}
         stageHeading={stageHeading}

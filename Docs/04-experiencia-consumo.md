@@ -108,7 +108,9 @@ A escada hover → clique → escuta, fechada com o Dudu:
    do clique.
 2. **Clique = compromisso.** Clicar entra no **follow em terceira pessoa**
    (rig do doc 03 §6) e a história começa — o corte editado por beats
-   (padrão acima).
+   (padrão acima). **2026-07-15:** ao entrar no follow, a 1ª estação com
+   áudio toca sozinha após ~0,75 s de **overview** da régua inteira (zoom no
+   capítulo em seguida — sem segundo clique na timeline).
 3. **Durante a escuta**, a **timeline minimalista com hotspots** já decidida
    acima ganha forma concreta: uma linha fina com marcas clicáveis e o
    texto do momento (o rótulo do beat) — **saltar entre momentos** da
@@ -129,6 +131,11 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
    NA TELA acerta (elipse do tamanho aparente; sobrepostos → o da frente
    vence), em vez do antigo raio de 1,2 m ao redor do ponto do mouse no
    chão, que falhava ao apontar para tronco/cabeça (doc 03 §14.6).
+   *2026-07-15:* **`pause on hover`** (Witnesses, default on) — a testemunha
+   sob o cursor **para de andar por conta própria** (wander/seek) para
+   facilitar o clique; no follow com esteira, continua no deslocamento do
+   palco (em pé no tapete — sem sliding contra a câmera). Desligável
+   (`hoverFreeze`).
 2. **Clique = follow em 3ª pessoa** — a câmera viaja até atrás/acima da
    pessoa e ACOMPANHA (órbita e zoom seguem livres — o OrbitControls não
    desliga). ESC ou clique no vazio solta, sem teleporte. Arrastos de
@@ -177,12 +184,73 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
    - Anel na virada, cores por valência (fria→quente) e clique-seleciona
      continuam. ~~v1 é visual~~ → **a voz entrou** (Voz v1, 2026-07-14,
      item 4 abaixo).
+   - **Zoom de escuta (estações, 2026-07-15).** A barra é UMA só, no mesmo
+     lugar na tela — não são três timelines. Na **visão geral** (repouso),
+     os capítulos canônicos ficam **igualmente espaçados** na largura (índice
+     narrativo, não `t_norm` — acaba com as bolinhas amontoadas à esquerda e
+     rótulos em vários andares). Rótulos numa linha só. Clicar num capítulo
+     faz **morph/zoom semântico**: capítulo focado na esquerda, próximo na
+     direita (último capítulo: fim lógico à direita); durante o corte, um
+     **playhead** percorre a barra (progresso real do player). O áudio é o
+     snippet `.opus` do beat (`beatCut`), não a entrevista inteira. Ao
+     terminar o clipe → zoom out animado de volta à visão geral. Capítulos
+     fora da janela viram **fantasmas** nas pontas (clicáveis). Navegação
+     mínima: **← visão geral**, **⏮/⏭** capítulo anterior/próximo (morph
+     direto, sem passar pelo overview), **ESC** = overview. Hover só
+     enriquece (resumo, fantasmas) — não é o gatilho principal de estado.
+     Modos **momentos** e **elemento** mantêm posição por `t_norm` (sem zoom
+     neste marco). Implementação: `src/ui/StoryTimeline.tsx` +
+     `src/ui/timelineZoom.ts`. Na visão geral, **sinopse** (`summary.one_liner`)
+     repousa na faixa acima da barra; no zoom o título vira o capítulo ativo.
+   - **Direção em discussão (Dudu, 2026-07-15) — uma régua, duas camadas.**
+     Estações **são** momentos: cada estação canônica é um beat
+     representativo (`beats[].type` + `arc.virada`), não uma categoria à
+     parte. O incômodo com o toggle "estações · momentos" é legítimo — parece
+     duas timelines quando na verdade é **gramática fixa** vs **densidade
+     total**. Proposta: **uma linha só** com momentos em `t_norm` (tempo
+     real da entrevista) e estações como **marcação diferente** na mesma
+     régua — bolinha maior + rótulo fixo (Antes · A morte · …) + anel na
+     virada; beats intermediários = pontos menores sem rótulo (ou só no
+     hover). Alternativa complementar: **faixa-régua acima** (sempre
+     igualmente espaçada, só gramática) + **faixa de momentos abaixo** (por
+     `t_norm`) — duas trilhas, um widget. O zoom de capítulo continua
+     morfando a faixa ativa; overview igualmente espaçado pode ficar só na
+     régua de estações. **Peek no zoom:** hover nas **zonas das extremidades**
+     (onde hoje ficam os fantasmas) **revela temporariamente o overview**
+     (morph de volta, todas as estações visíveis) para trocar de capítulo sem
+     ESC nem ⏮/⏭; ao sair do hover, volta ao zoom do capítulo em escuta
+     (áudio não interrompe). Fantasmas pontuais podem sumir se o peek
+     resolver a navegação lateral. Toggle "momentos/elemento" vira densidade
+     opcional ou some — a definir após protótipo do peek.
+     **Peek implementado (2026-07-15):** no zoom, hover nas **faixas externas**
+     dos endpoints da linha (~12 px para fora do ponto extremo, sem invadir
+     a régua) morpha de volta ao overview (latch — pode atravessar a barra
+     para clicar outro capítulo); sair da timeline recolhe; áudio continua;
+     fantasmas removidos; ⏮/⏭ mantidos como atalho.
+     **Régua unificada (2026-07-15, v2):** **uma linha só** em `t_norm`.
+     Estações = bolinhas maiores + rótulo (no hover/zoom) no tempo real do
+     beat representativo; momentos = pontos finos no mesmo eixo. Sem
+     espaçamento igual. Zoom expande o trecho entre `t_norm` do capítulo e
+     do próximo; momentos da janela acompanham o morph.
+     **Sub-zoom de momento (2026-07-15):** clicar um ponto fino — na visão
+     geral ou já no zoom — abre o capítulo certo e ancora o momento no início
+     da linha (`[t_norm do beat, fim do capítulo]`). Clicar de novo no mesmo
+     ponto (em escuta, com sub-zoom) volta ao zoom do capítulo inteiro.
+     Trocar de capítulo ou `←` / ESC limpa o sub-zoom. Botão voltar: só **←**
+     (sem texto "visão geral").
+     **Largura (2026-07-15):** régua usa mais viewport
+     (`clamp(480px, 72vw, 960px)` de fábrica). Grupo **Timeline** no leva:
+     largura + **tipografia e bolinhas em px de tela** (não escalam quando a
+     régua fica mais larga — só o eixo temporal estica). Persistem via
+     **Preferences → save as default** (local) ou `tuning.json` → defaults no
+     código para todos os visitantes.
 
 4. **A voz entra — clique consome o corte (Voz v1, 2026-07-14).** Todo
    ponto da timeline agora TOCA o áudio real da pessoa: estação/momento →
    o corte do beat; ponto de elemento → o corte da própria quote (se
-   existir no bucket; senão o corte do beat que a contém). A gramática do
-   consumo:
+   existir no bucket; senão o corte do beat que a contém). **2026-07-15:**
+   o **clique na pessoa** (entrar no follow) já dispara a 1ª estação —
+   fecha a escada §4.1 item 2. A gramática do consumo:
 
    - **Um som por vez** (o mesmo princípio da Legenda desvanecer no
      follow): player singleton com fades de ~120 ms — trocar de ponto
@@ -460,14 +528,13 @@ irradia uma abertura.
   indo de um lado pro outro, quicando na contenção). A separação é WebGPU;
   a contenção vale nos dois backends (e some quando o wrap universal está
   ligado — §5.10).
-- **Story field** (`story field`, off/attract/repel, para o **modo livre**):
-  as testemunhas (com-história) irradiam um campo sobre os dormentes —
-  **attract** junta pequenos ajuntamentos ao redor de quem tem relato
-  (bonito no Campo em repouso), **repel** abre um halo de legibilidade em
-  torno de quem carrega história. Vive no loop de separação (lê o flag
-  com-história do vizinho) — WebGPU; força fraca de propósito, os alvos das
-  formações e a gravidade sempre vencem (não teleguia ninguém). Limitação
-  WebGL2: sem separação, sem story field (como o yield).
+- **Story field** (`story field`, off/**social**/repel, para o **modo livre**):
+  as testemunhas irradiam um campo sobre os dormentes —
+  **social** junta numa coroa ao redor de quem tem relato mas mantém
+  **bolha interna** repulsiva (não perfuram), **repel** abre um halo de
+  legibilidade. Vive no loop de separação — WebGPU; força fraca de
+  propósito. Controles do story field só aparecem no leva quando o modo
+  ≠ off (`render` condicional, como Appearance).
 
 **Formações dos dormentes** (grupo "Formations"): o que os sem-história
 fazem enquanto os ativos migram — dropdown dinâmico, para moldar a cena
@@ -533,7 +600,7 @@ pessoa — ele gira o rumo da **esteira**.
    trás reaparece na frente, como um cenário sem fim;
 3. o **terreno scrolla** no mesmo passo: o domínio do noise do heightfield
    (e as linhas do grid) desliza junto — GPU e CPU em paridade (sim, chão,
-   fios e marker leem a MESMA altura deslocada); com o wrap ligado o noise
+   fios, marker e **nuvens da névoa** leem o MESMO scroll deslocado); com o wrap ligado o noise
    é **tileado** no período da área (o chão combina na costura — sem
    degrau) e o anfiteatro viaja com o mundo;
 4. as **formações** (corredor/círculo) são ancoradas no mundo: elas fluem

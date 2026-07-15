@@ -142,11 +142,11 @@ export function ClusterOutlines({ content }: { content: Content }) {
 
     // Gate: gravidade on e nenhuma lente (mesma condição dos rótulos).
     const active =
-      levaVal("Data (M3).gravidade", false) &&
-      levaVal("Data (M3).lente", NO_LENS) === NO_LENS &&
-      levaVal("Demographic lens.dlente", NO_LENS) === NO_LENS;
-    const mapScale = levaVal("Data (M3).mapScale", 14);
-    const formRadius = levaVal("Data (M3).formRaio", 2.4);
+      levaVal("Witnesses.gravidade", false) &&
+      levaVal("Witnesses.lente", NO_LENS) === NO_LENS &&
+      levaVal("Witnesses.dlente", NO_LENS) === NO_LENS;
+    const mapScale = levaVal("Witnesses.mapScale", 14);
+    const formRadius = levaVal("Witnesses.formRaio", 2.4);
     // Tica a formação (idempotente com o ClusterLabels — só a 1ª chamada
     // da janela de 0,6 s faz trabalho).
     tickClusterFormation(infos, active, mapScale, formRadius);

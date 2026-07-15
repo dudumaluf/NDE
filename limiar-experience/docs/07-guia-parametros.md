@@ -3,10 +3,17 @@
 > **Papel deste documento:** manual de uso dos controles do painel de debug
 > (leva) que **ainda não tinham manual** (pedido do Dudu, 2026-07-14: "escreve
 > uma documentação para coisas que não documentamos ainda dos nossos
-> parâmetros"). É o irmão do doc 06 — que já explica **States (per agent)** e
-> **Vocabulary** (as animações). Aqui está **todo o resto**: Scene, Crowd,
-> Simulation, Data (M3), as lentes, o follow (Active field / Stage /
-> Formations), Focus & reading, Appearance, Terrain, Effects e Preferences.
+> parâmetros"). É o irmão do doc 06 — que já explica **Vocabulary** (as
+> animações). Aqui está **todo o resto**: Scene, **Field · physics**,
+> **Witnesses**, **Dormants**, **Field · coupling**, **Stage (treadmill)**,
+> Focus & reading, Appearance, Terrain, Effects e Preferences.
+>
+> **Reorganização 2026-07-15:** Crowd + Simulation viraram **Field · physics**
+> (física da multidão). Estados de chegada + Data (M3) + lente demográfica
+> viraram **Witnesses** (testemunhas com história). Formations + pausas/×
+> dormentes viraram **Dormants**. Active field (campo/repulsão/story field)
+> virou **Field · coupling**; o leme (`mouse steering`) foi para **Stage**.
+> Presets antigos migram sozinhos (`prefs.ts`). Estados automáticos: doc 06.
 >
 > O design por trás mora no doc 04 (experiência/consumo); a técnica no doc 03.
 > Os nomes citados são os do painel (inglês desde 2026-07-13; ver doc 06 §6).
@@ -34,9 +41,9 @@
 > controles ficam ociosos.
 
 Ordem dos grupos no painel (todos começam recolhidos, menos Effects):
-Scene · Crowd · Simulation · States (per agent) · Vocabulary · Data (M3) ·
-Demographic lens · Active field · Formations · Stage (treadmill) ·
-Focus & reading · Terrain · Effects · Appearance · Preferences.
+Scene · **Field · physics** · **Dormants** · Vocabulary · **Witnesses** ·
+**Field · coupling** · **Stage (treadmill)** · Focus & reading · Terrain ·
+Effects · Appearance · Preferences.
 
 ---
 
@@ -49,48 +56,46 @@ Focus & reading · Terrain · Effects · Appearance · Preferences.
 | `follow ease (s)` | 0.45 | `followEase` | Constante de tempo da VIAGEM da câmera (ao entrar no follow ou trocar de pessoa). Maior = chegada mais lenta e cinematográfica |
 
 > **Como se segue alguém:** passe o mouse sobre uma pessoa (nome aparece em
-> 3D) e **clique** — a câmera viaja suave até a 3ª pessoa. Clicar em outra
-> pessoa re-alveja a MESMA câmera (transição contínua A→B); **ESC** ou clique
-> no vazio solta. Clique ≠ arrasto (arrastar é órbita). No boot, `?follow=6`
-> já entra seguindo a pessoa 6 (screenshots). Técnica do rig: doc 03 §14.6.
+> 3D) e **clique** — a câmera viaja suave até a 3ª pessoa; a **história
+> começa** sozinha (~0,75 s de overview da timeline, depois zoom suave no 1º
+> capítulo + áudio). Clicar em outra pessoa re-alveja a MESMA câmera
+> (transição contínua A→B); **ESC** ou clique no vazio solta. Clique ≠ arrasto
+> (arrastar é órbita). No boot, `?follow=6` já entra seguindo a pessoa 6
+> (screenshots). Técnica do rig: doc 03 §14.6.
 
 ---
 
-## 2. Crowd — a população
+## 2. Field · physics — população e movimento
+
+Fusão de Crowd + Simulation (2026-07-15). A grade, o spawn e as forças que
+movem **todos** os agentes — testemunhas e dormentes. (Limiares de animação
+`v0`/`v1` moram em **Witnesses**; ver doc 06.)
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
-| `grid (N×N)` | 32 | `grid` | Lado da grade: **N² agentes** (32 ⇒ 1024; teto 64 ⇒ 4096). É o botão de performance nº 1 |
-| `spawn area` | 40 | `area` | Lado da área onde nascem espalhados |
+| `grid (N×N)` | 32 | `grid` | Lado da grade: **N² agentes**. O espaçamento segue o raio de contenção (disco = 2×) |
 | `spawn noise` | 0.6 | — | Bagunça do nascimento (0 = grade perfeita; alto = nuvem orgânica) |
 | `seed` | 3 | — | Semente do sorteio de posição/atributos. Muda o arranjo sem mudar a lógica |
 | `person scale` | 2.5 | — | Tamanho dos corpos |
 | `palette (vs. dormant)` | on | — | on = paleta de núcleos nas cores; off = todo mundo na cor de dormente |
-| `only people with stories` | off | `onlyPeople` | Esconde os dormentes: desenha só as pessoas reais do manifest. A sim continua rodando para todos (fios/rótulos seguem válidos) — é corte de DESENHO |
+| `hide (draw only witnesses)` | off | `onlyPeople` | Esconde os dormentes: desenha só as pessoas reais do manifest. A sim continua rodando para todos (fios/rótulos seguem válidos) — é corte de DESENHO |
 | `reset` | (botão) | — | Respawna a multidão do zero com os valores atuais |
 
 > **Dormentes** = os slots além das pessoas reais (ex.: 1024 agentes − 116
-> pessoas = 908 dormentes). São o "fundo" vivo; a hierarquia de leitura entre
-> eles e as pessoas reais se ajusta em States (per agent) → `dormant: …`
-> (doc 06) e em Appearance → `dormant color` (§10).
+> pessoas = 908 dormentes). Formação, pausas e multiplicadores deles moram em
+> **Dormants** (§5); cor de dormente em Appearance (§10).
 
----
-
-## 3. Simulation — o movimento e as forças
-
-O coração cinético. (Os **limiares que viram animação** — `v0`, `v1` etc. —
-moram em States per agent, doc 06. Aqui são as FORÇAS que movem os corpos.)
+**Forças e debug** (ex-Simulation — mesma tabela, agora neste grupo):
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
-| `max speed` | 0.8 | `speed2` | Teto de velocidade de todo mundo. Decide se a corrida (`v1`, doc 06) é sequer alcançável |
-| `wander (weight)` | 1 | — | Vontade própria: quanto cada corpo vagueia sem rumo |
-| `wander scale` | 0.12 | — | Frequência do ruído do wander (baixo = curvas largas e preguiçosas; alto = zigue-zague) |
-| `wander evolution` | 0.12 | — | Quão rápido o rumo do wander muda no tempo |
+| `max speed` | 0.8 | `speed2` | Teto de velocidade de todo mundo — multiplique por `speed ×` em **Witnesses** / **Dormants** |
 | `separation (weight)` | 1.6 | — | Força que empurra vizinhos para longe (evita sobreposição). **WebGPU only** |
 | `separation radius` | 0.7 | — | Até que distância a separação age |
-| `containment radius` | 21 | `contain` | Raio do "curral" que segura a multidão no centro. **Também define o mundo-toro**: o quadrado do wrap tem lado 2× este raio (§5) |
-| `world wrap` | on | `wrap` | O mundo é um **toro**: quem cruza uma borda reaparece do lado oposto e a força de contenção desliga. É a base da ilusão de espaço infinito (§5). Off = curral clássico |
+| `containment radius` | 21 | `contain` | Raio do disco de jogo: spawn, grid no chão e curral seguem este valor (wrap = quadrado 2×) |
+| `world wrap` | on | `wrap` | Toro: quem cruza a borda reaparece do outro lado |
+| `toroidal separation` | on | `wrapSep` | Com wrap: vizinhos na costura se empurram (menor caminho no toro) |
+| `wrap seam margin (m)` | 0.8 | `wrapHyst` | Metros além de L/2 antes do teleporte — mata flicker no limiar |
 | `debug areas` | off | `debugAreas` | Overlays de arame: quadrado do wrap, círculo de contenção, anéis dos núcleos, círculo do campo do ativo e a seta do rumo. **A melhor forma de ENTENDER o mundo-toro** |
 | `mouse` | attract | `mouse` | Ponteiro no chão em modo livre: **attract** puxa, **repel** afasta, **off** nada. (No follow o mouse vira leme — §5) |
 | `mouse radius` | 7 | `mouseR` | Alcance da força do mouse |
@@ -102,17 +107,36 @@ moram em States per agent, doc 06. Aqui são as FORÇAS que movem os corpos.)
 
 ---
 
-## 4. Data (M3) — gravidade, lentes, fios e palavras (só com acervo)
+## 3. Witnesses — testemunhas com história (só com acervo)
 
-É aqui que os **dados reais organizam a multidão**. Sem acervo, o grupo existe
-mas não tem o que organizar.
+Fusão de States (per agent, sem dormentes) + Data (M3) + lente demográfica
+(2026-07-15). É aqui que os **dados reais organizam quem tem história**:
+estados de chegada, gravidade UMAP, lentes, fios e rótulos.
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
+| `automatic states` | on | `estados` | Máquina de estados por agente (idle/walk/run/settle). Ver doc 06 |
+| `v0 idle⇄walk` | 0.12 | `v0` | Limiar de velocidade idle↔walk |
+| `v1 walk⇄run` | 1.15 | `v1` | Limiar walk↔run |
+| `hysteresis (±)` | 0.12 | — | Faixa morta entre limiares |
+| `crossfade (s)` | 0.3 | — | Duração do blend entre clipes |
+| `settle: idle weight` | 1 | — | Peso do idle no assentar |
+| `settle: pray weight` | 0.6 | — | Peso do rezar no assentar |
+| `arrival wave` | 0.9 | `onda` | Onda de chegada nos núcleos (só testemunhas com seek ativo) |
+| `wander while seeking` | 0.35 | — | Curl en route ao UMAP/lente: 0 = marcha direta, 1 = vento cheio |
+| `lock at cluster` | on | `clusterLock` | Perto do slot, curl desliga — assentam no núcleo |
+| `wander weight` | 1 | — | Força do curl (só testemunhas) |
+| `wander scale` | 0.12 | — | Tamanho da célula de ruído (baixo = curvas largas) |
+| `wander evolution` | 0.12 | — | Quão rápido o vento muda no tempo |
+| `wander variance` | 0.15 | — | Espalhamento de curl **por agente** (0 = uniforme; 1 = ±100% do weight) |
+| `wander pauses` | 0.2 | `pausas` | Ciclos parar/andar por agente — desliga enquanto migra (seek ativo) |
+| `speed variance` | 0.2 | — | Espalhamento de velocidade **por agente** (0 = uniforme; 1 = ±100% do `speed ×`) |
+| `speed ×` | 1 | — | × `max speed` para testemunhas |
 | `gravity (UMAP)` | off | `gravity` | Liga o puxão dos agentes para o lugar que o **mapa semântico (UMAP)** deu a cada pessoa — histórias parecidas caem perto. É o que FORMA os núcleos |
 | `map scale` | 14 | `mapScale` | Tamanho do mapa espalhado no chão (afasta/aproxima os núcleos entre si) |
 | `gravity force` | 2.2 | `gravForca` | Força do puxão = velocidade na viagem = quem corre para chegar (doc 06, "onda de chegada") |
-| `lens (element)` | none | `lens` | Reorganiza a multidão por um **elemento** do relato (túnel, seres de luz, revisão da vida…). Ligar uma lente força o seek mesmo com `gravity` off. Exclusiva com a lente demográfica (§7) |
+| `lens (element)` | none | `lens` | Reorganiza por **elemento** do relato (túnel, seres de luz…). Ligar força o seek mesmo com `gravity` off. Exclusiva com a demográfica |
+| `lens (demographic)` | none | `dlens` | Reorganiza por eixo **demográfico** (sexo, década…). **Exclusiva** com `lens (element)`: ligar uma desliga a outra |
 | `wires (graph)` | on | `wires` | Os **fios**: conexões entre pessoas que compartilham elementos |
 | `wires alpha` | 0.22 | `wiresAlpha` | Opacidade base dos fios |
 | `wires height` | 1.05 | — | Altura em que os fios arqueiam sobre o chão |
@@ -125,11 +149,30 @@ mas não tem o que organizar.
 
 > **Receita "ver os dados se organizarem":** `gravity (UMAP)` ON e observe os
 > núcleos se formarem, os fios acenderem e as palavras aparecerem. Ligue
-> `debug color = state` (Simulation) para ver a onda de chegada.
+> `debug color = state` (**Field · physics**) para ver a onda de chegada.
 
 ---
 
-## 5. O follow como mundo vivo — Active field · Stage · Formations
+## 4. Dormants — a massa sem história
+
+| Controle | Default | qp | O que faz |
+|---|---|---|---|
+| `formation` | wander | `formation` | **wander** · **circle** · **corridor** (precisa follow) · **clear** |
+| `formation spacing` | 1.2 | `formSpacing` | Espaçamento na formação |
+| `rim inset (wrap)` | 1.5 | `rimInset` | Recua o anel da costura do wrap (só com `world wrap` ON) |
+| `wander while forming` | 0.35 | — | Curl en route ao anel/corredor: 0 = marcha, 1 = vento cheio |
+| `lock at formation` | on | `formLock` | Perto do slot, curl desliga — moldura limpa |
+| `wander weight` | 0.8 | — | Força do curl (só dormentes) |
+| `wander scale` | 0.12 | — | Frequência do curl (max **0.8**; baixo = curvas largas, alto = redemoinhos apertados) |
+| `wander evolution` | 0.12 | — | Quão rápido o vento muda no tempo |
+| `wander variance` | 0.25 | — | Espalhamento de curl **por agente** (0 = uniforme; 1 = ±100% do weight) |
+| `wander pauses` | 0.45 | `pausas` | Ciclos parar/andar por agente — desliga enquanto busca slot de formação |
+| `speed variance` | 0.25 | — | Espalhamento de velocidade **por agente** (0 = uniforme; 1 = ±100% do `speed ×`) |
+| `speed ×` | 0.7 | — | × `max speed` para dormentes (mín. 0) |
+
+---
+
+## 5. Follow — Field · coupling · Stage (treadmill)
 
 O trio que faz seguir uma pessoa parecer atravessar uma multidão infinita.
 Design no doc 04 §5.9/5.10; técnica (esteira + wrap + leme) no doc 03 §14.9.
@@ -140,7 +183,7 @@ agentes recuam, o chão scrolla, e o `world wrap` (§3) fecha a ilusão (quem sa
 por trás volta na frente). No modo livre, a mesma regra de wrap vale para
 todos.
 
-### Active field — o ativo abre espaço, e o leme
+### Field · coupling — campo do ativo e story field
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
@@ -149,41 +192,26 @@ todos.
 | `field strength` | 1.2 | `fieldF` | Força dela |
 | `yield to travelers` | 2 | `yield` | Separação **assimétrica**: quem tem alvo (migrando para um núcleo) empurra quem não tem até esse tanto mais forte. **WebGPU only** |
 | `selected inertia` | 0.15 | `selInertia` | Quanta separação/contenção a pessoa SEGUIDA recebe de volta: 0 = imune (passa como um trem), 1 = igual a todos. **É o fix do tranco (stutter) no meio da multidão** — deixe baixo |
-| `mouse steering` | on | `steer` | No follow, o mouse é o **leme**: a direção do ponteiro (no chão, relativa à pessoa) define para onde a viagem vai. Apontar NA pessoa (deadzone ~1,5 m) = parar |
-| `steer strength` | 1 | `steerK` | Quão bruscamente o leme vira o rumo |
-| `story field` | off | `storyField` | Modo livre: os agentes COM dados **attract** (juntam) ou **repel** (afastam) os dormentes. **WebGPU only** |
-| `story field radius` | 2 | `storyR` | Alcance do story field |
-| `story field strength` | 0.6 | `storyF` | Força do story field |
+| `story field` | off | `storyField` | **social** = atração + bolha interna · **repel** = halo externo. **WebGPU only** |
+| `story attract radius` | 2 | `storyR` | Alcance da atração (social) |
+| `story bubble radius` | 0.55 | `storyBubble` | Bolha repulsiva interna (social) — evita perfurar |
+| `story field strength` | 0.6 | `storyF` | Força do campo |
 
-### Stage (treadmill) — o comportamento PADRÃO do follow
+### Stage (treadmill) — esteira + leme
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
 | `follow treadmill (pin)` | on | `stage` | LIGADO (padrão): pessoa pinada + mundo em movimento (esteira). DESLIGADO = follow legado que desloca a própria pessoa (para comparar/debug). **Exige `automatic states`** ligado (doc 06) |
 | `treadmill speed` | 0.9 | `stageSpeed` | Velocidade da jornada (e o teto de velocidade do leme no modo legado) |
+| `mouse steering` | on | `steer` | No follow, o mouse é o **leme**: direção do ponteiro no chão define a viagem. Apontar NA pessoa (deadzone ~1,5 m) = parar |
+| `steer strength` | 1 | `steerK` | Quão bruscamente o leme vira o rumo |
 
-### Formations — o que a massa sem história faz
-
-| Controle | Default | qp | O que faz |
-|---|---|---|---|
-| `dormant formation` | wander | `formation` | **wander** (solto) · **circle** (anel grande em volta de tudo) · **corridor** (duas fileiras ladeando o caminho da pessoa seguida — precisa de follow ativo, senão cai em wander) · **clear** (recuam para a borda) |
-| `formation spacing` | 1.2 | `formSpacing` | Espaçamento entre os dormentes na formação |
-
-> **Regra de bolso:** `field (follow)` e as formações existem para as cenas em
-> que a **legibilidade** vence o caos. O caos vivo (estilo multidão de NYC) é o
-> default de propósito — ligue o campo/corredor quando quiser conduzir o olhar.
+> **Regra de bolso:** `field (follow)` (**Field · coupling**) e formações
+> (**Dormants** §4) existem para cenas em que a **legibilidade** vence o caos.
 
 ---
 
-## 6. Demographic lens — eixos não-fenomenológicos (só com acervo)
-
-| Controle | Default | qp | O que faz |
-|---|---|---|---|
-| `lens` | none | `dlens` | Reorganiza a multidão por um eixo **demográfico** (sexo, década do relato, etc.) em vez de por elemento do relato. **Exclusiva** com a lente de elemento (Data M3): ligar uma desliga a outra |
-
----
-
-## 7. Focus & reading — hierarquia visual e leitura dos núcleos (só com acervo)
+## 6. Focus & reading — hierarquia visual e leitura dos núcleos (só com acervo)
 
 A camada que torna os núcleos exploráveis. Design no doc 04 §5.11/5.12.
 
@@ -248,6 +276,12 @@ Técnica no doc 03 (M4f); design no doc 04.
 | `seed` | — | — | Semente do relevo |
 | `flatten radius` | — | — | Raio central achatado (deixa o palco plano no meio) |
 | `flatten band` | — | — | Faixa de transição do achatado para o relevo cheio |
+| `grid cell` | 0.25 | `gridCell` | Espaçamento das linhas do grid no chão |
+| `grid edge fade (m)` | 0.35 | — | Suaviza o corte do grid na borda do disco (0 = círculo duro) |
+| `noise tile period (m)` | 0 (auto) | `terrainTile` | Período do tile do relevo. **0 = 2× contenção** — independente de `world wrap` |
+
+> O **raio do grid** segue `containment radius` (**Field · physics**). O tile do
+> noise do chão também (auto), para o relevo não mudar ao desligar o wrap dos agentes.
 
 ---
 
@@ -336,17 +370,15 @@ screenshots.
 ## 13. Receitas que cruzam grupos
 
 **"Quero entender o mundo-toro"**
-Active field/Stage no follow + Simulation → `debug areas` ON + `world wrap` ON.
-Siga alguém e veja o quadrado do wrap, o campo e a seta do rumo.
+Field · coupling / Stage no follow + Field · physics → `debug areas` ON + `world wrap` ON.
 
 **"Overview de dados, limpo"**
-Data (M3) `gravity` ON · Focus & reading `data view` ON · suba a câmera acima
-de `data view height` · Effects `fog: recede height` baixo (chão enevoado, topo
-limpo). Vira circle-packing.
+Witnesses `gravity` ON · Focus & reading `data view` ON · suba a câmera acima
+de `data view height` · Effects `fog: recede height` baixo. Vira circle-packing.
 
 **"Conduzir o olhar numa história"**
-Follow ativo · Active field `field (follow)` ON · Formations `corridor` ·
-`selected inertia` baixo (sem tranco) · `mouse steering` ON para pilotar.
+Follow ativo · Field · coupling `field (follow)` ON · Dormants `corridor` ·
+`selected inertia` baixo · Stage `mouse steering` ON.
 
 **"Screenshot reproduzível"**
 Monte tudo na URL (§12) — a URL vence o que estiver salvo. Ex.:

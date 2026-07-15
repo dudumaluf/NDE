@@ -56,7 +56,7 @@ check("salvou densidade", saved?.values["Effects.nevoaDensidade"], 1.25);
 await boot();
 check("reload densidade (salvo)", await get("Effects.nevoaDensidade"), 1.25);
 check("reload vinheta (salvo)", await get("Effects.vinhetaForca"), 0.2);
-check("reload grid (fábrica intacta)", await get("Crowd.grid"), 32);
+check("reload grid (fábrica intacta)", await get("Field · physics.grid"), 32);
 
 // --- 3. query param vence o salvo ---
 await boot("fogRecuo=33");

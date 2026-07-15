@@ -3,15 +3,15 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { useControls } from "leva";
 import {
-  abs,
   color,
   float,
   fwidth,
+  length,
   min,
   mix,
   positionLocal,
   positionWorld,
-  select,
+  smoothstep,
   transformNormalToView,
   uniform,
   vec2,
@@ -27,6 +27,7 @@ import {
   TERRAIN_PRESETS,
   commitTerrain,
   heightTSL,
+  setGroundGridCell,
   terrainU,
 } from "./heightfield";
 
@@ -40,8 +41,8 @@ type N = any;
  *   usa o MESMO nó, então os pés grudam na superfície);
  * - normal por diferenças finitas (2 taps extras) no VERTEX (varying);
  * - o GRID vira TSL no próprio material: linhas anti-aliased por
- *   fract/fwidth, célula 0,25 e extensão 42,5 como o gridHelper antigo,
- *   cor/alpha do grupo Appearance — o grid ABRAÇA o relevo em vez de boiar.
+ *   fract/fwidth, célula e raio via uniforms (raio = contenção em
+ *   Field · physics) — o grid ABRAÇA o relevo em vez de boiar.
  * - raycast do mouse continua na malha CPU (flat): quem precisa do y real
  *   soma heightJS (marker no CrowdMesh, labels) — aceitável e barato.
  *
@@ -50,9 +51,6 @@ type N = any;
  */
 
 const GROUND_RADIUS = 80;
-/** Grid antigo: gridHelper(42.5, 170) → célula 0,25, meia-extensão 21,25. */
-const GRID_CELL = 0.25;
-const GRID_HALF = 21.25;
 
 const PRESET_OPTIONS = ["custom", ...Object.keys(TERRAIN_PRESETS)] as const;
 
@@ -116,6 +114,27 @@ export function TerrainGround() {
       max: 30,
       label: "flatten band",
     },
+    gridCell: {
+      value: prefNum("gridCell", "Terrain.gridCell", 0.25),
+      min: 0.05,
+      max: 2,
+      label: "grid cell",
+      hint: "spacing between ground grid lines — radius follows containment (Field · physics)",
+    },
+    gridEdge: {
+      value: pref("Terrain.gridEdge", 0.35),
+      min: 0,
+      max: 3,
+      label: "grid edge fade (m)",
+      hint: "soft fade at the play disc rim (0 = hard circle)",
+    },
+    tilePeriod: {
+      value: prefNum("terrainTile", "Terrain.tilePeriod", 0),
+      min: 0,
+      max: 120,
+      label: "noise tile period (m)",
+      hint: "0 = auto (2× containment). Tiles height noise — independent of world wrap",
+    },
   }));
 
   // Preset escolhido → escreve os sliders (1×; "custom" não faz nada).
@@ -155,7 +174,12 @@ export function TerrainGround() {
     t.seed,
     t.flattenRadius,
     t.flattenBand,
+    t.gridCell,
   ]);
+
+  useEffect(() => {
+    setGroundGridCell(t.gridCell);
+  }, [t.gridCell]);
 
   const built = useMemo(() => {
     // Disco subdividido nas DUAS direções (CircleGeometry só divide o
@@ -166,6 +190,7 @@ export function TerrainGround() {
     const uChao = uniform(color("#616161"));
     const uGrid = uniform(color("#7c7c7c"));
     const uGridAlpha = uniform(1);
+    const uGridEdge = uniform(0.35);
 
     const material = new THREE.MeshStandardNodeMaterial({
       roughness: 0.95,
@@ -189,15 +214,16 @@ export function TerrainGround() {
     // como uma esteira vista por uma moldura parada.
     const xz: N = positionWorld.xz;
     const scrolled: N = xz.add(vec2(terrainU.scrollX, terrainU.scrollZ));
-    const coord: N = scrolled.div(GRID_CELL);
+    const coord: N = scrolled.div(terrainU.gridCell);
     const g2: N = coord.sub(0.5).fract().sub(0.5).abs().div(fwidth(coord));
     const line: N = float(1).sub(min(min(g2.x, g2.y), float(1)));
-    const inside: N = select(
-      abs(xz.x)
-        .lessThan(GRID_HALF)
-        .and(abs(xz.y).lessThan(GRID_HALF)),
-      float(1),
-      float(0),
+    const dist: N = length(xz);
+    const inside: N = float(1).sub(
+      smoothstep(
+        terrainU.gridRadius.sub(uGridEdge),
+        terrainU.gridRadius,
+        dist,
+      ),
     );
     material.colorNode = mix(
       uChao,
@@ -205,14 +231,15 @@ export function TerrainGround() {
       line.mul(uGridAlpha).mul(inside),
     );
 
-    return { geometry, material, uChao, uGrid, uGridAlpha };
+    return { geometry, material, uChao, uGrid, uGridAlpha, uGridEdge };
   }, []);
 
   useEffect(() => {
     (built.uChao.value as THREE.Color).set(chao);
     (built.uGrid.value as THREE.Color).set(gridCor);
     built.uGridAlpha.value = gridAlpha;
-  }, [built, chao, gridCor, gridAlpha]);
+    built.uGridEdge.value = t.gridEdge;
+  }, [built, chao, gridCor, gridAlpha, t.gridEdge]);
 
   useEffect(() => {
     const { geometry, material } = built;

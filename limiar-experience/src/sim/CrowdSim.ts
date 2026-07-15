@@ -26,7 +26,12 @@ import {
 } from "three/tsl";
 import { vat } from "../vat/runtime";
 import { detectClipRoles, type ClipRoles } from "../vat/clipRoles";
-import { heightTSL, terrainU, wrapDeltaTSL } from "../scene/heightfield";
+import {
+  heightTSL,
+  terrainU,
+  wrapDeltaTSL,
+  wrapPosTSL,
+} from "../scene/heightfield";
 import { mouseTarget } from "./mouseTarget";
 
 type N = any;
@@ -38,9 +43,8 @@ type N = any;
  * (suavizada), fase do passo e ESTADO DE ANIMAÇÃO (doc 04 §5.5). Forças por
  * frame:
  *   wander     — curl noise 2D (campo sem divergência, evolui no tempo),
- *                com "pausas" orgânicas por agente (noise lento gateia o
- *                wander → uns param, outros andam — multidão mista) e
- *                multiplicadores por grupo (com-história vs dormentes)
+ *                com pausas orgânicas por grupo (dormentes/testemunhas;
+ *                desligam com seek ativo) e multiplicadores por grupo
  *   separação  — cada agente empurra os vizinhos: ninguém atravessa ninguém
  *                (O(N²) por enquanto; hash grid espacial é o upgrade p/ 16k+.
  *                 No fallback WebGL2 a separação desliga: transform feedback
@@ -82,8 +86,8 @@ type N = any;
  *                radial DESLIGA e as posições wrappam por módulo na área
  *                canônica [−L/2, L/2)² — os 2 backends (aritmética local).
  *                Deltas de seek/mouse/campo usam o caminho toroidal;
- *                separação/vizinhança NÃO é toroidal (limitação documentada
- *                — na borda, vizinhos do outro lado não empurram).
+ *                separação toroidal opcional (wrapToroidalSep) quando o wrap
+ *                está ligado; histerese na costura (wrapHysteresis).
  *
  * Máquina de estados POR AGENTE (pass próprio, buildStatePass): lê a
  * velocidade REAL e a distância ao alvo e escreve `states` (vec4: clipA,
@@ -142,16 +146,41 @@ export class CrowdSim {
     time: uniform(0),
     seed: uniform(3),
     gridN: uniform(32),
-    spawnArea: uniform(40),
+    spawnArea: uniform(42),
+    /** Raio do disco de spawn (= contenção); agentes fora são puxados à borda. */
+    spawnRadius: uniform(21),
     spawnNoise: uniform(0.6),
     containRadius: uniform(21),
     containBand: uniform(5),
+    /** Wrap: separação usa menor caminho no toro (1) ou euclidiana (0). */
+    wrapToroidalSep: uniform(1),
+    /** Metros além de L/2 antes do teleporte (histerese anti-flicker). */
+    wrapHysteresis: uniform(0.8),
     maxSpeed: uniform(0.8),
     accel: uniform(4),
     drag: uniform(0.8),
-    wanderWeight: uniform(1),
-    wanderScale: uniform(0.12),
-    wanderEvolve: uniform(0.12),
+    /** Curl por grupo (2026-07-15): meta.x escolhe testemunha vs dormente. */
+    witWanderWeight: uniform(1),
+    witWanderScale: uniform(0.12),
+    witWanderEvolve: uniform(0.12),
+    witSpeedMul: uniform(1),
+    /** Espalhamento de curl por testemunha (0 = uniforme; 1 = ±100%). */
+    witWanderVariance: uniform(0.15),
+    /** Espalhamento de teto de velocidade por testemunha. */
+    witSpeedVariance: uniform(0.2),
+    /** Pausas orgânicas do wander das testemunhas (0 = ninguém para). */
+    witPauseAmount: uniform(0.2),
+    wanderWhileSeek: uniform(0.35),
+    lockAtCluster: uniform(1),
+    dormWanderWeight: uniform(0.8),
+    dormWanderScale: uniform(0.12),
+    dormWanderEvolve: uniform(0.12),
+    /** Espalhamento de força do curl por dormente (0 = uniforme; 1 = ±100%). */
+    dormWanderVariance: uniform(0.25),
+    /** Espalhamento de teto de velocidade por dormente. */
+    dormSpeedVariance: uniform(0.25),
+    wanderWhileForm: uniform(0.35),
+    lockAtForm: uniform(1),
     sepWeight: uniform(1.6),
     sepRadius: uniform(0.7),
     mousePos: uniform(new THREE.Vector3()),
@@ -200,12 +229,10 @@ export class CrowdSim {
     waveGain: uniform(0),
     waveNear: uniform(5),
     waveFar: uniform(20),
-    /** Dormentes (sem história): multiplicadores de velocidade e wander. */
+    /** Dormentes: multiplicador do teto de velocidade (testemunhas: witSpeedMul). */
     dormantSpeedMul: uniform(0.7),
-    dormantWanderMul: uniform(0.8),
-    /** Pausas orgânicas do wander (0 = ninguém para; design 0.45 no leva). */
-    pauseAmount: uniform(0),
-    pauseEvolve: uniform(0.05),
+    /** Pausas orgânicas do wander dos dormentes (design 0.45 no leva). */
+    dormPauseAmount: uniform(0.45),
 
     // --- campo do ativo + palco (2026-07-14, doc 04) ---
     /** Campo de repulsão da pessoa SEGUIDA: os outros desviam em vez de
@@ -229,14 +256,20 @@ export class CrowdSim {
      *  1 = igual a todos. Separação só existe no WebGPU. */
     selInertia: uniform(0.15),
     /** Campo dos com-história sobre os DORMENTES (modo livre): −1 repele
-     *  (halo de legibilidade), 0 off, +1 atrai (ajuntamentos). Vive no
-     *  loop de separação — só WebGPU (documentado). */
+     *  (halo externo), 0 off, +1 social (atrai fora + repulsão na bolha). */
     storyMode: uniform(0),
+    /** Alcance externo do story field (atração ou repulsão pura). */
     storyRadius: uniform(2),
+    /** Bolha interna (modo social): repulsão abaixo deste raio — evita perfurar. */
+    storyRepelRadius: uniform(0.55),
     storyStrength: uniform(0.6),
     /** Steering DIRETO do seguido (modo legado, treadmill OFF): força de
      *  seek na direção do leme + teto de velocidade próprio (stageSpeed).
      *  No modo padrão (pino+esteira) o leme age via stageHeading. */
+    /** Agente sob o cursor (hover freeze, Witnesses): −1 = ninguém. */
+    hoverFreezeAgent: uniform(-1),
+    /** 1 = testemunha hovered para no mundo (facilita clique). */
+    hoverFreezeOn: uniform(0),
     steerOn: uniform(0),
     steerDir: uniform(new THREE.Vector2(0, 0)),
     steerStrength: uniform(1),
@@ -355,11 +388,20 @@ export class CrowdSim {
       const gz: N = iz.div(denom).sub(0.5).mul(u.spawnArea);
       const px: N = gx.add(rnd(1).mul(2).sub(1).mul(u.spawnNoise).mul(spacing));
       const pz: N = gz.add(rnd(2).mul(2).sub(1).mul(u.spawnNoise).mul(spacing));
+      const pos2: N = vec2(px, pz);
+      const len: N = length(pos2).add(1e-5);
+      const scale: N = select(
+        len.greaterThan(u.spawnRadius),
+        u.spawnRadius.div(len),
+        float(1),
+      );
+      const pxC: N = px.mul(scale);
+      const pzC: N = pz.mul(scale);
 
       // Terreno vivo (M4f): nascer JÁ na superfície (h=0 com terreno off).
       this.positions
         .element(instanceIndex)
-        .assign(vec3(px, heightTSL(px, pz), pz));
+        .assign(vec3(pxC, heightTSL(pxC, pzC), pzC));
       this.velocities.element(instanceIndex).assign(vec3(0, 0, 0));
 
       const ang: N = rnd(3).mul(Math.PI * 2);
@@ -417,6 +459,7 @@ export class CrowdSim {
       // Wrap universal: período L compartilhado com o heightfield (0 = off;
       // wrapDeltaTSL degenera em identidade — dá para aplicar sempre).
       const L: N = terrainU.wrapLen;
+      const wrapOn: N = select(L.greaterThan(0.5), float(1), float(0));
       const wrap2 = (d: N): N =>
         vec2(wrapDeltaTSL(d.x, L), wrapDeltaTSL(d.y, L));
       // Ground frame → view frame: alvos são ancorados no MUNDO; a esteira
@@ -432,22 +475,31 @@ export class CrowdSim {
       const arrive: N = smoothstep(float(0), u.seekArrive, tDist);
       const nearT: N = float(1).sub(arrive).mul(seekGate);
 
-      // --- wander: curl de um potencial de noise (campo sem divergência) ---
-      const pot = (xz: N): N =>
+      // --- wander: curl por grupo (dois campos, mix por meta.x — vec3+mix quebra o TS) ---
+      const potD = (xz: N): N =>
         mx_noise_float(
           vec3(
-            xz.x.mul(u.wanderScale),
-            xz.y.mul(u.wanderScale),
-            u.time.mul(u.wanderEvolve),
+            xz.x.mul(u.dormWanderScale),
+            xz.y.mul(u.dormWanderScale),
+            u.time.mul(u.dormWanderEvolve),
           ),
         );
+      const potW = (xz: N): N =>
+        mx_noise_float(
+          vec3(
+            xz.x.mul(u.witWanderScale),
+            xz.y.mul(u.witWanderScale),
+            u.time.mul(u.witWanderEvolve),
+          ),
+        );
+      const pot = (xz: N): N => mix(potD(xz), potW(xz), meta.x);
       const e = float(0.35);
       const dPdx: N = pot(p.xz.add(vec2(e, 0))).sub(pot(p.xz.sub(vec2(e, 0))));
       const dPdz: N = pot(p.xz.add(vec2(0, e))).sub(pot(p.xz.sub(vec2(0, e))));
       const wander: N = normalize(vec2(dPdz, dPdx.negate()).add(vec2(1e-5, 0)));
 
       // Pausas orgânicas: cada agente vive um ciclo lento próprio (sawtooth
-      // de hash + tempo); enquanto o ciclo está abaixo de uPauseAmount o
+      // de hash + tempo); enquanto o ciclo está abaixo do pauseAmt do grupo o
       // wander desliga e o drag o assenta — a máquina de estados LÊ o
       // resultado (idle) em vez de encená-lo. A fração parada é exatamente
       // o slider (ciclo uniforme em [0,1)); episódios de ~10–25 s.
@@ -459,14 +511,14 @@ export class CrowdSim {
       const pauseCycle: N = hash(fi.add(3 * 4096))
         .add(u.time.mul(pauseRate))
         .fract();
+      const pauseAmt: N = mix(u.dormPauseAmount, u.witPauseAmount, meta.x);
       const pauseGate: N = smoothstep(
-        u.pauseAmount.sub(0.03),
-        u.pauseAmount.add(0.03),
+        pauseAmt.sub(0.03),
+        pauseAmt.add(0.03),
         pauseCycle,
       );
-      // Gravidade vence a pausa (quem é chamado vai): com seek ativo o
-      // agente não pausa — dormentes (sem alvo) seguem pausando, o contraste
-      // é parte da leitura.
+      // Pausas por grupo (2026-07-15b): cada agente no seu ciclo; seek ativo
+      // (migração/formação) desliga — ninguém para no caminho ao alvo.
       const pauseEff: N = mix(pauseGate, float(1), seekGate);
 
       // Grupos: com-história (meta.x=1) usa os pesos base; dormentes (0)
@@ -477,11 +529,28 @@ export class CrowdSim {
         .mul(float(1).sub(isPinned))
         .toVar();
       const wanderAtten: N = float(1).sub(nearT.mul(0.85));
-      const wanderMul: N = u.wanderWeight
+      const wWeight: N = mix(u.dormWanderWeight, u.witWanderWeight, meta.x);
+      // Variância de curl por agente (por grupo): complementa pausas.
+      const wanderVar: N = mix(u.dormWanderVariance, u.witWanderVariance, meta.x);
+      const wanderJit: N = float(1).add(
+        wanderVar.mul(hash(fi.add(7 * 4096)).mul(2).sub(1)),
+      );
+      const wWeightEff: N = wWeight.mul(wanderJit);
+      const nearLock: N = nearT.greaterThan(0.85);
+      const lockFlag: N = mix(u.lockAtForm, u.lockAtCluster, meta.x);
+      const lockFactor: N = float(1).sub(lockFlag.mul(nearLock).mul(seekGate));
+      const whileSl: N = mix(u.wanderWhileForm, u.wanderWhileSeek, meta.x);
+      const whileFactor: N = mix(
+        float(1),
+        whileSl,
+        seekGate.mul(float(1).sub(nearLock)),
+      );
+      const wanderMul: N = wWeightEff
         .mul(wanderAtten)
-        .mul(mix(u.dormantWanderMul, float(1), meta.x))
         .mul(pauseEff)
-        .mul(float(1).sub(steerGate));
+        .mul(float(1).sub(steerGate))
+        .mul(lockFactor)
+        .mul(whileFactor);
       const acc: N = wander.mul(wanderMul).toVar();
 
       // --- separação: vizinhos empurram (evitação de sobreposição) ---
@@ -512,7 +581,16 @@ export class CrowdSim {
         Loop({ start: int(0), end: int(u.count), type: "int" }, ({ i: j }: any) => {
           If(j.notEqual(selfI), () => {
             const q: N = this.positions.element(j);
-            const d: N = p.xz.sub(q.xz);
+            const dEuc: N = p.xz.sub(q.xz);
+            const dTor: N = vec2(
+              wrapDeltaTSL(dEuc.x, L),
+              wrapDeltaTSL(dEuc.y, L),
+            );
+            const torG: N = u.wrapToroidalSep.mul(wrapOn);
+            const d: N = vec2(
+              mix(dEuc.x, dTor.x, torG),
+              mix(dEuc.y, dTor.y, torG),
+            );
             const dist: N = length(d).add(1e-5);
             If(dist.lessThan(u.sepRadius), () => {
               const push: N = d
@@ -524,16 +602,39 @@ export class CrowdSim {
               sep.addAssign(push.mul(boost));
             });
             If(storyGate.greaterThan(0.5).and(dist.lessThan(u.storyRadius)), () => {
-              // d aponta PARA LONGE do vizinho; o sinal entra depois do
-              // loop (storyMode: +1 atrai → −story; −1 repele → +story).
-              const fall: N = smoothstep(
-                u.storyRadius,
-                u.storyRadius.mul(0.25),
-                dist,
-              );
-              story.addAssign(
-                d.div(dist).mul(fall).mul(this.agentMeta.element(j).x),
-              );
+              const wit: N = this.agentMeta.element(j).x;
+              // Social (+1): bolha interna repulsiva + atração na coroa externa.
+              If(u.storyMode.greaterThan(0.5), () => {
+                If(dist.lessThan(u.storyRepelRadius), () => {
+                  const repelFall: N = float(1).sub(
+                    smoothstep(
+                      u.storyRepelRadius.mul(0.85),
+                      u.storyRepelRadius,
+                      dist,
+                    ),
+                  );
+                  story.addAssign(d.div(dist).mul(repelFall).mul(wit));
+                });
+                If(dist.greaterThanEqual(u.storyRepelRadius), () => {
+                  const attractFall: N = smoothstep(
+                    u.storyRadius,
+                    u.storyRepelRadius,
+                    dist,
+                  );
+                  story.addAssign(
+                    d.div(dist).negate().mul(attractFall).mul(wit),
+                  );
+                });
+              });
+              // Repel puro (−1): halo de legibilidade (comportamento legado).
+              If(u.storyMode.lessThan(float(-0.5)), () => {
+                const fall: N = smoothstep(
+                  u.storyRadius,
+                  u.storyRadius.mul(0.25),
+                  dist,
+                );
+                story.addAssign(d.div(dist).mul(fall).mul(wit));
+              });
             });
           });
         });
@@ -544,14 +645,20 @@ export class CrowdSim {
         acc.addAssign(
           sepCapped.mul(u.sepWeight).mul(mix(float(1), u.selInertia, isSel)),
         );
-        // Story field: força FRACA (capped) — alvos/formações dominam.
+        // Story field: força fraca (capped). Social já vem com sinal correto;
+        // repel puro ainda usa storyMode.negate() no vetor "para longe".
         const storyLen: N = length(story).add(1e-5);
+        const storySign: N = select(
+          u.storyMode.lessThan(float(-0.5)),
+          u.storyMode.negate(),
+          float(1),
+        );
         acc.addAssign(
           story
             .div(storyLen)
             .mul(min(storyLen, float(1.5)))
             .mul(u.storyStrength)
-            .mul(u.storyMode.negate()),
+            .mul(storySign),
         );
       }
 
@@ -559,7 +666,6 @@ export class CrowdSim {
       // Com o wrap universal ligado a contenção DESLIGA (o toro é a regra
       // do mundo); sem wrap, o selecionado recebe a contenção pela mesma
       // inércia da separação (senão a borda o rebate — metade do vaivém).
-      const wrapOn: N = select(L.greaterThan(0.5), float(1), float(0));
       const centerDist: N = length(p.xz).add(1e-5);
       const inward: N = p.xz.div(centerDist).negate();
       const contain: N = smoothstep(
@@ -613,12 +719,19 @@ export class CrowdSim {
       // --- steering direto (modo legado, treadmill OFF): o leme empurra ---
       acc.addAssign(u.steerDir.mul(u.steerStrength).mul(2).mul(steerGate));
 
+      // Hover freeze (Witnesses): para a vida própria (wander/seek) — NÃO
+      // isenta da esteira: no follow, quem congela fica em pé no tapete que
+      // anda (como dormente parado), sem deslizar contra a câmera.
+      const hoverFreeze: N = u.hoverFreezeOn.mul(
+        select(fi.equal(u.hoverFreezeAgent), float(1), float(0)),
+      );
+      acc.mulAssign(float(1).sub(hoverFreeze));
+
       // --- integração com drag e teto de velocidade ---
       // O damping do arrival soma ao drag base: quem chegou perde inércia.
       // Onda de chegada (doc 04 §5.5): com gravidade ativa, quem está LONGE
-      // do alvo ganha teto maior — chega "correndo" e assenta por último; o
-      // boost decai sozinho conforme se aproxima. Dormentes andam mais
-      // devagar (leitura dos núcleos fica limpa).
+      // do alvo ganha teto maior — chega "correndo" e assenta por último.
+      // Dormentes andam mais devagar (dormantSpeedMul) e não recebem wave.
       const dt: N = u.dt;
       const dragTotal: N = u.drag.add(nearT.mul(u.seekDamp));
       const vel2: N = v.xz
@@ -626,36 +739,51 @@ export class CrowdSim {
         .mul(exp(dragTotal.negate().mul(dt)))
         .toVar();
       const speed: N = length(vel2).add(1e-6);
+      // Onda de chegada (doc 04 §5.5): só testemunhas (meta.x=1) com seek ativo.
       const wave: N = float(1).add(
-        u.waveGain.mul(seekGate).mul(smoothstep(u.waveNear, u.waveFar, tDist)),
+        u.waveGain
+          .mul(seekGate)
+          .mul(meta.x)
+          .mul(smoothstep(u.waveNear, u.waveFar, tDist)),
       );
       // Pino da esteira: teto de velocidade →0 na pessoa seguida (a animação
       // de andar é forçada no state pass; o mundo é que se move). Steering
       // direto (legado): teto próprio = stageSpeed (a velocidade da viagem).
+      const speedVar: N = mix(u.dormSpeedVariance, u.witSpeedVariance, meta.x);
+      const speedJit: N = float(1).add(
+        speedVar.mul(hash(fi.add(11 * 4096)).mul(2).sub(1)),
+      );
       const speedCap: N = u.maxSpeed
-        .mul(mix(u.dormantSpeedMul, float(1), meta.x))
+        .mul(mix(u.dormantSpeedMul, u.witSpeedMul, meta.x))
+        .mul(speedJit)
         .mul(wave)
         .mul(mix(float(1), u.stageSpeed.div(u.maxSpeed.max(1e-4)), steerGate))
         .mul(float(1).sub(isPinned.mul(0.999)));
       vel2.assign(vel2.mul(min(float(1), speedCap.div(speed))));
+      vel2.assign(vel2.mul(float(1).sub(hoverFreeze)));
 
       // Forças/velocidades vivem em XZ; o y é DERIVADO da superfície
       // (heightfield compartilhado com o chão — M4f). Fios e render herdam.
       const newPos: N = p.xz.add(vel2.mul(dt)).toVar();
+      newPos.assign(mix(newPos, p.xz, hoverFreeze));
       // Esteira UNIVERSAL do follow: TODOS menos o pino recuam a stageSpeed
       // CONTRA o heading da viagem, por deslocamento DIRETO de posição (não
       // velocidade — a máquina de estados vê cada um pela física própria:
       // quem está parado no mundo desliza em pé, quem anda, anda por cima).
+      // Hover freeze entra nessa fila — parado no tapete, não parado no ar.
       newPos.subAssign(
         stageDir.mul(
-          u.stageSpeed.mul(dt).mul(u.stageOn).mul(float(1).sub(isPinned)),
+          u.stageSpeed
+            .mul(dt)
+            .mul(u.stageOn)
+            .mul(float(1).sub(isPinned)),
         ),
       );
       // Wrap universal (mundo-toro): posição por módulo na área canônica
       // [−L/2, L/2)² — quem sai por uma borda reaparece na oposta com
       // velocidade/estado/fase intactos (é só aritmética de posição).
-      // wrapDeltaTSL é identidade com L=0 — aplica sempre, sem branch.
-      newPos.assign(wrap2(newPos));
+      // Histerese na costura: só teleporta após L/2 + wrapHysteresis.
+      newPos.assign(wrapPosTSL(newPos, L, u.wrapHysteresis.mul(wrapOn)));
       this.positions
         .element(instanceIndex)
         .assign(vec3(newPos.x, heightTSL(newPos.x, newPos.y), newPos.y));

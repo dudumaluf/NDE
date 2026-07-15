@@ -70,7 +70,7 @@ export function ClusterFocus({ content }: { content: Content }) {
   const measure = (clusterId: number): { ok: boolean; radius: number } => {
     const info = infoById.get(clusterId);
     if (!info) return { ok: false, radius: 6 };
-    const mapScale = levaVal("Data (M3).mapScale", 14);
+    const mapScale = levaVal("Witnesses.mapScale", 14);
     let cx = 0;
     let cz = 0;
     let n = 0;
@@ -199,7 +199,7 @@ export function ClusterFocus({ content }: { content: Content }) {
     const w = window as unknown as Record<string, unknown>;
     w.__limiarFocusCluster = (id: number) => {
       // usa o fluxo real (respeita bloqueio por follow / lente).
-      if (levaVal("Data (M3).lente", NO_LENS) !== NO_LENS) return;
+      if (levaVal("Witnesses.lente", NO_LENS) !== NO_LENS) return;
       import("./focusStore").then((m) => m.focusCluster(id));
     };
     w.__limiarClearFocus = () => clearFocus();

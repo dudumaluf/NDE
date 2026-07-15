@@ -49,10 +49,12 @@ Focus & reading · Terrain · Effects · Appearance · Preferences.
 | `follow ease (s)` | 0.45 | `followEase` | Constante de tempo da VIAGEM da câmera (ao entrar no follow ou trocar de pessoa). Maior = chegada mais lenta e cinematográfica |
 
 > **Como se segue alguém:** passe o mouse sobre uma pessoa (nome aparece em
-> 3D) e **clique** — a câmera viaja suave até a 3ª pessoa. Clicar em outra
-> pessoa re-alveja a MESMA câmera (transição contínua A→B); **ESC** ou clique
-> no vazio solta. Clique ≠ arrasto (arrastar é órbita). No boot, `?follow=6`
-> já entra seguindo a pessoa 6 (screenshots). Técnica do rig: doc 03 §14.6.
+> 3D) e **clique** — a câmera viaja suave até a 3ª pessoa; a **história
+> começa** sozinha (~0,75 s de overview da timeline, depois zoom suave no 1º
+> capítulo + áudio). Clicar em outra pessoa re-alveja a MESMA câmera
+> (transição contínua A→B); **ESC** ou clique no vazio solta. Clique ≠ arrasto
+> (arrastar é órbita). No boot, `?follow=6` já entra seguindo a pessoa 6
+> (screenshots). Técnica do rig: doc 03 §14.6.
 
 ---
 
@@ -83,10 +85,7 @@ moram em States per agent, doc 06. Aqui são as FORÇAS que movem os corpos.)
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
-| `max speed` | 0.8 | `speed2` | Teto de velocidade de todo mundo. Decide se a corrida (`v1`, doc 06) é sequer alcançável |
-| `wander (weight)` | 1 | — | Vontade própria: quanto cada corpo vagueia sem rumo |
-| `wander scale` | 0.12 | — | Frequência do ruído do wander (baixo = curvas largas e preguiçosas; alto = zigue-zague) |
-| `wander evolution` | 0.12 | — | Quão rápido o rumo do wander muda no tempo |
+| `max speed` | 0.8 | `speed2` | Teto de velocidade de todo mundo — multiplique por `speed ×` em Witnesses / Dormants |
 | `separation (weight)` | 1.6 | — | Força que empurra vizinhos para longe (evita sobreposição). **WebGPU only** |
 | `separation radius` | 0.7 | — | Até que distância a separação age |
 | `containment radius` | 21 | `contain` | Raio do "curral" que segura a multidão no centro. **Também define o mundo-toro**: o quadrado do wrap tem lado 2× este raio (§5) |
@@ -151,9 +150,10 @@ todos.
 | `selected inertia` | 0.15 | `selInertia` | Quanta separação/contenção a pessoa SEGUIDA recebe de volta: 0 = imune (passa como um trem), 1 = igual a todos. **É o fix do tranco (stutter) no meio da multidão** — deixe baixo |
 | `mouse steering` | on | `steer` | No follow, o mouse é o **leme**: a direção do ponteiro (no chão, relativa à pessoa) define para onde a viagem vai. Apontar NA pessoa (deadzone ~1,5 m) = parar |
 | `steer strength` | 1 | `steerK` | Quão bruscamente o leme vira o rumo |
-| `story field` | off | `storyField` | Modo livre: os agentes COM dados **attract** (juntam) ou **repel** (afastam) os dormentes. **WebGPU only** |
-| `story field radius` | 2 | `storyR` | Alcance do story field |
-| `story field strength` | 0.6 | `storyF` | Força do story field |
+| `story field` | off | `storyField` | **social** = dormentes orbitam testemunhas (atração externa + bolha interna) · **repel** = halo de legibilidade. **WebGPU only** |
+| `story attract radius` | 2 | `storyR` | Alcance da atração (modo social) |
+| `story bubble radius` | 0.55 | `storyBubble` | Repulsão interna — evita perfurar testemunhas (só social) |
+| `story field strength` | 0.6 | `storyF` | Força do campo |
 
 ### Stage (treadmill) — o comportamento PADRÃO do follow
 
@@ -168,6 +168,20 @@ todos.
 |---|---|---|---|
 | `dormant formation` | wander | `formation` | **wander** (solto) · **circle** (anel grande em volta de tudo) · **corridor** (duas fileiras ladeando o caminho da pessoa seguida — precisa de follow ativo, senão cai em wander) · **clear** (recuam para a borda) |
 | `formation spacing` | 1.2 | `formSpacing` | Espaçamento entre os dormentes na formação |
+| `wander scale` | 0.12 | — | Frequência do curl nos dormentes (max **0.8**; baixo = curvas largas, alto = redemoinhos apertados) |
+| `wander variance` | 0.25 | — | Espalhamento de curl **por agente** (Dormants) |
+| `wander pauses` | 0.45 | `pausas` | Parar/andar por agente — desliga com seek de formação |
+| `speed variance` | 0.25 | — | Velocidade de andar **por agente** (Dormants) |
+
+> **Witnesses** espelham `wander variance`, `wander pauses` e `speed variance`
+> (defaults 0.15 / 0.2 / 0.2). Pausas desligam na migração (seek ativo).
+> **`pause on hover`** (default on, qp `hoverFreeze`): a testemunha sob o cursor
+> para a vida própria (velocidade/forças zeradas) — no follow, **não** isenta
+> da esteira (fica em pé no tapete como os outros). Facilita o clique.
+
+> **Só dormentes:** `clear`/`circle`/`corridor` e formação. Testemunhas migram com
+> `gravity (UMAP)` ou lente (`witnessSeek`); wander/lock delas moram em
+> **Witnesses**. `arrival wave` idem (só testemunhas com seek).
 
 > **Regra de bolso:** `field (follow)` e as formações existem para as cenas em
 > que a **legibilidade** vence o caos. O caos vivo (estilo multidão de NYC) é o
@@ -310,7 +324,7 @@ screenshots.
 
 # follow / mundo-toro
 ?field=1 ?fieldR=2.5 ?fieldF=1.2 ?yield=2 ?selInertia=0.15
-?steer=1 ?steerK=1 ?storyField=attract ?storyR=2 ?storyF=0.6
+?steer=1 ?steerK=1 ?storyField=social ?storyR=2 ?storyBubble=0.55 ?storyF=0.6
 ?formation=corridor ?formSpacing=1.2 ?stage=1 ?stageSpeed=0.9
 
 # hierarquia visual (só com acervo)
@@ -324,7 +338,7 @@ screenshots.
 ?fx=<preset> ?fxauto=1 ?fog=1 ?fogRecuo=16 ?fogNear=14 ?fogFar=55
 
 # animações (doc 06)
-?estados=0 ?v0= ?v1= ?onda= ?pausas=
+?estados=0 ?v0= ?v1= ?onda= ?pausas= ?hoverFreeze=0
 ```
 
 > Valores internos de dropdown seguem em PT (`?mouse=atrair`, `?scene=character`

@@ -436,8 +436,10 @@ mecanismos deliberadamente diferentes para "ativos abrem espaço":
 grid visível) na MESMA infra de targets do M3; a state machine existente
 assenta quem chega (idle/rezar). `circle`/`clear` = anéis estáveis
 (jitter mulberry32 por slot); `corridor` = 3 camadas por lado ao longo do
-rumo da pessoa seguida. Formação ativa força o seek como as lentes (sem
-gravidade ligada não haveria efeito). **Aprendizados de sonda:**
+rumo da pessoa seguida. Formação ativa liga `seekWeight` globalmente, mas
+só os **slots dormentes** recebem `w=1` (`computeDormantTargets`); testemunhas
+só buscam alvo com gravidade OU lente (`witnessSeek` em `computeTargets`).
+**Aprendizados de sonda:**
 (a) heading por EMA de deltas por frame GIRA com o jitter de
 readback/separação da pessoa assentada — o rumo vem de uma **trilha**
 (1 amostra/250 ms, janela 2 s) e só conta com deslocamento real ≥1,2 m;
@@ -459,8 +461,9 @@ pessoa, 3 peças sincronizadas pela MESMA velocidade (`stageSpeed`):
 2. **Scroll do heightfield**: uniforms `scrollX/scrollZ` deslocam o
    DOMÍNIO do noise (warp+fbm) e as linhas do grid TSL — o flatten
    (anfiteatro) fica ancorado no mundo. **Paridade TSL+JS obrigatória**:
-   `setTerrainScroll()` escreve GPU e espelho JS juntos; sim, chão, fios
-   e marker leem a mesma altura deslocada. O scroll acumula
+   `setTerrainScroll()` escreve GPU e espelho JS juntos; sim, chão, fios,
+   marker e névoa de altura (nuvens do banco) leem a mesma altura/scroll
+   deslocado. O scroll acumula
    (`heading×speed×dt` com o MESMO clamp de dt da sim) e não zera ao
    sair — o mundo "fica onde a viagem chegou", sem salto.
 3. **Wrap modular dos dormentes**: na janela local do palco (caixa
@@ -560,32 +563,30 @@ beatIndex, file, url, t, duration, progress} enquanto toca.
 O adendo do Dudu virou **um sistema só**: o follow padrão pina a pessoa e
 move o mundo; o mundo é um toro; o mouse é o leme. Fatos técnicos:
 
-**Wrap universal (mundo-toro).** Um período `L` compartilhado
-(`terrainU.wrapLen`, uniform lido pela sim E pelo heightfield;
-`setWorldWrap(L)` escreve GPU+JS) define a área canônica `[−L/2, L/2)²`
-(L = 2× contenção). No update pass (os **dois** backends — é aritmética
-local, sem vizinhos) a posição final passa por `wrapDeltaTSL` por eixo
-(`d − L·floor(d/L + 0,5)`); com wrap ON a **contenção radial desliga**.
-`wrapDeltaTSL` degenera em identidade com L=0 → aplica-se sempre, sem
-branch. **Deltas toroidais**: seek, mouse e campo do ativo usam
-`wrap2(delta)` — quem wrappa perto da borda busca o alvo/foge do campo
-pelo **menor caminho no toro**, nunca atravessa o mapa de volta.
-**Limitação documentada:** separação/vizinhança NÃO é toroidal (o loop
-O(N²) lê posições cruas — na costura, vizinhos do outro lado não empurram;
-invisível na prática). Sonda `coh-probe.mjs`: 45+ eventos de wrap, todos
-dentro de ½L, salto wrappado ~0,06 m (≈ passo normal) e estado preservado
-(taxa de troca no wrap = taxa base da state machine — o wrap só mexe em
-posição).
+**Wrap universal (mundo-toro).** Período `L` dos **agentes**
+(`terrainU.wrapLen`; `setWorldWrap(L)` — GPU+JS) define a área canônica
+`[−L/2, L/2)²` (L = 2× contenção). Com wrap ON a **contenção radial
+desliga**; L=0 → curral clássico. O **tile do noise do chão** usa
+`terrainU.terrainTileLen` (`setTerrainTileLen`) — **desacoplado** do wrap
+dos agentes (2026-07-15): default auto = 2× contenção mesmo com wrap OFF,
+para o relevo não “estourar” ao desligar o toro. Override: Terrain →
+`noise tile period (m)` (`?terrainTile=`). No update pass (os **dois**
+backends) a posição final passa por `wrapPosTSL` com histerese. Deltas
+toroidais: seek, mouse e campo usam `wrap2(delta)`. Separação toroidal
+opcional (`wrapToroidalSep`). Sonda `coh-probe.mjs`.
 
-**Tiling do noise (heightfield, paridade TSL+JS obrigatória).** Com wrap
-ON cada escala do value-noise é **tileada** no período L:
+**Tiling do noise (heightfield, paridade TSL+JS obrigatória).** Período
+`terrainTileLen` (não confundir com `wrapLen`). Cada escala do value-noise
+é **tileada** quando `terrainTileLen > 0`:
 `P = floor(L·freq + 0,5)` células por volta, frequência quantizada `P/L`
 para P inteiro; o wrap acontece no **índice da lattice** (cada canto por
 `wrapIdx = i − P·floor(i/P)`), então `h(x+L) = h(x)` EXATO na costura. O
-flatten (anfiteatro) passa a viver no domínio scrollado+wrappado (viaja com
-o mundo e repete por tile). `floor(v+0,5)`, nunca `round()` — half é
-implementation-defined na GPU; paridade primeiro. Com amplitude 0 (default)
-o custo existe mas o resultado é 0 (o `select` da GPU avalia os dois ramos).
+flatten (anfiteatro) segue o **wrap dos agentes** (`wrapLen`): com wrap ON
+vive no domínio scrollado+wrappado (viaja com o mundo); com wrap OFF usa
+distância euclidiana ao centro do mundo. `floor(v+0,5)`, nunca `round()` —
+half é implementation-defined na GPU; paridade primeiro. Com amplitude 0
+(default) o custo existe mas o resultado é 0 (o `select` da GPU avalia os
+dois ramos).
 
 **Esteira universal (o follow padrão, kill-switch `stage`).** O pino
 (velocidade→0 + walking forçado enquanto a esteira anda; no deadzone do

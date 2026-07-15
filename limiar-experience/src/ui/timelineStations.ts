@@ -80,3 +80,14 @@ export function computeStations(person: PersonDetail): Station[] {
   // Linha lê da esquerda para a direita: x = posição real na entrevista.
   return out.sort((a, b) => a.beat.t_norm - b.beat.t_norm);
 }
+
+/** Capítulo (estação) que contém um instante `t_norm` na linha. */
+export function chapterIndexForT(stations: Station[], tNorm: number): number {
+  if (stations.length === 0) return 0;
+  let idx = 0;
+  for (let i = 0; i < stations.length; i++) {
+    if (stations[i].beat.t_norm <= tNorm + 0.0001) idx = i;
+    else break;
+  }
+  return idx;
+}

@@ -108,7 +108,9 @@ A escada hover → clique → escuta, fechada com o Dudu:
    do clique.
 2. **Clique = compromisso.** Clicar entra no **follow em terceira pessoa**
    (rig do doc 03 §6) e a história começa — o corte editado por beats
-   (padrão acima).
+   (padrão acima). **2026-07-15:** ao entrar no follow, a 1ª estação com
+   áudio toca sozinha após ~0,75 s de **overview** da régua inteira; zoom
+   no capítulo em **ease-in-out ~1,2 s** (sem segundo clique na timeline).
 3. **Durante a escuta**, a **timeline minimalista com hotspots** já decidida
    acima ganha forma concreta: uma linha fina com marcas clicáveis e o
    texto do momento (o rótulo do beat) — **saltar entre momentos** da
@@ -129,6 +131,8 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
    NA TELA acerta (elipse do tamanho aparente; sobrepostos → o da frente
    vence), em vez do antigo raio de 1,2 m ao redor do ponto do mouse no
    chão, que falhava ao apontar para tronco/cabeça (doc 03 §14.6).
+   *2026-07-15:* **`pause on hover`** (Witnesses, default on) — para a vida
+   própria no hover; no follow, continua na esteira (sem sliding).
 2. **Clique = follow em 3ª pessoa** — a câmera viaja até atrás/acima da
    pessoa e ACOMPANHA (órbita e zoom seguem livres — o OrbitControls não
    desliga). ESC ou clique no vazio solta, sem teleporte. Arrastos de
@@ -181,8 +185,9 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
 4. **A voz entra — clique consome o corte (Voz v1, 2026-07-14).** Todo
    ponto da timeline agora TOCA o áudio real da pessoa: estação/momento →
    o corte do beat; ponto de elemento → o corte da própria quote (se
-   existir no bucket; senão o corte do beat que a contém). A gramática do
-   consumo:
+   existir no bucket; senão o corte do beat que a contém). **2026-07-15:**
+   o **clique na pessoa** (entrar no follow) já dispara a 1ª estação após
+   overview breve — fecha §4.1 item 2. A gramática do consumo:
 
    - **Um som por vez** (o mesmo princípio da Legenda desvanecer no
      follow): player singleton com fades de ~120 ms — trocar de ponto
@@ -460,14 +465,11 @@ irradia uma abertura.
   indo de um lado pro outro, quicando na contenção). A separação é WebGPU;
   a contenção vale nos dois backends (e some quando o wrap universal está
   ligado — §5.10).
-- **Story field** (`story field`, off/attract/repel, para o **modo livre**):
-  as testemunhas (com-história) irradiam um campo sobre os dormentes —
-  **attract** junta pequenos ajuntamentos ao redor de quem tem relato
-  (bonito no Campo em repouso), **repel** abre um halo de legibilidade em
-  torno de quem carrega história. Vive no loop de separação (lê o flag
-  com-história do vizinho) — WebGPU; força fraca de propósito, os alvos das
-  formações e a gravidade sempre vencem (não teleguia ninguém). Limitação
-  WebGL2: sem separação, sem story field (como o yield).
+- **Story field** (`story field`, off/**social**/repel, para o **modo livre**):
+  as testemunhas irradiam um campo sobre os dormentes —
+  **social** junta numa coroa mas mantém **bolha interna** repulsiva,
+  **repel** abre halo de legibilidade. Controles condicionais no leva
+  (`render` por modo). WebGPU only; formações/gravidade vencem.
 
 **Formações dos dormentes** (grupo "Formations"): o que os sem-história
 fazem enquanto os ativos migram — dropdown dinâmico, para moldar a cena
