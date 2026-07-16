@@ -22,10 +22,12 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { enrichPersonAudio, loadIntroSkips } from "./intro-skip.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(here, "../../acervo/export");
 const DST = resolve(here, "../public/content");
+const ACERVO_DATA = resolve(here, "../../acervo/data");
 
 const DOCS = [
   "manifest.json",
@@ -50,6 +52,8 @@ for (const f of DOCS) {
 rmSync(join(DST, "people"), { recursive: true, force: true });
 mkdirSync(join(DST, "people"), { recursive: true });
 let nPeople = 0;
+let nSkip = 0;
+const introSkips = loadIntroSkips(ACERVO_DATA);
 // demographics.json (derivado): o app só precisa de um punhado de campos por
 // pessoa para as lentes demográficas — destilar aqui evita 46 fetches no boot.
 const demographics = {};
@@ -57,9 +61,10 @@ let nDemo = 0;
 if (existsSync(join(SRC, "people"))) {
   for (const f of readdirSync(join(SRC, "people"))) {
     if (!f.endsWith(".json")) continue;
-    copyFileSync(join(SRC, "people", f), join(DST, "people", f));
-    nPeople += 1;
     const doc = JSON.parse(readFileSync(join(SRC, "people", f), "utf8"));
+    nSkip += enrichPersonAudio(doc, introSkips);
+    writeFileSync(join(DST, "people", f), JSON.stringify(doc));
+    nPeople += 1;
     const dem = doc.demographics ?? {};
     demographics[doc.id] = {
       sexo: dem.sexo ?? null,
@@ -78,5 +83,6 @@ writeFileSync(join(DST, "demographics.json"), JSON.stringify(demographics));
 const manifest = JSON.parse(readFileSync(join(DST, "manifest.json"), "utf8"));
 console.log(
   `sync-content: ${manifest.counts?.people ?? "?"} pessoas (${nPeople} docs, ` +
-    `${nDemo} com demographics) · manifest ${manifest.content_hash ?? "?"} → public/content/`,
+    `${nDemo} com demographics, ${nSkip} cortes com skip de vinheta) · manifest ` +
+    `${manifest.content_hash ?? "?"} → public/content/`,
 );

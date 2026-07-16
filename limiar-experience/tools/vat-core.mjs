@@ -16,6 +16,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { mergeClips, DEFAULT_MERGE_FADE } from "./merge-clips.mjs";
 import { isFbxBinary, normalizeFbxResult, translateFbxError } from "./fbx-normalize.mjs";
+import { countFoldableContainerTracks, resolveContainerMotion } from "./fold-container-tracks.mjs";
 import { rebaseTracksToRig, restPoseMaps, worldScaleOf } from "./retarget-units.mjs";
 
 /** Largura máxima de textura segura no WebGPU com limites default do three. */
@@ -596,8 +597,26 @@ function adaptPositionUnits(clip, clipLabel, srcScene, model, normMap, cache, wa
  * ESCALA (0,01) do nó homônimo no rig destino. Retorna false se o clipe
  * ficou sem nenhum track útil.
  */
-function retargetTracks(clip, clipLabel, model, normMap, warn, bonesOnly = false) {
-  const allowed = bonesOnly ? model.boneNames : model.nodeNames;
+function retargetTracks(clip, clipLabel, model, normMap, warn, bonesOnly = false, srcScene = null) {
+  let keepContainer = null;
+  if (bonesOnly && srcScene) {
+    const motion = resolveContainerMotion(clip, srcScene, model.rootBoneNames, model.scene);
+    if (motion.mode === "fold")
+      warn(
+        `clipe "${clipLabel}": motion do container "${motion.container}" fundida no osso raiz "${motion.root}" ` +
+          `(${motion.folded} track(s) — queda/root motion do Mixamo)`,
+      );
+    else if (motion.mode === "keep-container") {
+      keepContainer = motion.container;
+      warn(
+        `clipe "${clipLabel}": motion do container "${motion.container}" mantida no nó homônimo ` +
+          `(${motion.folded} track(s) — queda no container do rig, não no osso raiz)`,
+      );
+    }
+  }
+  const allowed = bonesOnly
+    ? new Set([...model.boneNames, ...(keepContainer ? [keepContainer] : [])])
+    : model.nodeNames;
   const kept = [];
   let dropped = 0;
   for (const track of clip.tracks) {
@@ -681,7 +700,7 @@ export function collectClips(files, model, args, warn = console.warn) {
         continue;
       used.add(name.toLowerCase());
 
-      if (!retargetTracks(clip, name, model, normMap, warn, gltf.scene !== model.scene)) continue;
+      if (!retargetTracks(clip, name, model, normMap, warn, gltf.scene !== model.scene, gltf.scene)) continue;
       adaptPositionUnits(clip, name, gltf.scene, model, normMap, unitsCache, warn);
       let sourceClip = null;
       if (args.inPlace) {
@@ -739,7 +758,7 @@ export function selectClips(files, model, selection, warn = console.warn) {
       const parts = sel.parts.map((p) => resolvePart(p, name));
       const kept = [];
       for (const p of parts)
-        if (retargetTracks(p.clip, name, model, normMap, warn, p.scene !== model.scene)) {
+        if (retargetTracks(p.clip, name, model, normMap, warn, p.scene !== model.scene, p.scene)) {
           adaptPositionUnits(p.clip, name, p.scene, model, normMap, unitsCache, warn);
           kept.push(p);
         }
@@ -752,7 +771,7 @@ export function selectClips(files, model, selection, warn = console.warn) {
       source = [...new Set(kept.map((p) => p.source))].join(" + ");
     } else {
       const part = resolvePart(sel);
-      if (!retargetTracks(part.clip, name, model, normMap, warn, part.scene !== model.scene)) continue;
+      if (!retargetTracks(part.clip, name, model, normMap, warn, part.scene !== model.scene, part.scene)) continue;
       adaptPositionUnits(part.clip, name, part.scene, model, normMap, unitsCache, warn);
       clip = part.clip;
       source = part.source;
@@ -1461,6 +1480,28 @@ export async function analyzeFiles(paths, warn = console.warn) {
     (f.gltf.animations ?? []).forEach((clip, ci) => {
       const name = suggestClipName(clip, f.path, used, clips.length);
       used.add(name.toLowerCase());
+      const foreign = f.gltf.scene !== model.scene;
+      let matchedTracks = countMatched(clip, foreign);
+      if (foreign)
+        matchedTracks = Math.min(
+          clip.tracks.length,
+          matchedTracks + countFoldableContainerTracks(clip, f.gltf.scene, model.rootBoneNames, model.scene),
+        );
+      const frozenClip = clip.clone();
+      let containerMotion = { mode: "none" };
+      if (foreign)
+        containerMotion = resolveContainerMotion(frozenClip, f.gltf.scene, model.rootBoneNames, model.scene);
+      const frozenTracks = foreign
+        ? frozenClip.tracks.filter((t) => {
+            const { nodeName } = THREE.PropertyBinding.parseTrackName(t.name);
+            return model.boneNames.has(nodeName) || (normMap.get(normalizeName(nodeName)) && model.boneNames.has(normMap.get(normalizeName(nodeName))));
+          })
+        : frozenClip.tracks;
+      const frozenProbe = new THREE.AnimationClip(name, clip.duration, frozenTracks);
+      const frozen = frozenBonesByRegion(frozenProbe, model, normMap);
+      // Queda no container (rigs Blender): coluna parece "congelada" nas tracks
+      // de osso — a motion está no nó pai, não é artefato de export.
+      if (containerMotion.mode === "keep-container" && frozen.coluna) delete frozen.coluna;
       clips.push({
         file: fi,
         clip: ci,
@@ -1468,11 +1509,9 @@ export async function analyzeFiles(paths, warn = console.warn) {
         name,
         duration: +clip.duration.toFixed(3),
         tracks: clip.tracks.length,
-        matchedTracks: countMatched(clip, f.gltf.scene !== model.scene),
+        matchedTracks,
         rootTravel: +(measureRootTravel(clip, model.rootBoneNames) * worldScale).toFixed(4),
-        // ossos core do DESTINO sem movimento neste clipe ("perna manca"
-        // detectável antes do bake), agrupados por região
-        frozen: frozenBonesByRegion(clip, model, normMap),
+        frozen,
         source: basename(f.path),
       });
     });

@@ -55,7 +55,7 @@ export interface PersonElement {
  * `quotes[key][j]` alinha por posição com `elements[key].quotes[j]`.
  */
 export interface PersonAudio {
-  beats: { file: string }[];
+  beats: { file: string; skip_in?: number }[];
   quotes?: Record<string, string[]>;
   whisper?: string;
 }

@@ -187,7 +187,9 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
    o corte do beat; ponto de elemento → o corte da própria quote (se
    existir no bucket; senão o corte do beat que a contém). **2026-07-15:**
    o **clique na pessoa** (entrar no follow) já dispara a 1ª estação após
-   overview breve — fecha §4.1 item 2. A gramática do consumo:
+   overview breve — fecha §4.1 item 2. **2026-07-15 (noite):** com `chain`
+   ativo, cada corte **encadeia** no próximo ponto da régua em ordem `t_norm`
+   (estações e momentos intercalados). A gramática do consumo:
 
    - **Um som por vez** (o mesmo princípio da Legenda desvanecer no
      follow): player singleton com fades de ~120 ms — trocar de ponto
@@ -614,10 +616,11 @@ elemento** (núcleo ∩ elemento). É a Lente (§5.3) em miniatura, dentro de um
 núcleo — o começo do drill-down "temas dentro de temas". Re-tocar volta ao
 núcleo inteiro; ESC / clicar no vazio sai do foco (a câmera fica onde está).
 
-**Contornos dos núcleos (opção visual).** Um contorno suave desenhado no
-chão ao redor de cada núcleo formado — blob spline que "respira" devagar,
-discreto (cor do núcleo dessaturada). Torna os grupos legíveis como REGIÕES,
-não só nuvens de pontos. Toggle no grupo "Focus & reading".
+**Contornos dos núcleos (opção visual).** Um **anel circular** (só stroke) no
+chão ao redor de cada núcleo formado — raio = membro mais distante do
+centroide vivo + folga, suavizado e com leve "respiração". Discreto (cor do
+núcleo dessaturada). Torna os grupos legíveis como REGIÕES, não só nuvens de
+pontos. Toggle no grupo "Focus & reading".
 
 ### 5.12 A vista de dados (LOD) — a semente da constelação (2026-07-14)
 

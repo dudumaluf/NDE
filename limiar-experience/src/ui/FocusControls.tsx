@@ -36,7 +36,7 @@ export function FocusControls() {
       outlines: {
         value: prefBool("outlines", "Focus & reading.outlines", DEF.outlines),
         label: "cluster outlines",
-        hint: "a soft spline drawn on the ground around each FORMED cluster (needs gravity on). Sampled ~0.3 s, breathes gently — a few hundred line points, ~free",
+        hint: "a circle stroke on the ground around each FORMED cluster (needs gravity on). Radius fits the farthest member + padding; sampled ~0.3 s, breathes gently — ~50 line points per cluster, ~free",
       },
       outlineAlpha: {
         value: prefNum("outlineAlpha", "Focus & reading.outlineAlpha", DEF.outlineAlpha),

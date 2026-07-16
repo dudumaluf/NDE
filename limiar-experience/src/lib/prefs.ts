@@ -147,9 +147,15 @@ const PATH_MIGRATIONS: Record<string, string> = (() => {
     "storyField",
     "storyRadius",
     "storyRepelRadius",
-    "storyStrength",
+    "storyRepelHaloRadius",
+    "storyAttractStrength",
+    "storyRepelStrength",
+    "storyDebug",
   ]);
   moveGroup(m, "Active field", STAGE, ["steerOn", "steerStrength"]);
+  // Pivot VAT (2026-07-16): pref lia VAT.* mas o leva salva Field · physics.*
+  m["VAT.pivotX"] = `${PHYS}.pivotX`;
+  m["VAT.pivotZ"] = `${PHYS}.pivotZ`;
   return m;
 })();
 
@@ -169,6 +175,18 @@ function migrateValues(values: Record<string, unknown>): Record<string, unknown>
   // attract puro → social (bolha interna, 2026-07-15).
   const sf = out["Field · coupling.storyField"];
   if (sf === "attract") out["Field · coupling.storyField"] = "social";
+  if (sf === "social (attract + bubble)") out["Field · coupling.storyField"] = "social";
+  // storyStrength único → attract + repel (2026-07-16).
+  const legacyF = out["Field · coupling.storyStrength"];
+  if (typeof legacyF === "number") {
+    if (!("Field · coupling.storyAttractStrength" in out)) {
+      out["Field · coupling.storyAttractStrength"] = legacyF;
+    }
+    if (!("Field · coupling.storyRepelStrength" in out)) {
+      out["Field · coupling.storyRepelStrength"] = legacyF;
+    }
+    delete out["Field · coupling.storyStrength"];
+  }
   return out;
 }
 

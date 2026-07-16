@@ -21,6 +21,7 @@ let master = 1;
 let muted = false;
 let fadeRaf = 0;
 let fadeDone: (() => void) | null = null;
+let playbackStart = 0;
 
 function ensure(): HTMLAudioElement {
   if (!el) {
@@ -61,6 +62,8 @@ function fadeTo(a: HTMLAudioElement, target: number, ms: number): Promise<void> 
 }
 
 export interface PlayOptions {
+  /** Segundos dentro do arquivo para começar (ex.: pular vinheta do canal). */
+  startAt?: number;
   /** Chamado quando o corte termina sozinho (não em stop()/troca). */
   onEnd?: () => void;
 }
@@ -80,6 +83,8 @@ export async function play(url: string, opts?: PlayOptions): Promise<boolean> {
   a.onended = null;
   a.src = url;
   a.volume = 0;
+  const startAt = Math.max(0, opts?.startAt ?? 0);
+  playbackStart = startAt;
   try {
     await a.play();
   } catch {
@@ -87,6 +92,13 @@ export async function play(url: string, opts?: PlayOptions): Promise<boolean> {
     return false;
   }
   if (my !== token) return false;
+  if (startAt > 0) {
+    try {
+      a.currentTime = startAt;
+    } catch {
+      /* seek antes do buffer — toca do começo */
+    }
+  }
   a.onended = () => {
     if (my === token) opts?.onEnd?.();
   };
@@ -102,6 +114,7 @@ export async function stop(): Promise<void> {
   await fadeTo(a, 0, FADE_MS);
   if (my !== token) return;
   a.pause();
+  playbackStart = 0;
 }
 
 export interface PlayerState {
@@ -118,12 +131,15 @@ export function state(): PlayerState | null {
   const a = el;
   if (!a || !a.src) return null;
   const duration = Number.isFinite(a.duration) ? a.duration : 0;
+  const t = a.currentTime;
+  const effective = Math.max(0, t - playbackStart);
+  const span = Math.max(0, duration - playbackStart);
   return {
     url: a.src,
     playing: !a.paused && !a.ended,
-    t: a.currentTime,
+    t,
     duration,
-    progress: duration > 0 ? Math.min(1, a.currentTime / duration) : 0,
+    progress: span > 0 ? Math.min(1, effective / span) : 0,
   };
 }
 

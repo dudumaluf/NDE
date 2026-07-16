@@ -8,7 +8,7 @@ import { buildCharacterMaterial } from "./characterMaterial";
 import { useVatTextures } from "./useVatTextures";
 import { vatPlayer } from "./VatClipPlayer";
 import { hasRootMotion, rootMotionOffset } from "./rootMotion";
-import { pref, prefBool } from "../lib/prefs";
+import { pref, prefBool, prefNum } from "../lib/prefs";
 
 /** Personagem único — palco da demo de morph entre estados (e entre VATs). */
 export function VatCharacter() {
@@ -26,6 +26,21 @@ export function VatCharacter() {
   const withRootMotion = useMemo(hasRootMotion, []);
   const c = useControls("Character", {
     escala: { value: pref("Character.escala", 2.5), min: 0.1, max: 5, label: "scale" },
+    pivotX: {
+      value: prefNum("pivotX", "Field · physics.pivotX", 0),
+      min: -1,
+      max: 1,
+      step: 0.01,
+      label: "pivot X",
+      hint: "same as Field · physics — baked VAT units",
+    },
+    pivotZ: {
+      value: prefNum("pivotZ", "Field · physics.pivotZ", 0),
+      min: -1,
+      max: 1,
+      step: 0.01,
+      label: "pivot Z",
+    },
     rootMotion: {
       // ?rootMotion=0 desliga (screenshots determinísticos do antes/depois)
       value: prefBool("rootMotion", "Character.rootMotion", true),
@@ -39,6 +54,7 @@ export function VatCharacter() {
     const state = vatPlayer.getState();
     bundle.sampler.applyState(state);
     bundle.setScale(c.escala);
+    bundle.setPivot(c.pivotX, c.pivotZ);
     const mesh = meshRef.current;
     if (mesh) {
       if (withRootMotion && c.rootMotion) {

@@ -457,7 +457,10 @@ pessoa, 3 peças sincronizadas pela MESMA velocidade (`stageSpeed`):
    **walking forçado no state pass** (deixar a state machine ver v≈0
    levaria a idle e quebraria a ilusão) com a fase avançando
    `stageSpeed×phasePerUnit` — o passo casa com o chão que anda (nada
-   patina). Heading do pino gira suave ao rumo do palco.
+   patina). **2026-07-16:** stride/playback do pino são uniforms próprios
+   (`pin stride/unit`, `pin playback ×`, `pin run playback ×` no leva) —
+   independentes do `stride/unit` global da multidão. Heading do pino gira
+   suave ao rumo do palco.
 2. **Scroll do heightfield**: uniforms `scrollX/scrollZ` deslocam o
    DOMÍNIO do noise (warp+fbm) e as linhas do grid TSL — o flatten
    (anfiteatro) fica ancorado no mundo. **Paridade TSL+JS obrigatória**:
@@ -610,13 +613,19 @@ reversões laterais e RMS do jitter caem (medido 8,0→4,0 mm, 3→1 reversões
 num run; WebGL2 sem separação só relata — a inércia da separação é inerte,
 só campo/contenção agem).
 
-**Leme (steering).** CPU calcula por frame `mouse − posição da pessoa` no
-chão; fora da deadzone (~1,5 m) gira o `stageHeading` (suavizado por
-`steer strength`) e ativa a esteira; dentro da deadzone `stageSpeed→0`
-(rampa suave). No kill-switch (treadmill OFF) o leme vira força direta
-(`steerDir` uniform: seek na direção + teto de velocidade próprio) que
-sobrepõe wander/gravidade só do seguido. Sonda: o rumo responde ao
-ponteiro (dot cai), o mundo scrolla ~2 m em 2,5 s, apontar no lado oposto
+**Leme (steering).** CPU amostra por frame via `computeSteerSample` (`steer
+pivot`): modo **pessoa** usa `mouse − posição da pessoa` no chão; modo
+**screen** usa offset isotrópico do centro da tela (convertido para metros na
+profundidade da pessoa) — o raycast no chão continua como alvo visual. Fora
+da deadzone (~1,5 m) gira o `stageHeading` (suavizado por `steer strength`)
+e escala `stageSpeed` pela distância (`steer speed ramp`, smoothstep até
+`treadmill speed`); dentro da deadzone `stageSpeed→0` (rampa suave). O pino
+promove walk/run conforme a fração do teto. No kill-switch (treadmill OFF) o
+leme vira força direta (`steerDir` + `steerSpeedMul`: seek na direção + teto
+proporcional à distância) que sobrepõe wander/gravidade só do seguido. Debug:
+`steer wheel debug` desenha anéis no chão; sonda `__limiarSteerWheel`. Sonda:
+o rumo responde ao ponteiro (dot cai), o mundo scrolla ~2 m em 2,5 s,
+apontar no lado oposto
 inverte o rumo e apontar na pessoa para a viagem.
 
 **Story field (modo livre).** No loop de separação (WebGPU), além do
@@ -698,15 +707,14 @@ luz" → estado_de_graca 2,3×). Top-6 viram CHIPS clicáveis no painel de foco
 (`ui/FocusPanel.tsx`, irmão da Legend). Tudo client-side sobre
 `manifest.people`.
 
-**Contorno/spline dos núcleos (`render/ClusterOutlines.tsx`).** Para cada
-núcleo FORMADO (sinal COMPARTILHADO — ver abaixo) um blob no chão: hull
-RADIAL de 12 setores (em cada um, o membro mais distante do centroide vivo +
-folga, espalhado aos vizinhos), suavizado por **Catmull-Rom fechado** (6
-subpontos/segmento) + lerp temporal (amostra ~0,3 s) + leve respiração.
-`THREE.Line` com fecho explícito (o WebGPU do three **não suporta
-LineLoop** — mesma lição do §14.9), material dessaturado, `depthWrite:false`,
-y = `heightJS(x,z) + 0,02`. ~13×(12×6+1) ≈ 950 vértices reescritos/frame na
-CPU (posições do positionMirror — sem readback novo): desprezível.
+**Contorno circular dos núcleos (`render/ClusterOutlines.tsx`).** Para cada
+núcleo FORMADO (sinal COMPARTILHADO — ver abaixo) um anel no chão: raio =
+membro mais distante do centroide vivo + folga (`PAD_MUL`/`PAD_ADD`), lerp
+temporal (amostra ~0,3 s) + leve respiração. 48 segmentos em `THREE.Line`
+com fecho explícito (o WebGPU do three **não suporta LineLoop** — mesma lição
+do §14.9), material dessaturado, `depthWrite:false`, y = `heightJS(x,z) +
+0,02`. ~13×49 ≈ 650 vértices reescritos/frame na CPU (posições do
+positionMirror — sem readback novo): desprezível.
 
 **Sinal de formação compartilhado (`data/clusterFormation.ts`).** A detecção
 saiu do ClusterLabels (que tinha readback GPU próprio) para um módulo que lê

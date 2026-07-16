@@ -103,6 +103,7 @@ movem **todos** os agentes — testemunhas e dormentes. (Limiares de animação
 | `turn smoothing` | 6 | — | Quão rápido os corpos giram para o rumo novo (baixo = viradas largas) |
 | `stride/unit` | 34 | — | Frames de passo por unidade andada (calibra o "não patinar" dos pés). Muda a cadência visual, não o estado |
 | `flip facing` | off | `faceflip` | Inverte a frente do modelo (se a VAT vier virada) |
+| `pivot X` / `pivot Z` | 0 | `pivotX` / `pivotZ` | Desloca o **eixo de rotação** em unidades do bake (× person scale no mundo). Persistem em `Field · physics.pivotX` / `pivotZ` (Preferences → save as default) |
 | `debug color` | off | `debug` | Pinta cada agente por um dado: **speed / direction / target / state**. `state` é a régua de calibração das animações (doc 06) |
 
 ---
@@ -192,19 +193,31 @@ todos.
 | `field strength` | 1.2 | `fieldF` | Força dela |
 | `yield to travelers` | 2 | `yield` | Separação **assimétrica**: quem tem alvo (migrando para um núcleo) empurra quem não tem até esse tanto mais forte. **WebGPU only** |
 | `selected inertia` | 0.15 | `selInertia` | Quanta separação/contenção a pessoa SEGUIDA recebe de volta: 0 = imune (passa como um trem), 1 = igual a todos. **É o fix do tranco (stutter) no meio da multidão** — deixe baixo |
-| `story field` | off | `storyField` | **social** = atração + bolha interna · **repel** = halo externo. **WebGPU only** |
-| `story attract radius` | 2 | `storyR` | Alcance da atração (social) |
-| `story bubble radius` | 0.55 | `storyBubble` | Bolha repulsiva interna (social) — evita perfurar |
-| `story field strength` | 0.6 | `storyF` | Força do campo |
+| `story field` | off | `storyField` | **social** = coroa + repel interno · **repel** = halo. **WebGPU only** |
+| `story attract radius` | 2 | `storyR` | Coroa externa (só **social**) |
+| `story repel radius` | 0,55 / 2 | `storyRepelR` / `storyHaloR` | **Social:** bolha interna · **Repel:** halo (`storyHaloR`) |
+| `story attract strength` | 0,8 | `storyFAt` | Só **social** |
+| `story repel strength` | 1 | `storyFRep` | **Social** + **repel** |
+| `story field debug` | off | `storyDbg` | social = salmão+ciano · repel = salmão halo |
 
 ### Stage (treadmill) — esteira + leme
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
 | `follow treadmill (pin)` | on | `stage` | LIGADO (padrão): pessoa pinada + mundo em movimento (esteira). DESLIGADO = follow legado que desloca a própria pessoa (para comparar/debug). **Exige `automatic states`** ligado (doc 06) |
-| `treadmill speed` | 0.9 | `stageSpeed` | Velocidade da jornada (e o teto de velocidade do leme no modo legado) |
-| `mouse steering` | on | `steer` | No follow, o mouse é o **leme**: direção do ponteiro no chão define a viagem. Apontar NA pessoa (deadzone ~1,5 m) = parar |
-| `steer strength` | 1 | `steerK` | Quão bruscamente o leme vira o rumo |
+| `treadmill speed` | 0.9 | `stageSpeed` | Velocidade **máxima** da jornada (com o mouse no fim da rampa) — e o teto no modo legado |
+| `mouse steering` | on | `steer` | No follow, o mouse é o **leme**: direção + distância (além da deadzone) modulam rumo e velocidade |
+| `steer strength` | 1 | `steerK` | Multiplicador da taxa de giro |
+| `steer turn ease (s)` | 0,15 | `steerHTau` | Rumo seguir o mouse — menor = mais rápido |
+| `steer speed ease (s)` | 0,2 | `steerSTau` | Velocidade subir/descer — menor = mais rápido |
+| `steer speed ramp (m)` | 10 | `steerRamp` | Distância do mouse (além da deadzone) para atingir a velocidade máxima — mais longe = mais rápido + corrida no pino |
+| `steer pivot` | pessoa (chão) | `steerPivot` | **pessoa** = chão; **centro da tela** = screen-space isotrópico |
+| `steer wheel debug` | off | `steerDbg` | Anéis no chão na pessoa seguida |
+| `steer debug scale` | 1 | `steerDbgS` | Tamanho dos anéis (só visual) |
+| `pin stride/unit` | 48 | `pinStride` | Cadência dos pés **só do seguido** na esteira — independente do `stride/unit` global |
+| `pin playback ×` | 1 | `pinPlayback` | Multiplicador geral (walk + run) |
+| `pin walk playback ×` | 1 | `pinWalkBoost` | Extra só no **walk** do pino |
+| `pin run playback ×` | 1.85 | `pinRunBoost` | Extra só no **run** do pino |
 
 > **Regra de bolso:** `field (follow)` (**Field · coupling**) e formações
 > (**Dormants** §4) existem para cenas em que a **legibilidade** vence o caos.
@@ -219,7 +232,7 @@ A camada que torna os núcleos exploráveis. Design no doc 04 §5.11/5.12.
 |---|---|---|---|
 | `label anti-overlap` | on | `labelAnti` | Resolve rótulos de núcleo que se sobrepõem na tela: o menor (menos membros) sobe com uma mola e some um pouco quando a câmera está longe demais para separá-los |
 | `label distance falloff` | 0.35 | `labelDist` | Quanto os rótulos encolhem com a distância da câmera (hierarquia de leitura), com piso em 0,65× para não sumirem |
-| `cluster outlines` | on | `outlines` | Um **contorno suave** desenhado no chão em volta de cada núcleo FORMADO (precisa de gravidade). Respira devagar; custo ~zero |
+| `cluster outlines` | on | `outlines` | Um **anel circular** (stroke) no chão em volta de cada núcleo FORMADO (precisa de gravidade). Raio engloba o membro mais distante; respira devagar; custo ~zero |
 | `outline alpha` | 0.16 | `outlineAlpha` | Opacidade máxima do contorno (o núcleo modula por cima) |
 | `data view (birdseye)` | on | `dataView` | Acima da altura de câmera abaixo, as pessoas **desvanecem em discos coloridos** no chão — a leitura "circle packing" do acervo inteiro (1 draw call, ~zero custo) |
 | `data view height` | 55 | `dataViewH` | Altura da câmera (m) em que os discos chegam a plena opacidade |

@@ -394,6 +394,8 @@ const server = createServer(async (req, res) => {
       return sendFile(res, join(TOOLS_DIR, "fbx-normalize.mjs"));
     if (url.pathname === "/retarget-units.mjs")
       return sendFile(res, join(TOOLS_DIR, "retarget-units.mjs"));
+    if (url.pathname === "/fold-container-tracks.mjs")
+      return sendFile(res, join(TOOLS_DIR, "fold-container-tracks.mjs"));
 
     if (VENDOR[url.pathname]) return sendFile(res, VENDOR[url.pathname]);
     if (url.pathname.startsWith("/vendor/addons/")) {

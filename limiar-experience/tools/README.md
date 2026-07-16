@@ -129,8 +129,14 @@ node tools/vat-bake.mjs tools/fixtures/samba.fbx tools/fixtures/samba-anim.fbx \
      (clipe já desmarcado) quando nada casa;
    - **misturar base GLB + animação FBX** (ou vice-versa) funciona: tracks
      são adaptadas à convenção do rig da base quando necessário (abaixo).
-     Tracks de containers ("Armature") de outros arquivos são ignoradas —
-     só ossos entram;
+     Tracks de containers ("Armature" / `low_poly_base_mesh`) de outros arquivos
+     **não** vão direto no rig quando o Armature Mixamo tem escala 0,01 (quebraria
+     o GLB) — aí a motion animada é **fundida no osso raiz (Hips/spine)** antes
+     do retarget (`tools/fold-container-tracks.mjs`). Em rigs Blender/custom onde
+     a queda vive no container e o osso raiz fica constante no bind local, as
+     tracks do container são **mantidas no nó homônimo** do personagem (modo
+     `keep-container`; validado com Death From Front Headshot + T-Pose do Dudu);
+     só ossos (e, nesse caso, o container) entram no mixer depois disso;
    - **quando o retarget transforma e quando aplica direto**
      (`tools/retarget-units.mjs`): se os ossos homônimos têm as MESMAS
      translações locais (critério imune a pose — cobre anims sem skin cujos

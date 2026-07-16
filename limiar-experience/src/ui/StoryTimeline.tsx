@@ -11,7 +11,13 @@ import {
 import { useFollow } from "./followStore";
 import { useLegend } from "./legendStore";
 import { cssColor, demoRampColor } from "../data/palette";
-import { computeStations, chapterIndexForT } from "./timelineStations";
+import { displayBeatSummary } from "./beatSummary";
+import { chapterIndexForT, computeStations } from "./timelineStations";
+import {
+  buildPlaybackQueue,
+  isStationBeat,
+  nextPlaybackAfter,
+} from "./timelinePlayback";
 import { spreadTimelineMarkers } from "./stationLabelLayout";
 import {
   DEFAULT_TIMELINE_SCREEN,
@@ -471,6 +477,7 @@ export function StoryTimeline() {
   const dots = useMemo<TimelineDot[]>(() => {
     if (!person) return [];
     const focus = focusStationIdx ?? 0;
+    const oneLiner = person.summary?.one_liner;
 
     if (shownMode !== "element") {
       const stations = computeStations(person);
@@ -529,7 +536,9 @@ export function StoryTimeline() {
           r: svgLayout.stationDotR,
           label: st.label,
           isVirada: st.isVirada,
-          info: (e?.label ? `${e.label} — ` : "") + st.beat.summary,
+          info:
+            (e?.label ? `${e.label} — ` : "") +
+            displayBeatSummary(st.beat.summary, st.beat.type, oneLiner),
           beatIndex: st.beat.beat_index,
           stationIndex: i,
           cut: beatCut(person, st.beat.beat_index, audioIndex),
@@ -550,7 +559,9 @@ export function StoryTimeline() {
           r: svgLayout.momentDotR,
           label: null,
           isVirada: person.arc.virada === b.beat_index,
-          info: (e?.label ? `${e.label} — ` : "") + b.summary,
+          info:
+            (e?.label ? `${e.label} — ` : "") +
+            displayBeatSummary(b.summary, b.type, oneLiner),
           beatIndex: b.beat_index,
           stationIndex: null,
           cut: beatCut(person, b.beat_index, audioIndex),
@@ -631,33 +642,41 @@ export function StoryTimeline() {
     setActiveBeat(null);
   }, []);
 
-  const playBeat = useCallback((beatIndex: number, cut: Cut | null) => {
-    setActiveBeat(beatIndex);
-    if (!cut) {
-      void player.stop();
-      setPlaying(null);
-      return;
-    }
-    setPlaying(cut);
-    void player
-      .play(cut.url, {
-        onEnd: () => {
-          if (useAudioIndex.getState().playing?.url === cut.url) setPlaying(null);
-        },
-      })
-      .then((ok) => {
-        if (!ok && useAudioIndex.getState().playing?.url === cut.url)
-          setPlaying(null);
-      });
+  const endStationSession = useCallback(() => {
+    peekLatched.current = false;
+    sessionEndRef.current = true;
+    zoomTarget.current = 0;
+    setActiveBeat(null);
   }, []);
 
-  const playStation = useCallback(
-    (stationIdx: number, beatIndex: number, cut: Cut | null) => {
+  const applyBeatFocus = useCallback(
+    (beat: PersonBeat) => {
+      if (!person) return;
+      const stations = computeStations(person);
+      const stationIdx = chapterIndexForT(stations, beat.t_norm);
       setFocusStationIdx(stationIdx);
-      setFocusMomentT(null);
+      setFocusMomentT(
+        isStationBeat(person, beat.beat_index) ? null : beat.t_norm,
+      );
       peekLatched.current = false;
       sessionEndRef.current = false;
       zoomTarget.current = 1;
+    },
+    [person],
+  );
+
+  const playAtBeatRef = useRef<
+    (beatIndex: number, cut: Cut | null, opts?: { chain?: boolean }) => void
+  >(() => {});
+
+  const playAtBeat = useCallback(
+    (beatIndex: number, cut: Cut | null, opts?: { chain?: boolean }) => {
+      if (!person) return;
+      const beat = person.beats.find((b) => b.beat_index === beatIndex);
+      if (!beat) return;
+      const chain = opts?.chain ?? false;
+
+      applyBeatFocus(beat);
       setActiveBeat(beatIndex);
       if (!cut) {
         void player.stop();
@@ -667,14 +686,19 @@ export function StoryTimeline() {
       setPlaying(cut);
       void player
         .play(cut.url, {
+          startAt: cut.skipIn,
           onEnd: () => {
-            if (useAudioIndex.getState().playing?.url === cut.url) {
-              setPlaying(null);
-              peekLatched.current = false;
-              sessionEndRef.current = true;
-              zoomTarget.current = 0;
-              setActiveBeat(null);
+            if (useAudioIndex.getState().playing?.url !== cut.url) return;
+            setPlaying(null);
+            if (chain && shownMode !== "element") {
+              const queue = buildPlaybackQueue(person, audioIndex);
+              const next = nextPlaybackAfter(queue, beatIndex);
+              if (next) {
+                playAtBeatRef.current(next.beatIndex, next.cut, { chain: true });
+                return;
+              }
             }
+            endStationSession();
           },
         })
         .then((ok) => {
@@ -682,7 +706,28 @@ export function StoryTimeline() {
             setPlaying(null);
         });
     },
-    [],
+    [person, shownMode, audioIndex, applyBeatFocus, endStationSession],
+  );
+
+  playAtBeatRef.current = playAtBeat;
+
+  const playStation = useCallback(
+    (
+      _stationIdx: number,
+      beatIndex: number,
+      cut: Cut | null,
+      opts?: { chain?: boolean },
+    ) => {
+      playAtBeat(beatIndex, cut, opts);
+    },
+    [playAtBeat],
+  );
+
+  const playBeat = useCallback(
+    (beatIndex: number, cut: Cut | null) => {
+      playAtBeat(beatIndex, cut, { chain: false });
+    },
+    [playAtBeat],
   );
 
   const goStation = useCallback(
@@ -696,7 +741,7 @@ export function StoryTimeline() {
       const cut = beatCut(person, st.beat.beat_index, audioIndex);
       setPeekUi(false);
       peekLatched.current = false;
-      playStation(idx, st.beat.beat_index, cut);
+      playStation(idx, st.beat.beat_index, cut, { chain: true });
     },
     [person, shownMode, audioIndex, playStation, clearAutoPlayTimer],
   );
@@ -715,26 +760,19 @@ export function StoryTimeline() {
       return;
     }
 
-    const stations = computeStations(person);
-    if (stations.length === 0) {
+    const queue = buildPlaybackQueue(person, audioIndex);
+    if (queue.length === 0) {
       autoPlayFor.current = null;
       return;
     }
 
-    let stationIdx = 0;
-    for (let i = 0; i < stations.length; i++) {
-      if (beatCut(person, stations[i].beat.beat_index, audioIndex)) {
-        stationIdx = i;
-        break;
-      }
-    }
-
+    const first = queue[0];
     const ticket = following;
     autoPlayTimer.current = setTimeout(() => {
       autoPlayTimer.current = null;
       autoPlayFor.current = null;
       if (useFollow.getState().following !== ticket) return;
-      goStation(stationIdx);
+      playAtBeat(first.beatIndex, first.cut, { chain: true });
     }, AUTO_PLAY_OVERVIEW_MS);
 
     return () => clearAutoPlayTimer();
@@ -746,7 +784,7 @@ export function StoryTimeline() {
     audioReady,
     audioIndex,
     shownMode,
-    goStation,
+    playAtBeat,
     clearAutoPlayTimer,
   ]);
 
@@ -1051,7 +1089,7 @@ export function StoryTimeline() {
       }
       setPeekUi(false);
       peekLatched.current = false;
-      playStation(d.stationIndex, d.beatIndex, d.cut);
+      playStation(d.stationIndex, d.beatIndex, d.cut, { chain: true });
       return;
     }
 

@@ -212,16 +212,20 @@ async function fetchDescriptor(name: string): Promise<VatBakeDescriptor> {
   return desc;
 }
 
+/** VAT de fábrica (2026-07-16). `?vat=legacy` volta ao EXR do patch cables. */
+export const DEFAULT_VAT = "Movements_Simpler";
+
 const validName = (name: string): boolean => /^[\w-]+$/.test(name);
 
 /**
- * Lê `?vat=<nome>` (e `?vatB=<nome>`) e troca o(s) descriptor(s) ativo(s).
+ * Lê `?vat=<nome>` (default {@link DEFAULT_VAT}; `?vat=legacy` = EXR do patch)
+ * e `?vatB=<nome>` e troca o(s) descriptor(s) ativo(s).
  * Qualquer falha mantém o que estava — o app nunca quebra por asset ruim.
  * Deve rodar ANTES do render (main.tsx): shaders/sim capturam vat() ao montar.
  */
 export async function initVat(): Promise<void> {
-  const name = qpStr("vat", "");
-  if (name) {
+  const name = qpStr<string>("vat", DEFAULT_VAT);
+  if (name !== "legacy") {
     if (!validName(name)) {
       console.warn(`[vat] nome inválido em ?vat=${name} — usando o legado`);
     } else {

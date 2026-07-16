@@ -42,6 +42,8 @@ export interface Cut {
   /** beat da timeline dono do corte (quote usa o beat que a contém). */
   beatIndex: number;
   file: string;
+  /** Segundos dentro do Opus para pular vinheta do canal (sync-content). */
+  skipIn?: number;
 }
 
 export interface AudioIndexState {
@@ -101,15 +103,18 @@ export function beatCut(
   index: Record<string, string[]> | null,
 ): Cut | null {
   const pos = person.beats.findIndex((b) => b.beat_index === beatIndex);
-  const file = person.audio?.beats[pos]?.file;
+  const audioBeat = person.audio?.beats[pos];
+  const file = audioBeat?.file;
   if (!file) return null;
   const opus = toOpus(file);
   if (!available(index, person.id, opus)) return null;
+  const skipIn = audioBeat?.skip_in;
   return {
     url: `${audioBase()}/${person.id}/${opus}`,
     personId: person.id,
     beatIndex,
     file: opus,
+    ...(skipIn != null && skipIn > 0 ? { skipIn } : {}),
   };
 }
 

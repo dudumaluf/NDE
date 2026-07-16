@@ -248,9 +248,13 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
 4. **A voz entra — clique consome o corte (Voz v1, 2026-07-14).** Todo
    ponto da timeline agora TOCA o áudio real da pessoa: estação/momento →
    o corte do beat; ponto de elemento → o corte da própria quote (se
-   existir no bucket; senão o corte do beat que a contém). **2026-07-15:**
+   existir no bucket; senão o corte do beat que a contém).    **2026-07-15:**
    o **clique na pessoa** (entrar no follow) já dispara a 1ª estação —
-   fecha a escada §4.1 item 2. A gramática do consumo:
+   fecha a escada §4.1 item 2. **2026-07-15 (noite):** com `chain` ativo,
+   cada corte **encadeia** no próximo ponto da régua em ordem `t_norm`
+   (estações e momentos intercalados; pula só beats sem áudio no bucket) —
+   a história toca em sequência até acabar ou o visitante interromper
+   (clique no ponto ativo, ESC, sair do follow). A gramática do consumo:
 
    - **Um som por vez** (o mesmo princípio da Legenda desvanecer no
      follow): player singleton com fades de ~120 ms — trocar de ponto
@@ -263,6 +267,13 @@ A escada do §4.1 saiu do papel, ainda sem o áudio:
    - **Estados vazios honestos**: ponto sem corte no bucket não pulsa e o
      hover diz "sem áudio ainda" — decidido por um `_index.json` que o
      app baixa uma vez (nada de 404 no console, nada de play que falha).
+   - **Vinheta do canal (2026-07-15):** o 1º beat costuma começar em 0 s
+     com a apresentação fixa ("Sejam muito bem-vindos…"). No `sync-content`,
+     a transcrição word-level marca o fim exato da frase → `skip_in` no JSON
+     da pessoa; o player faz seek no Opus **sem re-cortar** o bucket (mediana
+     ~4,6 s; só beats que começam perto de 0). O **hover/resumo** do beat
+     `contexto` passa por `displayBeatSummary()` — remove "Apresentação do
+     canal…" na UI (sem re-extração); se sobrar pouco texto, usa o `one_liner`.
    - **Custo/hospedagem**: os cortes saíram do deploy (4,4 GB de mp3
      ficariam fora do Vercel) e vivem no Supabase Storage (projeto NDE,
      bucket público `audio-cortes`), re-encodados em **Opus mono
@@ -530,11 +541,11 @@ irradia uma abertura.
   ligado — §5.10).
 - **Story field** (`story field`, off/**social**/repel, para o **modo livre**):
   as testemunhas irradiam um campo sobre os dormentes —
-  **social** junta numa coroa ao redor de quem tem relato mas mantém
-  **bolha interna** repulsiva (não perfuram), **repel** abre um halo de
-  legibilidade. Vive no loop de separação — WebGPU; força fraca de
-  propósito. Controles do story field só aparecem no leva quando o modo
-  ≠ off (`render` condicional, como Appearance).
+  **social** = coroa de atração + **repel radius** interno (não perfuram),
+  **repel** = halo de legibilidade. Forças separadas (`story attract
+  strength` / `story repel strength`); debug `story field debug` desenha
+  anéis salmão/ciano em cada testemunha. Vive no loop de separação —
+  WebGPU; força capped a 3. Controles só quando modo ≠ off.
 
 **Formações dos dormentes** (grupo "Formations"): o que os sem-história
 fazem enquanto os ativos migram — dropdown dinâmico, para moldar a cena
@@ -585,15 +596,18 @@ vagam nessa área e loopam; a contenção radial desliga (o toro é a regra).
 
 **O mouse é o leme da jornada.** Ouvindo uma história, o trajeto está
 sempre *indo a algum lugar*: a direção do ponteiro no chão (relativa à
-pessoa) decide para onde a viagem segue. Apontar longe = viajar para lá;
-apontar **na própria pessoa** (deadzone) = parar. O leme não desloca a
-pessoa — ele gira o rumo da **esteira**.
+pessoa) decide para onde a viagem segue; a **distância** do ponteiro (além
+da deadzone ~1,5 m) decide a **velocidade** — perto = devagar, longe =
+rápido (animação walk→run no pino). Apontar **na própria pessoa**
+(deadzone) = parar. O leme não desloca a pessoa — ele gira o rumo da
+**esteira** e modula `stageSpeed`.
 
 **A esteira (o follow padrão):** ao seguir alguém —
 
-1. a pessoa seguida é **pinada** (velocidade→0) mas segue **andando** no
-   lugar (a state machine força walking; a cadência do passo casa com a
-   velocidade da esteira — os pés não patinam no chão que anda);
+1. a pessoa seguida é **pinada** (velocidade→0) mas segue **andando ou
+   correndo** no lugar conforme a velocidade da esteira (state machine:
+   walk abaixo de ~55% do teto; run acima; idle na deadzone); a cadência
+   do passo casa com `stageSpeed` — os pés não patinam no chão que anda);
 2. o **mundo inteiro se move**: TODOS os outros agentes são deslocados na
    contra-direção do leme (a física própria deles continua por cima do
    deslocamento) e **wrappam** na área canônica — a multidão que sai por
@@ -679,10 +693,11 @@ elemento** (núcleo ∩ elemento). É a Lente (§5.3) em miniatura, dentro de um
 núcleo — o começo do drill-down "temas dentro de temas". Re-tocar volta ao
 núcleo inteiro; ESC / clicar no vazio sai do foco (a câmera fica onde está).
 
-**Contornos dos núcleos (opção visual).** Um contorno suave desenhado no
-chão ao redor de cada núcleo formado — blob spline que "respira" devagar,
-discreto (cor do núcleo dessaturada). Torna os grupos legíveis como REGIÕES,
-não só nuvens de pontos. Toggle no grupo "Focus & reading".
+**Contornos dos núcleos (opção visual).** Um **anel circular** (só stroke) no
+chão ao redor de cada núcleo formado — raio = membro mais distante do
+centroide vivo + folga, suavizado e com leve "respiração". Discreto (cor do
+núcleo dessaturada). Torna os grupos legíveis como REGIÕES, não só nuvens de
+pontos. Toggle no grupo "Focus & reading".
 
 ### 5.12 A vista de dados (LOD) — a semente da constelação (2026-07-14)
 

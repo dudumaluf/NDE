@@ -119,7 +119,7 @@ mas não tem o que organizar.
 | `wires fade: far` | 14 | `wiresFar` | Distância acima da qual o fio some (evita a teia ilegível de longe) |
 | `wires weight (gamma)` | 1.6 | `wiresGamma` | Curva que privilegia as conexões fortes (γ alto = só as mais densas acesas) |
 | `wires only formed clusters` | off | `wiresFormed` | Só acende fios DENTRO de núcleos já formados (precisa de gravidade). Menos ruído, estrutura interna legível |
-| `words (clusters)` | on | `labels` | Os **rótulos 3D** com o nome/tema de cada núcleo formado |
+| `words (clusters)` | on | `labels` | Rótulos 3D do nome do núcleo — **exige `gravity (UMAP)` ON** + sem lente + coesão < `formation radius` |
 | `formation radius (cohesion)` | 2.4 | `formRaio` | Quão apertado um grupo precisa estar para contar como "núcleo formado" (dispara rótulo e outline). O fio começa a acender a 2× este raio — a chegada se anuncia antes da palavra confirmar |
 
 > **Receita "ver os dados se organizarem":** `gravity (UMAP)` ON e observe os
@@ -149,18 +149,30 @@ todos.
 | `yield to travelers` | 2 | `yield` | Separação **assimétrica**: quem tem alvo (migrando para um núcleo) empurra quem não tem até esse tanto mais forte. **WebGPU only** |
 | `selected inertia` | 0.15 | `selInertia` | Quanta separação/contenção a pessoa SEGUIDA recebe de volta: 0 = imune (passa como um trem), 1 = igual a todos. **É o fix do tranco (stutter) no meio da multidão** — deixe baixo |
 | `mouse steering` | on | `steer` | No follow, o mouse é o **leme**: a direção do ponteiro (no chão, relativa à pessoa) define para onde a viagem vai. Apontar NA pessoa (deadzone ~1,5 m) = parar |
-| `steer strength` | 1 | `steerK` | Quão bruscamente o leme vira o rumo |
-| `story field` | off | `storyField` | **social** = dormentes orbitam testemunhas (atração externa + bolha interna) · **repel** = halo de legibilidade. **WebGPU only** |
-| `story attract radius` | 2 | `storyR` | Alcance da atração (modo social) |
-| `story bubble radius` | 0.55 | `storyBubble` | Repulsão interna — evita perfurar testemunhas (só social) |
-| `story field strength` | 0.6 | `storyF` | Força do campo |
+| `steer strength` | 1 | `steerK` | Multiplicador da taxa de giro (maior = vira mais rápido) |
+| `steer turn ease (s)` | 0,15 | `steerHTau` | Constante de tempo do **rumo** seguir o mouse — **menor = vira mais rápido** (antes era ~0,5 s implícito) |
+| `steer speed ease (s)` | 0,2 | `steerSTau` | Constante de tempo da **velocidade** subir/descer (antes fixo em 0,45 s) |
+| `story field` | off | `storyField` | **social** = coroa + repel interno · **repel** = halo. **WebGPU only** |
+| `story attract radius` | 2 | `storyR` | Coroa externa (só **social**) |
+| `story repel radius` | 0,55 / 2 | `storyRepelR` / `storyHaloR` | **Social:** bolha interna · **Repel:** halo (`storyHaloR`) |
+| `story attract strength` | 0,8 | `storyFAt` | Só **social** |
+| `story repel strength` | 1 | `storyFRep` | **Social** + **repel** |
+| `story field debug` | off | `storyDbg` | Anéis no chão em cada testemunha: salmão = repel, ciano = attract |
 
 ### Stage (treadmill) — o comportamento PADRÃO do follow
 
 | Controle | Default | qp | O que faz |
 |---|---|---|---|
 | `follow treadmill (pin)` | on | `stage` | LIGADO (padrão): pessoa pinada + mundo em movimento (esteira). DESLIGADO = follow legado que desloca a própria pessoa (para comparar/debug). **Exige `automatic states`** ligado (doc 06) |
-| `treadmill speed` | 0.9 | `stageSpeed` | Velocidade da jornada (e o teto de velocidade do leme no modo legado) |
+| `treadmill speed` | 0.9 | `stageSpeed` | Velocidade **máxima** da jornada (com o mouse no fim da rampa) — e o teto no modo legado |
+| `steer speed ramp (m)` | 10 | `steerRamp` | Metros além da deadzone (~1,5 m) até velocidade máxima |
+| `steer pivot` | pessoa (chão) | `steerPivot` | **pessoa** = distância no chão (pessoa→mouse); **centro da tela** = direção e velocidade isotrópicas no screen-space (raycast no chão continua visual) |
+| `steer wheel debug` | off | `steerDbg` | Anéis no chão na pessoa seguida: âmbar = parar, ciano = rampa, círculo interno = direção/velocidade |
+| `steer debug scale` | 1 | `steerDbgS` | Multiplicador visual do tamanho dos anéis (só debug — não altera a física) |
+| `pin stride/unit` | 48 | `pinStride` | Cadência dos pés só do seguido na esteira |
+| `pin playback ×` | 1 | `pinPlayback` | Multiplicador geral walk+run do pino |
+| `pin walk playback ×` | 1 | `pinWalkBoost` | Extra no walk do pino |
+| `pin run playback ×` | 1.85 | `pinRunBoost` | Extra no run do pino |
 
 ### Formations — o que a massa sem história faz
 
@@ -205,7 +217,7 @@ A camada que torna os núcleos exploráveis. Design no doc 04 §5.11/5.12.
 |---|---|---|---|
 | `label anti-overlap` | on | `labelAnti` | Resolve rótulos de núcleo que se sobrepõem na tela: o menor (menos membros) sobe com uma mola e some um pouco quando a câmera está longe demais para separá-los |
 | `label distance falloff` | 0.35 | `labelDist` | Quanto os rótulos encolhem com a distância da câmera (hierarquia de leitura), com piso em 0,65× para não sumirem |
-| `cluster outlines` | on | `outlines` | Um **contorno suave** desenhado no chão em volta de cada núcleo FORMADO (precisa de gravidade). Respira devagar; custo ~zero |
+| `cluster outlines` | on | `outlines` | Um **anel circular** (stroke) no chão em volta de cada núcleo FORMADO (precisa de gravidade). Raio engloba o membro mais distante; respira devagar; custo ~zero |
 | `outline alpha` | 0.16 | `outlineAlpha` | Opacidade máxima do contorno (o núcleo modula por cima) |
 | `data view (birdseye)` | on | `dataView` | Acima da altura de câmera abaixo, as pessoas **desvanecem em discos coloridos** no chão — a leitura "circle packing" do acervo inteiro (1 draw call, ~zero custo) |
 | `data view height` | 55 | `dataViewH` | Altura da câmera (m) em que os discos chegam a plena opacidade |
@@ -324,7 +336,7 @@ screenshots.
 
 # follow / mundo-toro
 ?field=1 ?fieldR=2.5 ?fieldF=1.2 ?yield=2 ?selInertia=0.15
-?steer=1 ?steerK=1 ?storyField=social ?storyR=2 ?storyBubble=0.55 ?storyF=0.6
+?storyField=social&storyR=5&storyRepelR=0.8&storyFAt=2&storyFRep=2&storyDbg=1
 ?formation=corridor ?formSpacing=1.2 ?stage=1 ?stageSpeed=0.9
 
 # hierarquia visual (só com acervo)

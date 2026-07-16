@@ -174,9 +174,9 @@ Leia antes de qualquer tarefa, nesta ordem:
   `tools/README.md`). FBX é normalizado em `tools/fbx-normalize.mjs`
   (cm→m, takes vazios, nomes; FBXLoader roda em Node com shim de
   window.URL + handler de textura inerte); ASCII/6.x são recusados com
-  mensagem clara. Em runtime, `?vat=<nome>`
-  troca o descriptor ativo (`src/vat/runtime.ts`, basis `identity`, pés no
-  y=0); sem o parâmetro, vale o asset legado acima. Assets custom são
+  Em runtime, `?vat=<nome>` troca o descriptor ativo (`src/vat/runtime.ts`,
+  basis `identity`, pés no y=0); **default de fábrica: `Movements_Simpler`**
+  (`DEFAULT_VAT`); `?vat=legacy` volta ao EXR do patch. Assets custom são
   `indexed` por padrão (index buffer + textura por vértice único — download
   menor); limite duro: 8192 colunas de textura. E2E do Studio:
   `node tools/studio/e2e.mjs`.

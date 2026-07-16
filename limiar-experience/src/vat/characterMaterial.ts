@@ -1,6 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as THREE from "three/webgpu";
-import { normalize, transformNormalToView, uniform, varying, vec3 } from "three/tsl";
+import {
+  float,
+  normalize,
+  transformNormalToView,
+  uniform,
+  varying,
+  vec3,
+} from "three/tsl";
 import { createVatSampler, type VatSampler } from "./vatNodes";
 
 type N = any;
@@ -9,6 +16,8 @@ export interface CharacterMaterialBundle {
   material: THREE.MeshStandardNodeMaterial;
   sampler: VatSampler;
   setScale(v: number): void;
+  /** Pivot em unidades do bake (XZ; alinha pés ao centro antes da escala). */
+  setPivot(x: number, z: number): void;
 }
 
 /** Material do personagem único (demo de morph): sampler VAT sem fase. */
@@ -18,13 +27,19 @@ export function buildCharacterMaterial(
 ): CharacterMaterialBundle {
   const sampler = createVatSampler(posTex, nrmTex);
   const uScale: N = uniform(2.5);
+  const uPivotX: N = uniform(0);
+  const uPivotZ: N = uniform(0);
 
   const material = new THREE.MeshStandardNodeMaterial({
     roughness: 0.55,
     metalness: 0.05,
     side: THREE.DoubleSide,
   });
-  material.positionNode = sampler.localPosition(sampler.vertexColumn).mul(uScale);
+  const pivot: N = vec3(uPivotX, float(0), uPivotZ);
+  material.positionNode = sampler
+    .localPosition(sampler.vertexColumn)
+    .sub(pivot)
+    .mul(uScale);
 
   const vNormal: N = varying(sampler.texNormal());
   material.normalNode = (transformNormalToView as N)(normalize(vNormal));
@@ -35,6 +50,10 @@ export function buildCharacterMaterial(
     sampler,
     setScale: (v) => {
       uScale.value = v;
+    },
+    setPivot: (x, z) => {
+      uPivotX.value = x;
+      uPivotZ.value = z;
     },
   };
 }

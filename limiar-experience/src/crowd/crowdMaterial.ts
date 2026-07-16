@@ -13,6 +13,7 @@ import {
   uniform,
   varying,
   vec3,
+  float,
 } from "three/tsl";
 import { createVatSampler, type VatSampler } from "../vat/vatNodes";
 import { vat } from "../vat/runtime";
@@ -35,6 +36,8 @@ export interface CrowdMaterialBundle {
   setPerAgentStates(on: boolean): void;
   /** Avança o relógio de frame dos estados por agente (dt em segundos). */
   tickAgentClock(dt: number): void;
+  /** Pivot de rotação em unidades do bake (XZ; Y ignorado). */
+  setPivot(x: number, z: number): void;
 }
 
 /**
@@ -87,6 +90,8 @@ export function buildCrowdMaterial(
   const uPalette: N = uniform(1);
   const uDebug: N = uniform(0);
   const uFaceFlip: N = uniform(1);
+  const uPivotX: N = uniform(0);
+  const uPivotZ: N = uniform(0);
 
   const dir: N = normalize(iHeading.add(vec3(1e-6, 0, 0).xy));
   const c: N = dir.y.mul(uFaceFlip);
@@ -108,7 +113,9 @@ export function buildCrowdMaterial(
     .localPosition(sampler.vertexColumn)
     .mul(uScale)
     .mul(aScale);
-  material.positionNode = rotY(local).add(iPos);
+  const pivot: N = vec3(uPivotX, float(0), uPivotZ).mul(uScale).mul(aScale);
+  // R(local−pivot)+iPos — NÃO somar R(pivot) de volta (cancelaria o offset).
+  material.positionNode = rotY(local.sub(pivot)).add(iPos);
 
   const vNormal: N = varying(rotY(sampler.texNormal()));
   material.normalNode = (transformNormalToView as N)(normalize(vNormal));
@@ -183,6 +190,10 @@ export function buildCrowdMaterial(
       // patch; a fase por instância dessincroniza por cima.
       clock = (clock + dt * vat().fps) % vat().framesPerClip;
       uAgentClock.value = clock;
+    },
+    setPivot: (x, z) => {
+      uPivotX.value = x;
+      uPivotZ.value = z;
     },
   };
 }

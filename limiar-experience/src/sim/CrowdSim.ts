@@ -258,11 +258,14 @@ export class CrowdSim {
     /** Campo dos com-história sobre os DORMENTES (modo livre): −1 repele
      *  (halo externo), 0 off, +1 social (atrai fora + repulsão na bolha). */
     storyMode: uniform(0),
-    /** Alcance externo do story field (atração ou repulsão pura). */
+    /** Alcance externo da coroa (modo social). */
     storyRadius: uniform(2),
-    /** Bolha interna (modo social): repulsão abaixo deste raio — evita perfurar. */
+    /** Bolha interna de repulsão (modo social). */
     storyRepelRadius: uniform(0.55),
-    storyStrength: uniform(0.6),
+    /** Halo de repulsão (modo repel puro). */
+    storyRepelHaloRadius: uniform(2),
+    storyAttractStrength: uniform(0.8),
+    storyRepelStrength: uniform(1),
     /** Steering DIRETO do seguido (modo legado, treadmill OFF): força de
      *  seek na direção do leme + teto de velocidade próprio (stageSpeed).
      *  No modo padrão (pino+esteira) o leme age via stageHeading. */
@@ -281,6 +284,18 @@ export class CrowdSim {
     stageHeading: uniform(new THREE.Vector2(0, 1)),
     /** Velocidade ATUAL da esteira (CPU suaviza; 0 no deadzone do leme). */
     stageSpeed: uniform(0.9),
+    /** Teto configurado da esteira (leva) — limiares walk/run do pino. */
+    stageSpeedMax: uniform(0.9),
+    /** Escala 0..1 do leme analógico (distância mouse → velocidade). */
+    steerSpeedMul: uniform(1),
+    /** Stride do pino (frames/unidade) — independente do stride global. */
+    stagePhasePerUnit: uniform(48),
+    /** Playback × da animação do seguido na esteira (só o pino). */
+    stagePlayback: uniform(1),
+    /** Playback × extra no pino quando estado = walk. */
+    stageWalkPlayback: uniform(1),
+    /** Playback × extra no pino quando estado = run. */
+    stageRunPlayback: uniform(1.85),
   };
 
   private resetPass: N;
@@ -577,7 +592,8 @@ export class CrowdSim {
           .mul(float(1).sub(meta.x))
           .toVar();
         const sep: N = vec2(0, 0).toVar();
-        const story: N = vec2(0, 0).toVar();
+        const storyPull: N = vec2(0, 0).toVar();
+        const storyPush: N = vec2(0, 0).toVar();
         Loop({ start: int(0), end: int(u.count), type: "int" }, ({ i: j }: any) => {
           If(j.notEqual(selfI), () => {
             const q: N = this.positions.element(j);
@@ -601,9 +617,18 @@ export class CrowdSim {
               );
               sep.addAssign(push.mul(boost));
             });
-            If(storyGate.greaterThan(0.5).and(dist.lessThan(u.storyRadius)), () => {
+            const storyOuter: N = select(
+              u.storyMode.greaterThan(float(0.5)),
+              u.storyRadius,
+              select(
+                u.storyMode.lessThan(float(-0.5)),
+                u.storyRepelHaloRadius,
+                float(0),
+              ),
+            );
+            If(storyGate.greaterThan(0.5).and(dist.lessThan(storyOuter)), () => {
               const wit: N = this.agentMeta.element(j).x;
-              // Social (+1): bolha interna repulsiva + atração na coroa externa.
+              // Social (+1): repulsão interna + atração na coroa externa.
               If(u.storyMode.greaterThan(0.5), () => {
                 If(dist.lessThan(u.storyRepelRadius), () => {
                   const repelFall: N = float(1).sub(
@@ -613,7 +638,7 @@ export class CrowdSim {
                       dist,
                     ),
                   );
-                  story.addAssign(d.div(dist).mul(repelFall).mul(wit));
+                  storyPush.addAssign(d.div(dist).mul(repelFall).mul(wit));
                 });
                 If(dist.greaterThanEqual(u.storyRepelRadius), () => {
                   const attractFall: N = smoothstep(
@@ -621,19 +646,19 @@ export class CrowdSim {
                     u.storyRepelRadius,
                     dist,
                   );
-                  story.addAssign(
+                  storyPull.addAssign(
                     d.div(dist).negate().mul(attractFall).mul(wit),
                   );
                 });
               });
-              // Repel puro (−1): halo de legibilidade (comportamento legado).
+              // Repel puro (−1): halo de legibilidade.
               If(u.storyMode.lessThan(float(-0.5)), () => {
                 const fall: N = smoothstep(
-                  u.storyRadius,
-                  u.storyRadius.mul(0.25),
+                  u.storyRepelHaloRadius,
+                  u.storyRepelHaloRadius.mul(0.25),
                   dist,
                 );
-                story.addAssign(d.div(dist).mul(fall).mul(wit));
+                storyPush.addAssign(d.div(dist).mul(fall).mul(wit));
               });
             });
           });
@@ -645,20 +670,20 @@ export class CrowdSim {
         acc.addAssign(
           sepCapped.mul(u.sepWeight).mul(mix(float(1), u.selInertia, isSel)),
         );
-        // Story field: força fraca (capped). Social já vem com sinal correto;
-        // repel puro ainda usa storyMode.negate() no vetor "para longe".
-        const storyLen: N = length(story).add(1e-5);
-        const storySign: N = select(
-          u.storyMode.lessThan(float(-0.5)),
-          u.storyMode.negate(),
-          float(1),
+        // Story field: forças separadas (attract / repel). Social usa as duas.
+        const pullLen: N = length(storyPull).add(1e-5);
+        const pushLen: N = length(storyPush).add(1e-5);
+        acc.addAssign(
+          storyPull
+            .div(pullLen)
+            .mul(min(pullLen, float(3)))
+            .mul(u.storyAttractStrength),
         );
         acc.addAssign(
-          story
-            .div(storyLen)
-            .mul(min(storyLen, float(1.5)))
-            .mul(u.storyStrength)
-            .mul(storySign),
+          storyPush
+            .div(pushLen)
+            .mul(min(pushLen, float(3)))
+            .mul(u.storyRepelStrength),
         );
       }
 
@@ -757,7 +782,15 @@ export class CrowdSim {
         .mul(mix(u.dormantSpeedMul, u.witSpeedMul, meta.x))
         .mul(speedJit)
         .mul(wave)
-        .mul(mix(float(1), u.stageSpeed.div(u.maxSpeed.max(1e-4)), steerGate))
+        .mul(
+          mix(
+            float(1),
+            u.stageSpeed
+              .div(u.maxSpeed.max(1e-4))
+              .mul(u.steerSpeedMul),
+            steerGate,
+          ),
+        )
         .mul(float(1).sub(isPinned.mul(0.999)));
       vel2.assign(vel2.mul(min(float(1), speedCap.div(speed))));
       vel2.assign(vel2.mul(float(1).sub(hoverFreeze)));
@@ -911,16 +944,15 @@ export class CrowdSim {
         desired.assign(settleState);
       });
 
-      // Pino da esteira: a pessoa seguida tem velocidade ~0 (teto no update
-      // pass) mas a ILUSÃO exige que ela ANDE — deixar a máquina ver v≈0 e
-      // ir a idle quebraria a esteira. Força walking ENQUANTO a esteira
-      // anda; no deadzone do leme (stageSpeed→0, "apontar nela para parar")
-      // a física fala de novo: v≈0 → idle, honesto.
+      // Pino da esteira: velocidade real ~0 mas a ilusão exige locomoção.
+      // stageSpeed mapeia walk→run (frações do teto stageSpeedMax); no
+      // deadzone (stageSpeed→0) a máquina volta a idle honesto.
       const isPinned: N = u.stageOn.mul(
         select(fi.equal(u.stageAgent), float(1), float(0)),
       );
       If(isPinned.greaterThan(0.5).and(u.stageSpeed.greaterThan(0.05)), () => {
-        desired.assign(1);
+        const runPin: N = u.stageSpeed.greaterThan(u.stageSpeedMax.mul(0.55));
+        desired.assign(select(runPin, float(2), float(1)));
       });
 
       // --- transição (respeitando o dwell anti-flicker) ---
@@ -962,15 +994,21 @@ export class CrowdSim {
       )
         .sub(1)
         .mul(u.perAgentOn);
-      // Pino do palco: velocidade real ~0, mas o passo anda a stageSpeed —
-      // a cadência dos pés casa com o chão que scrolla (nada patina).
+      // Pino do palco: velocidade real ~0; fase avança com stageSpeed × stride
+      // do seguido (uniforms próprios — não usa o passo global da multidão).
+      const pinWalkMul: N = select(stateId.equal(1), u.stageWalkPlayback, float(1));
+      const pinRunMul: N = select(stateId.equal(2), u.stageRunPlayback, float(1));
+      const pinPhase: N = u.stagePhasePerUnit
+        .mul(u.stagePlayback)
+        .mul(pinWalkMul)
+        .mul(pinRunMul);
       const ph: N = this.phases.element(instanceIndex);
       this.phases
         .element(instanceIndex)
         .assign(
           ph
             .add(speed.mul(u.dt).mul(u.phasePerUnit).mul(runBoost))
-            .add(u.stageSpeed.mul(u.dt).mul(u.phasePerUnit).mul(isPinned))
+            .add(u.stageSpeed.mul(u.dt).mul(pinPhase).mul(isPinned))
             .add(u.dt.mul(float(vat().fps)).mul(stateMult))
             .mod(vat().framesPerClip),
         );

@@ -47,6 +47,16 @@ import {
   setWorldWrap,
 } from "../scene/heightfield";
 import { DebugAreas } from "../render/DebugAreas";
+import { SteerWheelDebug } from "../render/SteerWheelDebug";
+import { StoryFieldDebug } from "../render/StoryFieldDebug";
+import {
+  STEER_DEADZONE,
+  steerSpeedFactor,
+} from "./steerConfig";
+import {
+  computeSteerSample,
+  type SteerPivotMode,
+} from "./steerSample";
 import { useFollow } from "../ui/followStore";
 import { useHover } from "../ui/hoverStore";
 import { positionMirror } from "../sim/positionMirror";
@@ -206,6 +216,22 @@ export function CrowdMesh() {
     faceFlip: {
       value: prefBool("faceflip", "Field · physics.faceFlip", false),
       label: "flip facing",
+    },
+    pivotX: {
+      value: prefNum("pivotX", "Field · physics.pivotX", 0),
+      min: -1,
+      max: 1,
+      step: 0.01,
+      label: "pivot X",
+      hint: "rotation anchor offset (baked VAT units, × person scale in world) — align feet to agent/grid center",
+    },
+    pivotZ: {
+      value: prefNum("pivotZ", "Field · physics.pivotZ", 0),
+      min: -1,
+      max: 1,
+      step: 0.01,
+      label: "pivot Z",
+      hint: "positive Z usually pulls the body forward over the grid crosshair if the bake center sits behind the feet",
     },
     debug: {
       value: prefStr<"off" | "velocidade" | "direção" | "alvo" | "estado">(
@@ -653,6 +679,7 @@ export function CrowdMesh() {
       palavras: {
         value: prefBool("labels", "Witnesses.palavras", true),
         label: "words (clusters)",
+        hint: "rótulos 3D dos núcleos — só aparecem quando gravity (UMAP) está ON, nenhuma lente ativa, e o grupo já coesionou dentro de formation radius (~0,6 s/amostra)",
       },
       formRaio: {
         value: prefNum("formRaio", "Witnesses.formRaio", 2.4),
@@ -706,33 +733,60 @@ export function CrowdMesh() {
       ]),
       options: {
         off: "off",
-        social: "social (attract + bubble)",
+        social: "social",
         repel: "repel",
       },
       label: "story field",
-      hint: "social = dormentes orbitam testemunhas com bolha interna — WebGPU only",
+      hint: "social = coroa de atração + repel radius interno — WebGPU only",
     },
     storyRadius: {
       value: prefNum("storyR", "Field · coupling.storyRadius", 2),
       min: 0.5,
-      max: 6,
+      max: 15,
       label: "story attract radius",
-      hint: "outer pull toward witnesses (social mode)",
-      render: (get) => get("Field · coupling.storyField") !== "off",
-    },
-    storyRepelRadius: {
-      value: prefNum("storyBubble", "Field · coupling.storyRepelRadius", 0.55),
-      min: 0.2,
-      max: 2,
-      label: "story bubble radius",
-      hint: "inner repulsion — keeps dormants from tunneling through witnesses",
+      hint: "outer corona pull (social only)",
       render: (get) => get("Field · coupling.storyField") === "social",
     },
-    storyStrength: {
-      value: prefNum("storyF", "Field · coupling.storyStrength", 0.6),
+    storyRepelRadius: {
+      value: qpHas("storyBubble")
+        ? qpNum("storyBubble", 0.55)
+        : prefNum("storyRepelR", "Field · coupling.storyRepelRadius", 0.55),
+      min: 0.2,
+      max: 8,
+      label: "story repel radius",
+      hint: "inner bubble around each witness (social only)",
+      render: (get) => get("Field · coupling.storyField") === "social",
+    },
+    storyRepelHaloRadius: {
+      value: prefNum("storyHaloR", "Field · coupling.storyRepelHaloRadius", 2),
+      min: 0.5,
+      max: 15,
+      label: "story repel radius",
+      hint: "repulsion halo around each witness (repel mode)",
+      render: (get) => get("Field · coupling.storyField") === "repel",
+    },
+    storyAttractStrength: {
+      value: prefNum("storyFAt", "Field · coupling.storyAttractStrength", 0.8),
       min: 0,
-      max: 2,
-      label: "story field strength",
+      max: 4,
+      label: "story attract strength",
+      hint: "pull dormants into the corona (social only)",
+      render: (get) =>
+        get("Field · coupling.storyField") !== "off" &&
+        get("Field · coupling.storyField") !== "repel",
+    },
+    storyRepelStrength: {
+      value: prefNum("storyFRep", "Field · coupling.storyRepelStrength", 1),
+      min: 0,
+      max: 4,
+      label: "story repel strength",
+      hint: "push dormants away — inner bubble (social) or outer halo (repel)",
+      render: (get) => get("Field · coupling.storyField") !== "off",
+    },
+    storyDebug: {
+      value: prefBool("storyDbg", "Field · coupling.storyDebug", false),
+      label: "story field debug",
+      hint: "wire rings on each witness: social = salmon inner + cyan outer; repel = salmon halo only (WebGPU)",
       render: (get) => get("Field · coupling.storyField") !== "off",
     },
   });
@@ -749,21 +803,96 @@ export function CrowdMesh() {
     stageSpeed: {
       value: prefNum("stageSpeed", "Stage (treadmill).stageSpeed", 0.9),
       min: 0,
-      max: 2,
+      max: 5,
       label: "treadmill speed",
-      hint: "journey speed — also the steer speed cap in legacy (no-pin) mode",
+      hint: "max journey speed at full mouse distance (steer speed ramp) — also legacy steer cap",
     },
     steerOn: {
       value: prefBool("steer", "Stage (treadmill).steerOn", true),
       label: "mouse steering",
-      hint: "during follow the mouse is the rudder: the pointer's direction (ground ray, relative to the person) sets where the journey goes. Point AT the person (deadzone ~1.5 m) to stop",
+      hint: "during follow the mouse is the rudder: direction sets heading; distance sets speed (0 in deadzone ~1.5 m, full at steer speed ramp)",
     },
     steerStrength: {
       value: prefNum("steerK", "Stage (treadmill).steerStrength", 1),
       min: 0,
-      max: 2,
+      max: 6,
       label: "steer strength",
-      hint: "how sharply the rudder turns the journey heading (treadmill mode) or pushes the person (legacy mode)",
+      hint: "turn-rate multiplier on the heading ease — higher = snappier rudder (legacy mode: push force on the person)",
+    },
+    steerHeadingTau: {
+      value: prefNum("steerHTau", "Stage (treadmill).steerHeadingTau", 0.15),
+      min: 0.03,
+      max: 1,
+      label: "steer turn ease (s)",
+      hint: "time constant for the journey heading to catch the mouse — lower = faster turn (old implicit default was ~0.5 s at steer strength 1)",
+    },
+    steerSpeedTau: {
+      value: prefNum("steerSTau", "Stage (treadmill).steerSpeedTau", 0.2),
+      min: 0.05,
+      max: 1.2,
+      label: "steer speed ease (s)",
+      hint: "time constant for treadmill speed to ramp up/down when you push or release the mouse (was hardcoded 0.45 s)",
+    },
+    steerSpeedRamp: {
+      value: prefNum("steerRamp", "Stage (treadmill).steerSpeedRamp", 10),
+      min: 2,
+      max: 24,
+      label: "steer speed ramp (m)",
+      hint: "beyond the deadzone, mouse distance to reach full treadmill speed — farther = faster journey + run animation",
+    },
+    steerPivot: {
+      value: prefStr<SteerPivotMode>(
+        "steerPivot",
+        "Stage (treadmill).steerPivot",
+        "person",
+        ["person", "screen"],
+      ),
+      options: {
+        person: "pessoa (chão)",
+        screen: "centro da tela",
+      },
+      label: "steer pivot",
+      hint: "pessoa = distância no chão (pessoa→mouse); centro da tela = direção e velocidade isotrópicas no screen-space (raycast no chão continua visual)",
+    },
+    pinStride: {
+      value: prefNum("pinStride", "Stage (treadmill).pinStride", 48),
+      min: 5,
+      max: 120,
+      label: "pin stride/unit",
+      hint: "VAT frames advanced per meter of journey — ONLY the followed person on the treadmill (decoupled from Field · physics stride)",
+    },
+    pinPlayback: {
+      value: prefNum("pinPlayback", "Stage (treadmill).pinPlayback", 1),
+      min: 0.4,
+      max: 2.5,
+      label: "pin playback ×",
+      hint: "master multiplier for the followed person's foot cadence (walk and run)",
+    },
+    pinWalkPlayback: {
+      value: prefNum("pinWalkBoost", "Stage (treadmill).pinWalkPlayback", 1),
+      min: 0.5,
+      max: 3,
+      label: "pin walk playback ×",
+      hint: "extra multiplier when the pin is in walk state — tune steering cadence without touching run",
+    },
+    pinRunPlayback: {
+      value: prefNum("pinRunBoost", "Stage (treadmill).pinRunPlayback", 1.85),
+      min: 1,
+      max: 3,
+      label: "pin run playback ×",
+      hint: "extra multiplier when the pin is in run state — fixes slow-motion run clip at high steer (1.85 ≈ walk/run cycle ratio on Movements VAT)",
+    },
+    steerDebug: {
+      value: prefBool("steerDbg", "Stage (treadmill).steerDebug", false),
+      label: "steer wheel debug",
+      hint: "ground rings at the followed person: amber = stop deadzone, cyan = full-speed ramp, inner circle = direction + speed, magenta line = pivot to knob center",
+    },
+    steerDebugScale: {
+      value: prefNum("steerDbgS", "Stage (treadmill).steerDebugScale", 1),
+      min: 0.15,
+      max: 4,
+      label: "steer debug scale",
+      hint: "visual multiplier on debug ring radii (deadzone, ramp, knob) — does not change steering physics",
     },
   });
 
@@ -1064,7 +1193,7 @@ export function CrowdMesh() {
     following,
   ]);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     mouseTarget.mode = phy.mouseModo;
 
     sim.u.maxSpeed.value = phy.maxSpeed;
@@ -1099,6 +1228,10 @@ export function CrowdMesh() {
     sim.u.mouseWeight.value = phy.mouseForca;
     sim.u.turnRate.value = phy.giro;
     sim.u.phasePerUnit.value = phy.passo;
+    sim.u.stagePhasePerUnit.value = st.pinStride;
+    sim.u.stagePlayback.value = st.pinPlayback;
+    sim.u.stageWalkPlayback.value = st.pinWalkPlayback;
+    sim.u.stageRunPlayback.value = st.pinRunPlayback;
     sim.u.perAgentOn.value = wit.auto ? 1 : 0;
     sim.u.v0.value = wit.v0;
     sim.u.v1.value = wit.v1;
@@ -1167,11 +1300,13 @@ export function CrowdMesh() {
           ? -1
           : 0;
     sim.u.storyRadius.value = couple.storyRadius;
-    sim.u.storyRepelRadius.value = Math.min(
-      couple.storyRepelRadius,
-      couple.storyRadius - 0.05,
-    );
-    sim.u.storyStrength.value = couple.storyStrength;
+    sim.u.storyRepelRadius.value =
+      couple.storyField === "social"
+        ? Math.min(couple.storyRepelRadius, couple.storyRadius - 0.05)
+        : couple.storyRepelRadius;
+    sim.u.storyRepelHaloRadius.value = couple.storyRepelHaloRadius;
+    sim.u.storyAttractStrength.value = couple.storyAttractStrength;
+    sim.u.storyRepelStrength.value = couple.storyRepelStrength;
 
     // --- corridor dinâmico: checa a cada ~0,8 s se precisa RE-ANCORAR ---
     // (nunca por frame: alvo que persegue a pessoa vira turba). Re-ancora
@@ -1233,32 +1368,53 @@ export function CrowdMesh() {
     stageWasOn.current = stageActive;
     sim.u.stageOn.value = stageActive ? 1 : 0;
     sim.u.stageAgent.value = stageActive ? (following as number) : -1;
-    // Steering: direção pessoa→mouse no chão (view frame), com deadzone.
+    // Steering: direção + distância (pivot pessoa ou centro da tela).
     let steerLen = 0;
-    let steerX = 0;
-    let steerZ = 0;
+    let steerDirX = 0;
+    let steerDirZ = 0;
     if (st.steerOn && followValid.current && mouseTarget.moved) {
-      steerX = mouseTarget.point.x - followPos.current.x;
-      steerZ = mouseTarget.point.z - followPos.current.z;
-      steerLen = Math.hypot(steerX, steerZ);
+      const sample = computeSteerSample({
+        pivotMode: st.steerPivot as SteerPivotMode,
+        mouseMoved: mouseTarget.moved,
+        mouseX: mouseTarget.point.x,
+        mouseZ: mouseTarget.point.z,
+        followX: followPos.current.x,
+        followY: followPos.current.y,
+        followZ: followPos.current.z,
+        pointerNdcX: state.pointer.x,
+        pointerNdcY: state.pointer.y,
+        camera: state.camera as THREE.PerspectiveCamera,
+        viewportW: state.size.width,
+        viewportH: state.size.height,
+      });
+      steerLen = sample.steerLen;
+      steerDirX = sample.dirX;
+      steerDirZ = sample.dirZ;
     }
-    const STEER_DEADZONE = 1.5;
+    const STEER_DEADZONE_LOCAL = STEER_DEADZONE;
     if (stageActive) {
       // Leme → heading da esteira (giro suavizado por steer strength).
-      if (steerLen > STEER_DEADZONE) {
-        const k = 1 - Math.exp(-2 * st.steerStrength * dtc);
-        stageHeading.current.x += (steerX / steerLen - stageHeading.current.x) * k;
-        stageHeading.current.y += (steerZ / steerLen - stageHeading.current.y) * k;
+      if (steerLen > STEER_DEADZONE_LOCAL) {
+        const tauH = Math.max(0.02, st.steerHeadingTau);
+        const k = 1 - Math.exp(-(dtc * st.steerStrength) / tauH);
+        stageHeading.current.x +=
+          (steerDirX - stageHeading.current.x) * k;
+        stageHeading.current.y +=
+          (steerDirZ - stageHeading.current.y) * k;
         stageHeading.current.normalize();
       }
-      // Rampa de velocidade: deadzone (ou leme off sem rumo) → 0 suave.
-      const wantSpeed =
-        st.steerOn && mouseTarget.moved && steerLen <= STEER_DEADZONE
-          ? 0
-          : st.stageSpeed;
+      const steerFactor = steerSpeedFactor(
+        steerLen,
+        st.steerSpeedRamp,
+        st.steerOn,
+        mouseTarget.moved,
+      );
+      const wantSpeed = steerFactor * st.stageSpeed;
+      const tauS = Math.max(0.02, st.steerSpeedTau);
       stageSpeedCur.current +=
-        (wantSpeed - stageSpeedCur.current) * (1 - Math.exp(-dtc / 0.45));
+        (wantSpeed - stageSpeedCur.current) * (1 - Math.exp(-dtc / tauS));
       sim.u.stageSpeed.value = stageSpeedCur.current;
+      sim.u.stageSpeedMax.value = st.stageSpeed;
       (sim.u.stageHeading.value as THREE.Vector2).set(
         stageHeading.current.x,
         stageHeading.current.y,
@@ -1271,7 +1427,15 @@ export function CrowdMesh() {
       setTerrainScroll(scrollAccum.current.x, scrollAccum.current.y);
     } else {
       sim.u.stageSpeed.value = st.stageSpeed;
+      sim.u.stageSpeedMax.value = st.stageSpeed;
     }
+    const steerFactor = steerSpeedFactor(
+      steerLen,
+      st.steerSpeedRamp,
+      st.steerOn,
+      mouseTarget.moved,
+    );
+    sim.u.steerSpeedMul.value = steerFactor;
     // Steering DIRETO (kill-switch: treadmill OFF durante o follow) — o
     // leme empurra a própria pessoa (modo legado, para comparação).
     const legacySteer =
@@ -1279,8 +1443,8 @@ export function CrowdMesh() {
     sim.u.steerOn.value = legacySteer ? 1 : 0;
     sim.u.steerStrength.value = st.steerStrength;
     (sim.u.steerDir.value as THREE.Vector2).set(
-      legacySteer && steerLen > STEER_DEADZONE ? steerX / steerLen : 0,
-      legacySteer && steerLen > STEER_DEADZONE ? steerZ / steerLen : 0,
+      legacySteer && steerLen > STEER_DEADZONE ? steerDirX : 0,
+      legacySteer && steerLen > STEER_DEADZONE ? steerDirZ : 0,
     );
     if (import.meta.env.DEV) {
       const w = window as unknown as Record<string, unknown>;
@@ -1305,6 +1469,11 @@ export function CrowdMesh() {
         followPos: followValid.current ? followPos.current.toArray() : null,
         wrapLen: phy.worldWrap ? phy.contRaio * 2 : 0,
         stageSpeed: stageActive ? stageSpeedCur.current : 0,
+        steerFactor,
+        pinStride: st.pinStride,
+        pinPlayback: st.pinPlayback,
+        pinWalkPlayback: st.pinWalkPlayback,
+        pinRunPlayback: st.pinRunPlayback,
         steerOn: st.steerOn ? 1 : 0,
         storyMode: sim.u.storyMode.value,
       };
@@ -1359,6 +1528,7 @@ export function CrowdMesh() {
               : 0,
     );
     bundle.setFaceFlip(phy.faceFlip ? -1 : 1);
+    bundle.setPivot(phy.pivotX, phy.pivotZ);
     bundle.setPerAgentStates(wit.auto);
     bundle.tickAgentClock(delta);
 
@@ -1421,6 +1591,12 @@ export function CrowdMesh() {
         <PersonHover sim={sim} content={content} personScale={phy.escala} />
       )}
       {content && <FollowCamera sim={sim} content={content} />}
+      <StoryFieldDebug visible={couple.storyDebug} content={content} />
+      <SteerWheelDebug
+        visible={st.steerDebug}
+        followPos={followPos}
+        followValid={followValid}
+      />
       <DebugAreas
         visible={phy.debugAreas}
         content={content}

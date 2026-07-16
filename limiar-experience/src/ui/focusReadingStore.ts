@@ -15,7 +15,7 @@ export interface FocusReadingState {
   labelAntiOverlap: boolean;
   /** Quanto o rótulo encolhe com a distância (0 = nada; clamp em 0,65×). */
   labelDistScale: number;
-  /** Contornos (spline) ao redor dos núcleos formados. */
+  /** Contornos (círculo) ao redor dos núcleos formados. */
   outlines: boolean;
   /** Alpha máximo do contorno (o núcleo formado modula por cima). */
   outlineAlpha: number;

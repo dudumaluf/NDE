@@ -22,6 +22,7 @@ import {
   translateFbxError,
 } from "/fbx-normalize.mjs";
 import { rebaseTracksToRig, restPoseMaps } from "/retarget-units.mjs";
+import { resolveContainerMotion } from "/fold-container-tracks.mjs";
 
 /* ------------------------------------------------------------------------ */
 /* Constantes de orçamento (espelham vat-core.mjs e os limites web reais)    */
@@ -303,13 +304,25 @@ function buildPartClip(fileIdx, clipIdx, inPlace, name) {
     if (o.isBone && !o.parent?.isBone) rootBones.add(o.name);
   });
 
-  // clipes de OUTRO arquivo só podem mirar OSSOS: track de container
-  // ("Armature") sobrescreveria rotação/escala (0,01!) do nó homônimo
-  const foreign = state.files[fileIdx]?.gltf.scene !== charScene;
-  const allowed = foreign ? boneNames : nodeNames;
+  const srcScene = state.files[fileIdx]?.gltf.scene;
+  const foreign = srcScene !== charScene;
+
+  const working = raw.clone();
+  let keepContainer = null;
+  if (foreign && srcScene) {
+    const motion = resolveContainerMotion(working, srcScene, rootBones, charScene);
+    if (motion.mode === "keep-container") keepContainer = motion.container;
+  }
+
+  // clipes de OUTRO arquivo miram OSSOS; exceção: container com queda (rigs
+  // Blender) quando o fold no osso raiz não captura a motion. Armature Mixamo
+  // (escala 0,01) continua excluído — lá o fold no Hips funciona.
+  const allowed = foreign
+    ? new Set([...boneNames, ...(keepContainer ? [keepContainer] : [])])
+    : nodeNames;
 
   const kept = [];
-  for (const track of raw.tracks) {
+  for (const track of working.tracks) {
     const dot = track.name.lastIndexOf(".");
     const nodeName = track.name.slice(0, dot);
     let finalName = null;
@@ -333,7 +346,6 @@ function buildPartClip(fileIdx, clipIdx, inPlace, name) {
   }
   if (kept.length === 0) return null;
   const clip = new THREE.AnimationClip(name, raw.duration, kept);
-  const srcScene = state.files[fileIdx]?.gltf.scene;
   if (srcScene && srcScene !== charScene)
     rebaseTracksToRig(clip, restMapsFor(srcScene), restMapsFor(charScene), (srcName) =>
       nodeNames.has(srcName) ? srcName : normMap.get(normName(srcName)) ?? null,
