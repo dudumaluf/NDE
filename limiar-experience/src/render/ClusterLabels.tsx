@@ -13,7 +13,9 @@ import {
   formationEvaluated,
   isClusterFormed,
   tickClusterFormation,
+  type ClusterFormationInfo,
 } from "../data/clusterFormation";
+import { positionMirror } from "../sim/positionMirror";
 import { focusCluster, clearFocus, useFocus } from "../scene/focusStore";
 
 /**
@@ -38,6 +40,8 @@ import { focusCluster, clearFocus, useFocus } from "../scene/focusStore";
  *
  * O sinal de FORMAÇÃO agora vem do módulo compartilhado clusterFormation
  * (lê o positionMirror — sem readback próprio; o ClusterOutlines usa o mesmo).
+ * Posição no mundo: centroide VIVO dos membros via positionMirror (não o
+ * alvo UMAP estático) — acompanha quando uma testemunha é arrastada no follow.
  */
 
 const LABEL_FONT = '300 72px "Inter", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif';
@@ -219,6 +223,11 @@ export function ClusterLabels({
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
   const built = useMemo(() => buildEntries(content), [content]);
   const infos = useMemo(() => buildClusterFormationInfos(content), [content]);
+  const infoById = useMemo(() => {
+    const m = new Map<number, ClusterFormationInfo>();
+    for (const info of infos) m.set(info.clusterId, info);
+    return m;
+  }, [infos]);
 
   useEffect(() => {
     const { entries } = built;
@@ -252,6 +261,7 @@ export function ClusterLabels({
   const camUp = useMemo(() => new THREE.Vector3(), []);
   const world = useMemo(() => new THREE.Vector3(), []);
   const proj = useMemo(() => new THREE.Vector3(), []);
+  const centroidTmp = useMemo(() => new THREE.Vector3(), []);
 
   // Cursor do mouse em px do canvas (screen-space picking dos rótulos).
   const cursor = useRef({ x: 0, y: 0, has: false });
@@ -323,8 +333,27 @@ export function ClusterLabels({
       if (pendingSnap.current && evaluated) e.opacity = target;
       else e.opacity += (target - e.opacity) * (1 - Math.exp(-dt / tau));
 
-      const lx = e.centroid[0] * mapScale;
-      const lz = e.centroid[1] * mapScale;
+      const lx0 = e.centroid[0] * mapScale;
+      const lz0 = e.centroid[1] * mapScale;
+      let lx = lx0;
+      let lz = lz0;
+      const info = infoById.get(e.clusterId);
+      if (positionMirror.ready && info) {
+        let cx = 0;
+        let cz = 0;
+        let n = 0;
+        for (const slot of info.memberSlots) {
+          if (positionMirror.getPosSmooth(slot, centroidTmp)) {
+            cx += centroidTmp.x;
+            cz += centroidTmp.z;
+            n += 1;
+          }
+        }
+        if (n > 0) {
+          lx = cx / n;
+          lz = cz / n;
+        }
+      }
       const baseY = 2.85 + e.height * 0.55 + heightJS(lx, lz);
       world.set(lx, baseY, lz);
       const depth = world.distanceTo(camera.position);

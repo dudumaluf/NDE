@@ -142,8 +142,8 @@ export function ClusterOutlines({ content }: { content: Content }) {
       e.line.visible = e.opacity > 0.004;
       if (!e.line.visible && !doSample) continue;
 
-      // --- amostra centroide + raio máximo (~0,3 s) ---
-      if (doSample && positionMirror.ready) {
+      // --- centroide vivo (cada frame; raio alvo amostrado ~0,3 s) ---
+      if (positionMirror.ready) {
         let cx = 0;
         let cz = 0;
         let n = 0;
